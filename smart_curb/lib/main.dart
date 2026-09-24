@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+/// Entry point of the Flutter application.
 void main() {
   runApp(const MyApp());
 }
@@ -7,18 +8,23 @@ void main() {
 // ==========================================
 // THEME MANAGEMENT (Global Notifier)
 // ==========================================
-// This allows the whole app to instantly react when you flip the switch.
+
+/// A lightweight, app-wide notifier that tracks whether the app is currently in
+/// Dark Mode or Light Mode. Listening widgets will automatically rebuild when this value changes.
 final ValueNotifier<ThemeMode> themeNotifier = ValueNotifier(ThemeMode.dark);
 
+/// Brand accent colors: High-visibility neon hues used for active states,
+/// primary buttons, icons, and focus highlights.
 const Color accentNeonDark = Color(0xFFC5E01A); 
 const Color accentNeonLight = Color(0xFF9EBA15); // Slightly darker for contrast on white
 
-// --- DARK THEME ---
+// --- DARK THEME CONFIGURATION ---
+/// Defines global styling, typography colors, and surface shades for dark mode.
 final ThemeData darkTheme = ThemeData(
   brightness: Brightness.dark,
   primaryColor: accentNeonDark,
-  scaffoldBackgroundColor: const Color(0xFF1A1D24),
-  cardColor: const Color(0xFF282C35),
+  scaffoldBackgroundColor: const Color(0xFF1A1D24), // Deep slate background
+  cardColor: const Color(0xFF282C35),               // Elevated surface color
   dividerColor: Colors.white12,
   appBarTheme: const AppBarTheme(
     backgroundColor: Color(0xFF111318),
@@ -29,8 +35,8 @@ final ThemeData darkTheme = ThemeData(
   colorScheme: const ColorScheme.dark(
     primary: accentNeonDark,
     surface: Color(0xFF282C35),
-    onSurface: Colors.white,         // Primary text
-    onSurfaceVariant: Colors.white54, // Secondary text
+    onSurface: Colors.white,         // Primary text color on dark surfaces
+    onSurfaceVariant: Colors.white54, // Secondary/muted text color
   ),
   bottomNavigationBarTheme: const BottomNavigationBarThemeData(
     backgroundColor: Color(0xFF111318),
@@ -40,12 +46,13 @@ final ThemeData darkTheme = ThemeData(
   useMaterial3: true,
 );
 
-// --- LIGHT THEME (WHITE MODE) ---
+// --- LIGHT THEME (WHITE MODE) CONFIGURATION ---
+/// Defines global styling, typography colors, and surface shades for light mode.
 final ThemeData lightTheme = ThemeData(
   brightness: Brightness.light,
   primaryColor: accentNeonLight,
-  scaffoldBackgroundColor: const Color(0xFFF5F7FA),
-  cardColor: Colors.white,
+  scaffoldBackgroundColor: const Color(0xFFF5F7FA), // Soft off-white background
+  cardColor: Colors.white,                          // Pure white card surfaces
   dividerColor: Colors.black12,
   appBarTheme: const AppBarTheme(
     backgroundColor: Colors.white,
@@ -56,8 +63,8 @@ final ThemeData lightTheme = ThemeData(
   colorScheme: const ColorScheme.light(
     primary: accentNeonLight,
     surface: Colors.white,
-    onSurface: Color(0xFF1A1D24),    // Primary text
-    onSurfaceVariant: Colors.black54, // Secondary text
+    onSurface: Color(0xFF1A1D24),    // Primary high-contrast text
+    onSurfaceVariant: Colors.black54, // Secondary/muted text color
   ),
   bottomNavigationBarTheme: const BottomNavigationBarThemeData(
     backgroundColor: Colors.white,
@@ -67,11 +74,16 @@ final ThemeData lightTheme = ThemeData(
   useMaterial3: true,
 );
 
+// ==========================================
+// ROOT APPLICATION WIDGET
+// ==========================================
+/// Root widget that establishes MaterialApp, binds theme switching, and sets up initial routing.
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
+    // Listens to global theme changes without requiring complex state management libraries
     return ValueListenableBuilder<ThemeMode>(
       valueListenable: themeNotifier,
       builder: (context, currentMode, child) {
@@ -91,6 +103,7 @@ class MyApp extends StatelessWidget {
 // ==========================================
 // LOGIN PAGE
 // ==========================================
+/// Handles user and administrator authentication.
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
 
@@ -99,21 +112,28 @@ class LoginPage extends StatefulWidget {
 }
 
 class _LoginPageState extends State<LoginPage> {
+  // Text editing controllers to capture user input
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
+
+  // Flag tracking whether the user is attempting an Admin login vs Standard User login
   bool _isAdmin = false;
 
+  /// Validates input credentials based on the selected role and handles navigation.
   void _handleLogin() {
     final username = _usernameController.text.trim();
     final password = _passwordController.text;
 
     if (_isAdmin) {
+      // Validate Admin Credentials
       if (username == 'ttrann2022@fau.edu' && password == 'Baythang04@') {
+        // pushReplacement prevents the user from going back to the login screen via back button
         Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const AdminDashboard()));
       } else {
         _showError('Invalid Admin Credentials');
       }
     } else {
+      // Validate Standard User Credentials
       if (username == 'trannhattuan2004@gmail.com' && password == 'Baythang04@') {
         Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const UserSpace()));
       } else {
@@ -122,6 +142,7 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
+  /// Displays an alert banner at the bottom of the screen when login fails.
   void _showError(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -133,17 +154,19 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
+    // Access current active theme context
     final theme = Theme.of(context);
 
     return Scaffold(
       body: SafeArea(
         child: Center(
+          // SingleChildScrollView prevents keyboard overflows on smaller mobile screens
           child: SingleChildScrollView(
             padding: const EdgeInsets.symmetric(horizontal: 32.0),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // Logo image with the dark circular background removed
+                // Application branding logo with fallback to a radar icon
                 Image.asset(
                   'assets/logo.png',
                   height: 140, // Adjust this height if the image feels too big/small
@@ -175,14 +198,19 @@ class _LoginPageState extends State<LoginPage> {
                 ),
                 const SizedBox(height: 50),
                 
+                // Username input field
                 _buildTextField(controller: _usernameController, hintText: 'Username', icon: Icons.person_outline),
                 const SizedBox(height: 20),
+
+                // Password input field (obscured text)
                 _buildTextField(controller: _passwordController, hintText: 'Password', icon: Icons.lock_outline, obscureText: true),
                 const SizedBox(height: 30),
                 
+                // Controls row: Admin Toggle Switch and Submit Button
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
+                    // Pill-shaped container wrapping the Admin toggle
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                       decoration: BoxDecoration(
@@ -209,6 +237,8 @@ class _LoginPageState extends State<LoginPage> {
                         ],
                       ),
                     ),
+                    
+                    // Main Login Action Button
                     ElevatedButton(
                       onPressed: _handleLogin,
                       style: ElevatedButton.styleFrom(
@@ -231,7 +261,13 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 
-  Widget _buildTextField({required TextEditingController controller, required String hintText, required IconData icon, bool obscureText = false}) {
+  /// Helper widget to generate uniformly styled input fields.
+  Widget _buildTextField({
+    required TextEditingController controller, 
+    required String hintText, 
+    required IconData icon, 
+    bool obscureText = false,
+  }) {
     final theme = Theme.of(context);
     return Container(
       decoration: BoxDecoration(
@@ -258,6 +294,7 @@ class _LoginPageState extends State<LoginPage> {
 // ==========================================
 // USER SPACE
 // ==========================================
+/// Primary landing hub for regular users, providing navigation across Home, Vehicle, and Profile.
 class UserSpace extends StatefulWidget {
   const UserSpace({super.key});
 
@@ -266,8 +303,10 @@ class UserSpace extends StatefulWidget {
 }
 
 class _UserSpaceState extends State<UserSpace> {
+  // Tracks active bottom navigation tab: 0 = Home, 1 = Vehicle, 2 = Profile
   int _currentIndex = 0;
 
+  /// Logs the user out and sends them back to the login screen.
   void _logout(BuildContext context) {
     Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const LoginPage()));
   }
@@ -278,7 +317,10 @@ class _UserSpaceState extends State<UserSpace> {
 
     return Scaffold(
       appBar: AppBar(
+        // Logout button
         leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => _logout(context), tooltip: 'Logout'),
+        
+        // Embedded search bar in the app bar title area
         title: Container(
           height: 40,
           decoration: BoxDecoration(
@@ -297,6 +339,8 @@ class _UserSpaceState extends State<UserSpace> {
           ),
         ),
         centerTitle: true,
+        
+        // Top-right overflow menu for secondary screens
         actions: [
           PopupMenuButton<String>(
             icon: Icon(Icons.more_vert, color: theme.primaryColor),
@@ -335,7 +379,11 @@ class _UserSpaceState extends State<UserSpace> {
           ),
         ],
       ),
+      
+      // Dynamic body content rendered based on the selected tab
       body: _buildBodyContent(),
+      
+      // Bottom Navigation Bar to switch between main user views
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
         onTap: (index) => setState(() => _currentIndex = index),
@@ -349,6 +397,7 @@ class _UserSpaceState extends State<UserSpace> {
     );
   }
 
+  /// Switches body content based on the active bottom navigation bar index.
   Widget _buildBodyContent() {
     switch (_currentIndex) {
       case 0:
@@ -378,6 +427,7 @@ class _UserSpaceState extends State<UserSpace> {
 // ==========================================
 // USER SPECIFIC PAGES
 // ==========================================
+/// Settings page for regular users: allows toggling theme and notifications.
 class UserSettingsPage extends StatelessWidget {
   const UserSettingsPage({super.key});
 
@@ -389,6 +439,7 @@ class UserSettingsPage extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(16.0),
         children: [
+          // Theme switcher tile
           ListTile(
             leading: Icon(Icons.dark_mode, color: theme.primaryColor),
             title: Text('Dark Mode', style: TextStyle(color: theme.colorScheme.onSurface)),
@@ -402,6 +453,8 @@ class UserSettingsPage extends StatelessWidget {
               activeTrackColor: theme.primaryColor,
             ),
           ),
+          
+          // Notifications toggle tile
           ListTile(
             leading: Icon(Icons.notifications_active, color: theme.primaryColor),
             title: Text('Notifications', style: TextStyle(color: theme.colorScheme.onSurface)),
@@ -412,6 +465,8 @@ class UserSettingsPage extends StatelessWidget {
               activeTrackColor: theme.primaryColor,
             ),
           ),
+          
+          // Contact support navigation tile
           ListTile(
             leading: Icon(Icons.mail_outline, color: theme.primaryColor),
             title: Text('Contact Us', style: TextStyle(color: theme.colorScheme.onSurface)),
@@ -424,6 +479,7 @@ class UserSettingsPage extends StatelessWidget {
   }
 }
 
+/// Informational page presenting system overview and version metadata.
 class UserAboutPage extends StatelessWidget {
   const UserAboutPage({super.key});
 
@@ -460,6 +516,7 @@ class UserAboutPage extends StatelessWidget {
 // ==========================================
 // ADMIN DASHBOARD
 // ==========================================
+/// Administrative operations hub containing user management, profiles, and plot overview.
 class AdminDashboard extends StatefulWidget {
   const AdminDashboard({super.key});
 
@@ -468,8 +525,10 @@ class AdminDashboard extends StatefulWidget {
 }
 
 class _AdminDashboardState extends State<AdminDashboard> {
+  // Tracks active admin tab: 0 = User Mgmt, 1 = Profile, 2 = Plots
   int _currentIndex = 0;
 
+  /// Logs the admin out and returns to the login screen.
   void _logout(BuildContext context) {
     Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const LoginPage()));
   }
@@ -479,7 +538,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
     final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(
+        // Logout button
         leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => _logout(context), tooltip: 'Logout'),
+        
+        // Styled title highlighting administrative scope
         title: RichText(
           text: TextSpan(
             style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
@@ -490,6 +552,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
           ),
         ),
         centerTitle: true,
+        
+        // Overflow menu with links to Admin Settings and System Info
         actions: [
           PopupMenuButton<String>(
             icon: Icon(Icons.more_vert, color: theme.primaryColor),
@@ -528,6 +592,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
           ),
         ],
       ),
+      
+      // Central placeholder view displaying the active tab's title
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -546,6 +612,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
           ],
         ),
       ),
+      
+      // Administrative Bottom Navigation Bar
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
         onTap: (index) => setState(() => _currentIndex = index),
@@ -559,6 +627,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
+  /// Maps the selected bottom navigation index to a display header.
   String _getTabTitle(int index) {
     switch (index) {
       case 0: return 'User Management Area';
@@ -572,6 +641,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
 // ==========================================
 // ADMIN SPECIFIC PAGES
 // ==========================================
+/// Settings page specifically tailored for administrative configurations.
 class AdminSettingsPage extends StatelessWidget {
   const AdminSettingsPage({super.key});
 
@@ -583,6 +653,7 @@ class AdminSettingsPage extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(16.0),
         children: [
+          // Global Theme Switcher
           ListTile(
             leading: Icon(Icons.dark_mode, color: theme.primaryColor),
             title: Text('Dark Mode', style: TextStyle(color: theme.colorScheme.onSurface)),
@@ -595,6 +666,8 @@ class AdminSettingsPage extends StatelessWidget {
               activeTrackColor: theme.primaryColor,
             ),
           ),
+          
+          // System Alert Notifications Toggle
           ListTile(
             leading: Icon(Icons.notifications_active, color: theme.primaryColor),
             title: Text('System Alerts', style: TextStyle(color: theme.colorScheme.onSurface)),
@@ -605,6 +678,8 @@ class AdminSettingsPage extends StatelessWidget {
               activeTrackColor: theme.primaryColor,
             ),
           ),
+          
+          // Audit Log Inspection Tile
           ListTile(
             leading: Icon(Icons.admin_panel_settings, color: theme.primaryColor),
             title: Text('Access Control Logs', style: TextStyle(color: theme.colorScheme.onSurface)),
@@ -617,6 +692,7 @@ class AdminSettingsPage extends StatelessWidget {
   }
 }
 
+/// About page covering admin console infrastructure notes and versioning.
 class AdminAboutPage extends StatelessWidget {
   const AdminAboutPage({super.key});
 
@@ -653,6 +729,7 @@ class AdminAboutPage extends StatelessWidget {
 // ==========================================
 // CUSTOM ANIMATED INTERACTIVE CARD
 // ==========================================
+/// A reusable empty-state card featuring custom scale animations and neon glow effects on press.
 class AnimatedAddCard extends StatefulWidget {
   final String title;
   final String subtitle;
@@ -670,6 +747,7 @@ class AnimatedAddCard extends StatefulWidget {
 }
 
 class _AnimatedAddCardState extends State<AnimatedAddCard> {
+  // Tracks whether the card is currently being held down by the user
   bool _isPressed = false;
 
   @override
@@ -679,6 +757,7 @@ class _AnimatedAddCardState extends State<AnimatedAddCard> {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24.0),
+        // Intercepts touch gestures to produce custom squeeze and glow animations
         child: GestureDetector(
           onTapDown: (_) => setState(() => _isPressed = true),
           onTapUp: (_) {
@@ -691,6 +770,7 @@ class _AnimatedAddCardState extends State<AnimatedAddCard> {
             curve: Curves.easeInOut,
             width: double.infinity,
             height: 220,
+            // Shrinks slightly when pressed to give physical button-press feedback
             transform: Matrix4.identity()..scale(_isPressed ? 0.95 : 1.0),
             transformAlignment: Alignment.center,
             decoration: BoxDecoration(
@@ -700,6 +780,7 @@ class _AnimatedAddCardState extends State<AnimatedAddCard> {
                 color: _isPressed ? theme.primaryColor.withOpacity(0.6) : theme.dividerColor, 
                 width: 2,
               ),
+              // Elevates with a colored glow outline when pressed
               boxShadow: _isPressed
                   ? [BoxShadow(color: theme.primaryColor.withOpacity(0.15), blurRadius: 20, spreadRadius: 2)]
                   : [],
@@ -707,6 +788,7 @@ class _AnimatedAddCardState extends State<AnimatedAddCard> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
+                // Inset circular icon button with dynamic ambient neon shadow
                 AnimatedContainer(
                   duration: const Duration(milliseconds: 150),
                   padding: const EdgeInsets.all(16),
@@ -724,11 +806,15 @@ class _AnimatedAddCardState extends State<AnimatedAddCard> {
                   child: Icon(Icons.add, size: 40, color: theme.primaryColor),
                 ),
                 const SizedBox(height: 20),
+                
+                // Primary action title
                 Text(
                   widget.title,
                   style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 18, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 8),
+                
+                // Explanatory subtitle
                 Text(
                   widget.subtitle,
                   style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 14),
