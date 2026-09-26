@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "340226665938",
+    "firebase_url": "https://smartcurb-d174e-default-rtdb.firebaseio.com",
+    "project_id": "smartcurb-d174e",
+    "storage_bucket": "smartcurb-d174e.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:340226665938:android:e9a0309f488dea28aa6c0b",
+        "android_client_info": {
+          "package_name": "com.example.smart_curb"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCHJJna9q578H21T7p-KzmsYwDj8WSSZd8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

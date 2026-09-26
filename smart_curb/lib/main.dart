@@ -1,9 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'firebase_options.dart';
 
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
 
-// test: Ryan Hart edit
-/// Entry point of the Flutter application.
-void main() {
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+
   runApp(const MyApp());
 }
 
@@ -11,22 +18,16 @@ void main() {
 // THEME MANAGEMENT (Global Notifier)
 // ==========================================
 
-/// A lightweight, app-wide notifier that tracks whether the app is currently in
-/// Dark Mode or Light Mode. Listening widgets will automatically rebuild when this value changes.
 final ValueNotifier<ThemeMode> themeNotifier = ValueNotifier(ThemeMode.dark);
 
-/// Brand accent colors: High-visibility neon hues used for active states,
-/// primary buttons, icons, and focus highlights.
-const Color accentNeonDark = Color(0xFFC5E01A); 
-const Color accentNeonLight = Color(0xFF9EBA15); // Slightly darker for contrast on white
+const Color accentNeonDark = Color(0xFFC5E01A);
+const Color accentNeonLight = Color(0xFF9EBA15);
 
-// --- DARK THEME CONFIGURATION ---
-/// Defines global styling, typography colors, and surface shades for dark mode.
 final ThemeData darkTheme = ThemeData(
   brightness: Brightness.dark,
   primaryColor: accentNeonDark,
-  scaffoldBackgroundColor: const Color(0xFF1A1D24), // Deep slate background
-  cardColor: const Color(0xFF282C35),               // Elevated surface color
+  scaffoldBackgroundColor: const Color(0xFF1A1D24),
+  cardColor: const Color(0xFF282C35),
   dividerColor: Colors.white12,
   appBarTheme: const AppBarTheme(
     backgroundColor: Color(0xFF111318),
@@ -37,8 +38,8 @@ final ThemeData darkTheme = ThemeData(
   colorScheme: const ColorScheme.dark(
     primary: accentNeonDark,
     surface: Color(0xFF282C35),
-    onSurface: Colors.white,         // Primary text color on dark surfaces
-    onSurfaceVariant: Colors.white54, // Secondary/muted text color
+    onSurface: Colors.white,
+    onSurfaceVariant: Colors.white54,
   ),
   bottomNavigationBarTheme: const BottomNavigationBarThemeData(
     backgroundColor: Color(0xFF111318),
@@ -48,13 +49,11 @@ final ThemeData darkTheme = ThemeData(
   useMaterial3: true,
 );
 
-// --- LIGHT THEME (WHITE MODE) CONFIGURATION ---
-/// Defines global styling, typography colors, and surface shades for light mode.
 final ThemeData lightTheme = ThemeData(
   brightness: Brightness.light,
   primaryColor: accentNeonLight,
-  scaffoldBackgroundColor: const Color(0xFFF5F7FA), // Soft off-white background
-  cardColor: Colors.white,                          // Pure white card surfaces
+  scaffoldBackgroundColor: const Color(0xFFF5F7FA),
+  cardColor: Colors.white,
   dividerColor: Colors.black12,
   appBarTheme: const AppBarTheme(
     backgroundColor: Colors.white,
@@ -65,8 +64,8 @@ final ThemeData lightTheme = ThemeData(
   colorScheme: const ColorScheme.light(
     primary: accentNeonLight,
     surface: Colors.white,
-    onSurface: Color(0xFF1A1D24),    // Primary high-contrast text
-    onSurfaceVariant: Colors.black54, // Secondary/muted text color
+    onSurface: Color(0xFF1A1D24),
+    onSurfaceVariant: Colors.black54,
   ),
   bottomNavigationBarTheme: const BottomNavigationBarThemeData(
     backgroundColor: Colors.white,
@@ -79,13 +78,11 @@ final ThemeData lightTheme = ThemeData(
 // ==========================================
 // ROOT APPLICATION WIDGET
 // ==========================================
-/// Root widget that establishes MaterialApp, binds theme switching, and sets up initial routing.
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    // Listens to global theme changes without requiring complex state management libraries
     return ValueListenableBuilder<ThemeMode>(
       valueListenable: themeNotifier,
       builder: (context, currentMode, child) {
@@ -94,8 +91,21 @@ class MyApp extends StatelessWidget {
           debugShowCheckedModeBanner: false,
           theme: lightTheme,
           darkTheme: darkTheme,
-          themeMode: currentMode, // Instantly switches between light/dark
-          home: const LoginPage(),
+          themeMode: currentMode,
+          home: StreamBuilder<User?>(
+            stream: FirebaseAuth.instance.authStateChanges(),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Scaffold(
+                  body: Center(child: CircularProgressIndicator()),
+                );
+              }
+              if (snapshot.hasData) {
+                return const UserSpace();
+              }
+              return const LoginPage();
+            },
+          ),
         );
       },
     );
@@ -105,7 +115,6 @@ class MyApp extends StatelessWidget {
 // ==========================================
 // LOGIN PAGE
 // ==========================================
-/// Handles user and administrator authentication.
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
 
@@ -114,38 +123,38 @@ class LoginPage extends StatefulWidget {
 }
 
 class _LoginPageState extends State<LoginPage> {
-  // Text editing controllers to capture user input
-  final TextEditingController _usernameController = TextEditingController();
+  final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
+  bool _isLoading = false;
 
-  // Flag tracking whether the user is attempting an Admin login vs Standard User login
-  bool _isAdmin = false;
-
-  /// Validates input credentials based on the selected role and handles navigation.
-  void _handleLogin() {
-    final username = _usernameController.text.trim();
+  Future<void> _handleLogin() async {
+    final email = _emailController.text.trim();
     final password = _passwordController.text;
 
-    if (_isAdmin) {
-      // Validate Admin Credentials
-      if (username == 'ttrann2022@fau.edu' && password == 'Baythang04@') {
-        // pushReplacement prevents the user from going back to the login screen via back button
-        Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const AdminDashboard()));
-      } else {
-        _showError('Invalid Admin Credentials');
-      }
-    } else {
-      // Validate Standard User Credentials
-      if (username == 'trannhattuan2004@gmail.com' && password == 'Baythang04@') {
-        Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const UserSpace()));
-      } else {
-        _showError('Invalid User Credentials');
+    if (email.isEmpty || password.isEmpty) {
+      _showMessage('Please enter both email and password.');
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      await FirebaseAuth.instance.signInWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+    } on FirebaseAuthException catch (e) {
+      _showMessage(e.message ?? 'Login failed.');
+    } catch (_) {
+      _showMessage('An unexpected error occurred. Please try again.');
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
       }
     }
   }
 
-  /// Displays an alert banner at the bottom of the screen when login fails.
-  void _showError(String message) {
+  void _showMessage(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
@@ -155,30 +164,32 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    // Access current active theme context
     final theme = Theme.of(context);
 
     return Scaffold(
       body: SafeArea(
         child: Center(
-          // SingleChildScrollView prevents keyboard overflows on smaller mobile screens
           child: SingleChildScrollView(
             padding: const EdgeInsets.symmetric(horizontal: 32.0),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // Application branding logo with fallback to a radar icon
                 Image.asset(
                   'assets/logo.png',
-                  height: 140, // Adjust this height if the image feels too big/small
+                  height: 140,
                   fit: BoxFit.contain,
-                  errorBuilder: (context, error, stackTrace) => Icon(Icons.radar, size: 100, color: theme.primaryColor), 
+                  errorBuilder: (context, error, stackTrace) =>
+                      Icon(Icons.radar, size: 100, color: theme.primaryColor),
                 ),
                 const SizedBox(height: 20),
-                
-                // IF YOUR 'assets/logo.png' ALREADY INCLUDES THE TEXT:
-                // Delete this RichText and the Text widget beneath it so it doesn't double-up.
                 RichText(
                   text: TextSpan(
                     style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, letterSpacing: 1.5),
@@ -198,62 +209,59 @@ class _LoginPageState extends State<LoginPage> {
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                const SizedBox(height: 50),
-                
-                // Username input field
-                _buildTextField(controller: _usernameController, hintText: 'Username', icon: Icons.person_outline),
+                const SizedBox(height: 40),
+                _buildInputContainer(
+                  theme: theme,
+                  controller: _emailController,
+                  hintText: 'Email',
+                  icon: Icons.email_outlined,
+                  keyboardType: TextInputType.emailAddress,
+                ),
                 const SizedBox(height: 20),
-
-                // Password input field (obscured text)
-                _buildTextField(controller: _passwordController, hintText: 'Password', icon: Icons.lock_outline, obscureText: true),
+                _buildInputContainer(
+                  theme: theme,
+                  controller: _passwordController,
+                  hintText: 'Password',
+                  icon: Icons.lock_outline,
+                  obscureText: true,
+                ),
                 const SizedBox(height: 30),
-                
-                // Controls row: Admin Toggle Switch and Submit Button
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    // Pill-shaped container wrapping the Admin toggle
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: theme.cardColor,
-                        borderRadius: BorderRadius.circular(30),
-                        border: Border.all(color: theme.dividerColor),
-                      ),
-                      child: Row(
-                        children: [
-                          Text(
-                            'Admin?',
-                            style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: FontWeight.w600, fontSize: 14),
-                          ),
-                          const SizedBox(width: 8),
-                          SizedBox(
-                            height: 30,
-                            child: Switch(
-                              value: _isAdmin,
-                              onChanged: (val) => setState(() => _isAdmin = val),
-                              activeColor: theme.scaffoldBackgroundColor,
-                              activeTrackColor: theme.primaryColor,
-                            ),
-                          ),
-                        ],
-                      ),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: _isLoading ? null : _handleLogin,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: theme.primaryColor,
+                      foregroundColor: Colors.black,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      elevation: 8,
+                      shadowColor: theme.primaryColor.withOpacity(0.5),
                     ),
-                    
-                    // Main Login Action Button
-                    ElevatedButton(
-                      onPressed: _handleLogin,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: theme.primaryColor,
-                        foregroundColor: Colors.white, 
-                        padding: const EdgeInsets.symmetric(horizontal: 36, vertical: 16),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        elevation: 8,
-                        shadowColor: theme.primaryColor.withOpacity(0.5),
-                      ),
-                      child: const Text('Login', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, letterSpacing: 1)),
-                    ),
-                  ],
+                    child: _isLoading
+                        ? const SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
+                          )
+                        : const Text(
+                            'Login',
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, letterSpacing: 1),
+                          ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextButton(
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => const RegisterPage()),
+                    );
+                  },
+                  child: Text(
+                    "Don't have an account? Register",
+                    style: TextStyle(color: theme.primaryColor, fontWeight: FontWeight.w600),
+                  ),
                 ),
               ],
             ),
@@ -262,41 +270,206 @@ class _LoginPageState extends State<LoginPage> {
       ),
     );
   }
+}
 
-  /// Helper widget to generate uniformly styled input fields.
-  Widget _buildTextField({
-    required TextEditingController controller, 
-    required String hintText, 
-    required IconData icon, 
-    bool obscureText = false,
-  }) {
-    final theme = Theme.of(context);
-    return Container(
-      decoration: BoxDecoration(
-        color: theme.cardColor,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: theme.dividerColor),
+// ==========================================
+// REGISTER PAGE
+// ==========================================
+class RegisterPage extends StatefulWidget {
+  const RegisterPage({super.key});
+
+  @override
+  State<RegisterPage> createState() => _RegisterPageState();
+}
+
+class _RegisterPageState extends State<RegisterPage> {
+  final TextEditingController _emailController = TextEditingController();
+  final TextEditingController _passwordController = TextEditingController();
+  final TextEditingController _confirmPasswordController = TextEditingController();
+  bool _isLoading = false;
+
+  Future<void> _handleRegister() async {
+    final email = _emailController.text.trim();
+    final password = _passwordController.text;
+    final confirmPassword = _confirmPasswordController.text;
+
+    if (email.isEmpty || password.isEmpty || confirmPassword.isEmpty) {
+      _showMessage('Please fill out all fields.');
+      return;
+    }
+
+    if (password != confirmPassword) {
+      _showMessage('Passwords do not match.');
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      await FirebaseAuth.instance.createUserWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+      if (mounted) {
+        Navigator.pop(context);
+      }
+    } on FirebaseAuthException catch (e) {
+      _showMessage(e.message ?? 'Registration failed.');
+    } catch (_) {
+      _showMessage('An unexpected error occurred. Please try again.');
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        backgroundColor: Colors.redAccent,
       ),
-      child: TextField(
-        controller: controller,
-        obscureText: obscureText,
-        style: TextStyle(color: theme.colorScheme.onSurface),
-        decoration: InputDecoration(
-          border: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
-          hintText: hintText,
-          hintStyle: TextStyle(color: theme.colorScheme.onSurfaceVariant),
-          prefixIcon: Icon(icon, color: theme.primaryColor),
+    );
+  }
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    _confirmPasswordController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Create Account')),
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 32.0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.person_add_alt_1, size: 70, color: theme.primaryColor),
+                const SizedBox(height: 16),
+                Text(
+                  'Join Smart Curb',
+                  style: TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: theme.colorScheme.onSurface,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Register a new account to manage parking spaces',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 14),
+                ),
+                const SizedBox(height: 36),
+                _buildInputContainer(
+                  theme: theme,
+                  controller: _emailController,
+                  hintText: 'Email Address',
+                  icon: Icons.email_outlined,
+                  keyboardType: TextInputType.emailAddress,
+                ),
+                const SizedBox(height: 18),
+                _buildInputContainer(
+                  theme: theme,
+                  controller: _passwordController,
+                  hintText: 'Password',
+                  icon: Icons.lock_outline,
+                  obscureText: true,
+                ),
+                const SizedBox(height: 18),
+                _buildInputContainer(
+                  theme: theme,
+                  controller: _confirmPasswordController,
+                  hintText: 'Confirm Password',
+                  icon: Icons.lock_reset,
+                  obscureText: true,
+                ),
+                const SizedBox(height: 30),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: _isLoading ? null : _handleRegister,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: theme.primaryColor,
+                      foregroundColor: Colors.black,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      elevation: 8,
+                      shadowColor: theme.primaryColor.withOpacity(0.5),
+                    ),
+                    child: _isLoading
+                        ? const SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
+                          )
+                        : const Text(
+                            'Register',
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, letterSpacing: 1),
+                          ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: Text(
+                    'Already have an account? Back to Login',
+                    style: TextStyle(color: theme.primaryColor, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
   }
 }
 
+// Reusable input container
+Widget _buildInputContainer({
+  required ThemeData theme,
+  required TextEditingController controller,
+  required String hintText,
+  required IconData icon,
+  bool obscureText = false,
+  TextInputType keyboardType = TextInputType.text,
+}) {
+  return Container(
+    decoration: BoxDecoration(
+      color: theme.cardColor,
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: theme.dividerColor),
+    ),
+    child: TextField(
+      controller: controller,
+      obscureText: obscureText,
+      keyboardType: keyboardType,
+      style: TextStyle(color: theme.colorScheme.onSurface),
+      decoration: InputDecoration(
+        border: InputBorder.none,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+        hintText: hintText,
+        hintStyle: TextStyle(color: theme.colorScheme.onSurfaceVariant),
+        prefixIcon: Icon(icon, color: theme.primaryColor),
+      ),
+    ),
+  );
+}
+
 // ==========================================
-// USER SPACE
+// USER SPACE (With Vehicle Flow)
 // ==========================================
-/// Primary landing hub for regular users, providing navigation across Home, Vehicle, and Profile.
 class UserSpace extends StatefulWidget {
   const UserSpace({super.key});
 
@@ -305,12 +478,265 @@ class UserSpace extends StatefulWidget {
 }
 
 class _UserSpaceState extends State<UserSpace> {
-  // Tracks active bottom navigation tab: 0 = Home, 1 = Vehicle, 2 = Profile
   int _currentIndex = 0;
 
-  /// Logs the user out and sends them back to the login screen.
-  void _logout(BuildContext context) {
-    Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const LoginPage()));
+  Future<void> _logout() async {
+    await FirebaseAuth.instance.signOut();
+  }
+
+  /// Opens the dialog/sheet to input new vehicle data
+  /// Opens a centered modal dialog to input new vehicle data
+  void _showAddVehicleDialog() {
+    final manufacturerCtrl = TextEditingController();
+    final modelCtrl = TextEditingController();
+    final plateCtrl = TextEditingController();
+    final yearCtrl = TextEditingController();
+    final colorCtrl = TextEditingController();
+    final theme = Theme.of(context);
+
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (dialogContext) {
+        return Dialog(
+          backgroundColor: theme.cardColor,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Add New Vehicle',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: theme.colorScheme.onSurface,
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () => Navigator.of(dialogContext).pop(),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                _buildInputContainer(
+                  theme: theme,
+                  controller: manufacturerCtrl,
+                  hintText: 'Manufacturer (e.g. Toyota)',
+                  icon: Icons.business,
+                ),
+                const SizedBox(height: 12),
+                _buildInputContainer(
+                  theme: theme,
+                  controller: modelCtrl,
+                  hintText: 'Model (e.g. RAV 4)',
+                  icon: Icons.directions_car,
+                ),
+                const SizedBox(height: 12),
+                _buildInputContainer(
+                  theme: theme,
+                  controller: plateCtrl,
+                  hintText: 'License Plate (e.g. S108123)',
+                  icon: Icons.pin,
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _buildInputContainer(
+                        theme: theme,
+                        controller: yearCtrl,
+                        hintText: 'Year (e.g. 2024)',
+                        icon: Icons.calendar_today,
+                        keyboardType: TextInputType.number,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _buildInputContainer(
+                        theme: theme,
+                        controller: colorCtrl,
+                        hintText: 'Color (e.g. Silver)',
+                        icon: Icons.color_lens,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 24),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.of(dialogContext).pop(),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: theme.colorScheme.onSurface,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          side: BorderSide(color: theme.dividerColor),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                        child: const Text('Cancel'),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: () {
+                          final model = modelCtrl.text.trim();
+                          final plate = plateCtrl.text.trim();
+                          final manufacturer = manufacturerCtrl.text.trim();
+                          final year = yearCtrl.text.trim();
+                          final color = colorCtrl.text.trim();
+
+                          if (model.isEmpty || plate.isEmpty) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Please fill out at least Model and License Plate.'),
+                                backgroundColor: Colors.redAccent,
+                              ),
+                            );
+                            return;
+                          }
+
+                          // 1. Instantly dismiss the popup window
+                          Navigator.of(dialogContext).pop();
+
+                          // 2. Perform the database write asynchronously
+                          final user = FirebaseAuth.instance.currentUser;
+                          if (user != null) {
+                            FirebaseFirestore.instance
+                                .collection('users')
+                                .doc(user.uid)
+                                .collection('vehicles')
+                                .add({
+                              'manufacturer': manufacturer,
+                              'model': model,
+                              'plate': plate,
+                              'year': year,
+                              'color': color,
+                              'createdAt': FieldValue.serverTimestamp(),
+                            }).catchError((error) {
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Failed to save vehicle: $error'),
+                                    backgroundColor: Colors.redAccent,
+                                  ),
+                                );
+                              }
+                            });
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: theme.primaryColor,
+                          foregroundColor: Colors.black,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                        child: const Text('Confirm', style: TextStyle(fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// Displays vehicle detail modal when a card is clicked
+  /// Displays vehicle detail modal when a card is clicked
+  void _showVehicleDetails(Map<String, dynamic> data, String docId) {
+    final theme = Theme.of(context);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: theme.cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(Icons.directions_car, color: theme.primaryColor),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                '${data['model'] ?? 'Vehicle'}',
+                style: TextStyle(color: theme.colorScheme.onSurface),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildDetailRow('Plate Number', data['plate'] ?? 'N/A', theme),
+            _buildDetailRow('Manufacturer', data['manufacturer'] ?? 'N/A', theme),
+            _buildDetailRow('Year', data['year'] ?? 'N/A', theme),
+            _buildDetailRow('Color', data['color'] ?? 'N/A', theme),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              // 1. Instantly close the dialog window
+              Navigator.of(ctx).pop();
+
+              // 2. Perform the Firestore document delete in the background
+              final user = FirebaseAuth.instance.currentUser;
+              if (user != null) {
+                FirebaseFirestore.instance
+                    .collection('users')
+                    .doc(user.uid)
+                    .collection('vehicles')
+                    .doc(docId)
+                    .delete()
+                    .catchError((error) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Failed to delete vehicle: $error'),
+                        backgroundColor: Colors.redAccent,
+                      ),
+                    );
+                  }
+                });
+              }
+            },
+            child: const Text('Delete Vehicle', style: TextStyle(color: Colors.redAccent)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: theme.primaryColor,
+              foregroundColor: Colors.black,
+            ),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDetailRow(String label, String value, ThemeData theme) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 14)),
+          Text(value, style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: FontWeight.bold, fontSize: 14)),
+        ],
+      ),
+    );
   }
 
   @override
@@ -319,10 +745,11 @@ class _UserSpaceState extends State<UserSpace> {
 
     return Scaffold(
       appBar: AppBar(
-        // Logout button
-        leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => _logout(context), tooltip: 'Logout'),
-        
-        // Embedded search bar in the app bar title area
+        leading: IconButton(
+          icon: const Icon(Icons.logout),
+          onPressed: _logout,
+          tooltip: 'Logout',
+        ),
         title: Container(
           height: 40,
           decoration: BoxDecoration(
@@ -341,8 +768,6 @@ class _UserSpaceState extends State<UserSpace> {
           ),
         ),
         centerTitle: true,
-        
-        // Top-right overflow menu for secondary screens
         actions: [
           PopupMenuButton<String>(
             icon: Icon(Icons.more_vert, color: theme.primaryColor),
@@ -381,11 +806,7 @@ class _UserSpaceState extends State<UserSpace> {
           ),
         ],
       ),
-      
-      // Dynamic body content rendered based on the selected tab
       body: _buildBodyContent(),
-      
-      // Bottom Navigation Bar to switch between main user views
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
         onTap: (index) => setState(() => _currentIndex = index),
@@ -399,37 +820,157 @@ class _UserSpaceState extends State<UserSpace> {
     );
   }
 
-  /// Switches body content based on the active bottom navigation bar index.
   Widget _buildBodyContent() {
     switch (_currentIndex) {
       case 0:
         return AnimatedAddCard(
           title: 'No Locations Found',
           subtitle: 'Tap to add a new parking space',
-          onTap: () => print("Add Space Tapped"),
+          onTap: () {},
         );
       case 1:
-        return AnimatedAddCard(
-          title: 'No Vehicle Found',
-          subtitle: 'Tap to add a new vehicle to your account',
-          onTap: () => print("Add Vehicle Tapped"),
-        );
+        return _buildVehicleSection();
       case 2:
         return AnimatedAddCard(
           title: 'Profile Incomplete',
           subtitle: 'Tap to add your contact information',
-          onTap: () => print("Add Contact Info Tapped"),
+          onTap: () {},
         );
       default:
-        return Container();
+        return const SizedBox.shrink();
     }
+  }
+
+  /// Vehicle view: Displays empty card if 0 vehicles, or list of cards matching the sketch
+/// Vehicle view: Displays empty card if 0 vehicles, or list of cards matching the sketch
+  Widget _buildVehicleSection() {
+    final theme = Theme.of(context);
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (user == null) {
+      return const Center(child: Text('User not signed in.'));
+    }
+
+    return StreamBuilder<QuerySnapshot>(
+      // Removed orderBy temporarily to prevent index/permission hangs
+      stream: FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('vehicles')
+          .snapshots(),
+      builder: (context, snapshot) {
+        // If Firestore throws an error (e.g., rules permission denied), show it instead of hanging
+        if (snapshot.hasError) {
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24.0),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.error_outline, color: Colors.redAccent, size: 48),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Firestore Error:\n${snapshot.error}',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.redAccent, fontSize: 13),
+                  ),
+                  const SizedBox(height: 16),
+                  ElevatedButton(
+                    onPressed: () => setState(() {}),
+                    child: const Text('Retry'),
+                  )
+                ],
+              ),
+            ),
+          );
+        }
+
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
+        final docs = snapshot.data?.docs ?? [];
+
+        if (docs.isEmpty) {
+          return AnimatedAddCard(
+            title: 'No Vehicle Found',
+            subtitle: 'Tap to add a new vehicle to your account',
+            onTap: _showAddVehicleDialog,
+          );
+        }
+
+        return ListView(
+          padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0),
+          children: [
+            ...docs.map((doc) {
+              final data = doc.data() as Map<String, dynamic>;
+              final model = data['model'] ?? 'Unknown Model';
+              final plate = data['plate'] ?? 'No Plate';
+
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 12.0),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: () => _showVehicleDetails(data, doc.id),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+                    decoration: BoxDecoration(
+                      color: theme.cardColor,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: theme.dividerColor, width: 2),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          model,
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: theme.colorScheme.onSurface,
+                          ),
+                        ),
+                        Text(
+                          plate,
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: theme.primaryColor,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
+            const SizedBox(height: 8),
+            OutlinedButton(
+              onPressed: _showAddVehicleDialog,
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                side: BorderSide(color: theme.primaryColor, width: 1.5),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              child: Text(
+                'Add more vehicle',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: theme.primaryColor,
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
   }
 }
 
 // ==========================================
 // USER SPECIFIC PAGES
 // ==========================================
-/// Settings page for regular users: allows toggling theme and notifications.
 class UserSettingsPage extends StatelessWidget {
   const UserSettingsPage({super.key});
 
@@ -441,22 +982,18 @@ class UserSettingsPage extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(16.0),
         children: [
-          // Theme switcher tile
           ListTile(
             leading: Icon(Icons.dark_mode, color: theme.primaryColor),
             title: Text('Dark Mode', style: TextStyle(color: theme.colorScheme.onSurface)),
             trailing: Switch(
               value: themeNotifier.value == ThemeMode.dark,
               onChanged: (val) {
-                // Instantly flips the entire app theme
                 themeNotifier.value = val ? ThemeMode.dark : ThemeMode.light;
               },
               activeColor: theme.scaffoldBackgroundColor,
               activeTrackColor: theme.primaryColor,
             ),
           ),
-          
-          // Notifications toggle tile
           ListTile(
             leading: Icon(Icons.notifications_active, color: theme.primaryColor),
             title: Text('Notifications', style: TextStyle(color: theme.colorScheme.onSurface)),
@@ -467,8 +1004,6 @@ class UserSettingsPage extends StatelessWidget {
               activeTrackColor: theme.primaryColor,
             ),
           ),
-          
-          // Contact support navigation tile
           ListTile(
             leading: Icon(Icons.mail_outline, color: theme.primaryColor),
             title: Text('Contact Us', style: TextStyle(color: theme.colorScheme.onSurface)),
@@ -481,7 +1016,6 @@ class UserSettingsPage extends StatelessWidget {
   }
 }
 
-/// Informational page presenting system overview and version metadata.
 class UserAboutPage extends StatelessWidget {
   const UserAboutPage({super.key});
 
@@ -516,222 +1050,8 @@ class UserAboutPage extends StatelessWidget {
 }
 
 // ==========================================
-// ADMIN DASHBOARD
+// CUSTOM ANIMATED CARD
 // ==========================================
-/// Administrative operations hub containing user management, profiles, and plot overview.
-class AdminDashboard extends StatefulWidget {
-  const AdminDashboard({super.key});
-
-  @override
-  State<AdminDashboard> createState() => _AdminDashboardState();
-}
-
-class _AdminDashboardState extends State<AdminDashboard> {
-  // Tracks active admin tab: 0 = User Mgmt, 1 = Profile, 2 = Plots
-  int _currentIndex = 0;
-
-  /// Logs the admin out and returns to the login screen.
-  void _logout(BuildContext context) {
-    Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const LoginPage()));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Scaffold(
-      appBar: AppBar(
-        // Logout button
-        leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => _logout(context), tooltip: 'Logout'),
-        
-        // Styled title highlighting administrative scope
-        title: RichText(
-          text: TextSpan(
-            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            children: [
-              TextSpan(text: 'Admin ', style: TextStyle(color: theme.colorScheme.onSurface)),
-              TextSpan(text: 'Dashboard', style: TextStyle(color: theme.primaryColor)),
-            ],
-          ),
-        ),
-        centerTitle: true,
-        
-        // Overflow menu with links to Admin Settings and System Info
-        actions: [
-          PopupMenuButton<String>(
-            icon: Icon(Icons.more_vert, color: theme.primaryColor),
-            color: theme.cardColor,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            offset: const Offset(0, 50),
-            onSelected: (value) {
-              if (value == 'settings') {
-                Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminSettingsPage()));
-              } else if (value == 'about') {
-                Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminAboutPage()));
-              }
-            },
-            itemBuilder: (context) => [
-              PopupMenuItem<String>(
-                value: 'settings',
-                child: Row(
-                  children: [
-                    Icon(Icons.settings, color: theme.colorScheme.onSurfaceVariant, size: 20),
-                    const SizedBox(width: 12),
-                    Text('Admin Settings', style: TextStyle(color: theme.colorScheme.onSurface)),
-                  ],
-                ),
-              ),
-              PopupMenuItem<String>(
-                value: 'about',
-                child: Row(
-                  children: [
-                    Icon(Icons.info_outline, color: theme.colorScheme.onSurfaceVariant, size: 20),
-                    const SizedBox(width: 12),
-                    Text('About System', style: TextStyle(color: theme.colorScheme.onSurface)),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-      
-      // Central placeholder view displaying the active tab's title
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.admin_panel_settings_outlined, size: 80, color: theme.primaryColor.withOpacity(0.5)),
-            const SizedBox(height: 20),
-            Text(
-              _getTabTitle(_currentIndex),
-              style: TextStyle(fontSize: 22, color: theme.colorScheme.onSurface, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'No data available yet.',
-              style: TextStyle(fontSize: 16, color: theme.colorScheme.onSurfaceVariant),
-            ),
-          ],
-        ),
-      ),
-      
-      // Administrative Bottom Navigation Bar
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _currentIndex,
-        onTap: (index) => setState(() => _currentIndex = index),
-        type: BottomNavigationBarType.fixed,
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.manage_accounts), label: 'User Mgmt'),
-          BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
-          BottomNavigationBarItem(icon: Icon(Icons.map), label: 'Plots'),
-        ],
-      ),
-    );
-  }
-
-  /// Maps the selected bottom navigation index to a display header.
-  String _getTabTitle(int index) {
-    switch (index) {
-      case 0: return 'User Management Area';
-      case 1: return 'Admin Profile Area';
-      case 2: return 'Plot Management Area';
-      default: return '';
-    }
-  }
-}
-
-// ==========================================
-// ADMIN SPECIFIC PAGES
-// ==========================================
-/// Settings page specifically tailored for administrative configurations.
-class AdminSettingsPage extends StatelessWidget {
-  const AdminSettingsPage({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Scaffold(
-      appBar: AppBar(title: const Text('Admin Settings')),
-      body: ListView(
-        padding: const EdgeInsets.all(16.0),
-        children: [
-          // Global Theme Switcher
-          ListTile(
-            leading: Icon(Icons.dark_mode, color: theme.primaryColor),
-            title: Text('Dark Mode', style: TextStyle(color: theme.colorScheme.onSurface)),
-            trailing: Switch(
-              value: themeNotifier.value == ThemeMode.dark,
-              onChanged: (val) {
-                themeNotifier.value = val ? ThemeMode.dark : ThemeMode.light;
-              },
-              activeColor: theme.scaffoldBackgroundColor,
-              activeTrackColor: theme.primaryColor,
-            ),
-          ),
-          
-          // System Alert Notifications Toggle
-          ListTile(
-            leading: Icon(Icons.notifications_active, color: theme.primaryColor),
-            title: Text('System Alerts', style: TextStyle(color: theme.colorScheme.onSurface)),
-            trailing: Switch(
-              value: true,
-              onChanged: (val) {},
-              activeColor: theme.scaffoldBackgroundColor,
-              activeTrackColor: theme.primaryColor,
-            ),
-          ),
-          
-          // Audit Log Inspection Tile
-          ListTile(
-            leading: Icon(Icons.admin_panel_settings, color: theme.primaryColor),
-            title: Text('Access Control Logs', style: TextStyle(color: theme.colorScheme.onSurface)),
-            trailing: Icon(Icons.arrow_forward_ios, color: theme.colorScheme.onSurfaceVariant, size: 16),
-            onTap: () {},
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// About page covering admin console infrastructure notes and versioning.
-class AdminAboutPage extends StatelessWidget {
-  const AdminAboutPage({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Scaffold(
-      appBar: AppBar(title: const Text('About System')),
-      body: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(Icons.security, color: theme.primaryColor, size: 60),
-            const SizedBox(height: 20),
-            Text(
-              'Smart Curb Admin Console. This secure environment is designed to monitor overall smart city infrastructure, manage user accounts, and oversee plot assignments.',
-              style: TextStyle(color: theme.colorScheme.onSurfaceVariant, height: 1.5, fontSize: 16),
-            ),
-            const SizedBox(height: 30),
-            Divider(color: theme.dividerColor),
-            const SizedBox(height: 10),
-            Text(
-              'Version: 1.0.0 (Beta) - Admin Console',
-              style: TextStyle(color: theme.primaryColor, fontWeight: FontWeight.bold, fontSize: 14),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ==========================================
-// CUSTOM ANIMATED INTERACTIVE CARD
-// ==========================================
-/// A reusable empty-state card featuring custom scale animations and neon glow effects on press.
 class AnimatedAddCard extends StatefulWidget {
   final String title;
   final String subtitle;
@@ -749,22 +1069,20 @@ class AnimatedAddCard extends StatefulWidget {
 }
 
 class _AnimatedAddCardState extends State<AnimatedAddCard> {
-  // Tracks whether the card is currently being held down by the user
   bool _isPressed = false;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    
+
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24.0),
-        // Intercepts touch gestures to produce custom squeeze and glow animations
         child: GestureDetector(
           onTapDown: (_) => setState(() => _isPressed = true),
           onTapUp: (_) {
             setState(() => _isPressed = false);
-            widget.onTap(); 
+            widget.onTap();
           },
           onTapCancel: () => setState(() => _isPressed = false),
           child: AnimatedContainer(
@@ -772,17 +1090,15 @@ class _AnimatedAddCardState extends State<AnimatedAddCard> {
             curve: Curves.easeInOut,
             width: double.infinity,
             height: 220,
-            // Shrinks slightly when pressed to give physical button-press feedback
             transform: Matrix4.identity()..scale(_isPressed ? 0.95 : 1.0),
             transformAlignment: Alignment.center,
             decoration: BoxDecoration(
               color: theme.cardColor,
               borderRadius: BorderRadius.circular(16),
               border: Border.all(
-                color: _isPressed ? theme.primaryColor.withOpacity(0.6) : theme.dividerColor, 
+                color: _isPressed ? theme.primaryColor.withOpacity(0.6) : theme.dividerColor,
                 width: 2,
               ),
-              // Elevates with a colored glow outline when pressed
               boxShadow: _isPressed
                   ? [BoxShadow(color: theme.primaryColor.withOpacity(0.15), blurRadius: 20, spreadRadius: 2)]
                   : [],
@@ -790,12 +1106,11 @@ class _AnimatedAddCardState extends State<AnimatedAddCard> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // Inset circular icon button with dynamic ambient neon shadow
                 AnimatedContainer(
                   duration: const Duration(milliseconds: 150),
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: theme.scaffoldBackgroundColor, // Creates a nice inset look
+                    color: theme.scaffoldBackgroundColor,
                     shape: BoxShape.circle,
                     boxShadow: [
                       BoxShadow(
@@ -808,15 +1123,11 @@ class _AnimatedAddCardState extends State<AnimatedAddCard> {
                   child: Icon(Icons.add, size: 40, color: theme.primaryColor),
                 ),
                 const SizedBox(height: 20),
-                
-                // Primary action title
                 Text(
                   widget.title,
                   style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 18, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 8),
-                
-                // Explanatory subtitle
                 Text(
                   widget.subtitle,
                   style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 14),
