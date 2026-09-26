@@ -651,7 +651,506 @@ class _UserSpaceState extends State<UserSpace> {
       },
     );
   }
+  // ==========================================
+  // PROFILE TAB LOGIC & UI (With Zip Code)
+  // ==========================================
+  /// Opens a large blank modal dialog with an 'X' button on the top-left
+  void _showAddSpaceDialog() {
+    final theme = Theme.of(context);
 
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (dialogCtx) {
+        return Dialog(
+          backgroundColor: theme.cardColor,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+          child: Container(
+            width: double.infinity,
+            constraints: const BoxConstraints(
+              maxWidth: 700,
+              minHeight: 450,
+            ),
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Top-left 'X' close button
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  color: theme.colorScheme.onSurface,
+                  tooltip: 'Close',
+                  onPressed: () => Navigator.of(dialogCtx).pop(),
+                ),
+                // Expanded blank area ready for your parking space addition UI
+                const Expanded(
+                  child: SizedBox(),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // =========================================
+  /// PROFILE TAB UI
+  /// Displays user profile information and allows editing
+  /// =========================================
+  /// 
+  Widget _buildProfileSection() {
+    final user = FirebaseAuth.instance.currentUser;
+    final theme = Theme.of(context);
+
+    if (user == null) {
+      return const Center(child: Text('User not signed in.'));
+    }
+
+    return StreamBuilder<DocumentSnapshot>(
+      stream: FirebaseFirestore.instance.collection('users').doc(user.uid).snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
+        final data = snapshot.data?.data() as Map<String, dynamic>?;
+
+        // If no profile document or essential fields haven't been saved yet
+        if (data == null || data['firstName'] == null) {
+          return AnimatedAddCard(
+            title: 'Profile Incomplete',
+            subtitle: 'Tap to add your contact information',
+            onTap: () => _showContactInfoDialog(),
+          );
+        }
+
+        // Combine full name
+        final middle = (data['middleName'] ?? '').toString().trim();
+        final fullName = middle.isEmpty
+            ? '${data['firstName']} ${data['lastName']}'
+            : '${data['firstName']} $middle ${data['lastName']}';
+
+        // Combine address including zip code
+        final addr2 = (data['address2'] ?? '').toString().trim();
+        final zip = data['zipCode'] ?? '';
+        final fullAddress = addr2.isEmpty
+            ? '${data['address1']}\n${data['city']}, ${data['state']} $zip\n${data['country']}'
+            : '${data['address1']}, $addr2\n${data['city']}, ${data['state']} $zip\n${data['country']}';
+
+        return SafeArea(
+          child: Column(
+            children: [
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 20.0),
+                  children: [
+                    // Header Card
+                    Container(
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: theme.cardColor,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: theme.dividerColor),
+                      ),
+                      child: Row(
+                        children: [
+                          CircleAvatar(
+                            radius: 34,
+                            backgroundColor: theme.scaffoldBackgroundColor,
+                            child: Icon(Icons.person, size: 38, color: theme.primaryColor),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  fullName,
+                                  style: TextStyle(
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.bold,
+                                    color: theme.colorScheme.onSurface,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  user.email ?? '',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    color: theme.colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Information Details Card
+                    Container(
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: theme.cardColor,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: theme.dividerColor),
+                      ),
+                      child: Column(
+                        children: [
+                          _buildDetailRow('Phone Number', data['phone'] ?? 'N/A', theme),
+                          const Divider(height: 20),
+                          _buildDetailRow('Gender', data['gender'] ?? 'N/A', theme),
+                          const Divider(height: 20),
+                          _buildDetailRow('Address', fullAddress, theme),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              // Bottom Middle "Edit Information" Button
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: () => _showContactInfoDialog(existingData: data),
+                    icon: const Icon(Icons.edit_outlined, size: 18),
+                    label: const Text(
+                      'Edit Information',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: theme.primaryColor,
+                      foregroundColor: Colors.black,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      elevation: 6,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  /// Centered dialog for creating and updating user contact info
+  void _showContactInfoDialog({Map<String, dynamic>? existingData}) {
+    final theme = Theme.of(context);
+
+    final phoneCtrl = TextEditingController(text: existingData?['phone'] ?? '');
+    final firstCtrl = TextEditingController(text: existingData?['firstName'] ?? '');
+    final lastCtrl = TextEditingController(text: existingData?['lastName'] ?? '');
+    final middleCtrl = TextEditingController(text: existingData?['middleName'] ?? '');
+    final addr1Ctrl = TextEditingController(text: existingData?['address1'] ?? '');
+    final addr2Ctrl = TextEditingController(text: existingData?['address2'] ?? '');
+    final cityCtrl = TextEditingController(text: existingData?['city'] ?? '');
+    final stateCtrl = TextEditingController(text: existingData?['state'] ?? '');
+    final zipCtrl = TextEditingController(text: existingData?['zipCode'] ?? '');
+    final countryCtrl = TextEditingController(text: existingData?['country'] ?? '');
+
+    String? selectedGender = existingData?['gender'];
+    final List<String> genderOptions = ['Male', 'Female', 'Other'];
+
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (dialogCtx) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return Dialog(
+              backgroundColor: theme.cardColor,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 500),
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(24.0),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            existingData == null ? 'Add Contact Info' : 'Edit Contact Info',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              color: theme.colorScheme.onSurface,
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.close),
+                            onPressed: () => Navigator.of(dialogCtx).pop(),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+
+                      // First & Last Name (Required)
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _buildInputContainer(
+                              theme: theme,
+                              controller: firstCtrl,
+                              hintText: 'First Name *',
+                              icon: Icons.person_outline,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: _buildInputContainer(
+                              theme: theme,
+                              controller: lastCtrl,
+                              hintText: 'Last Name *',
+                              icon: Icons.person_outline,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+
+                      // Middle Name (Optional)
+                      _buildInputContainer(
+                        theme: theme,
+                        controller: middleCtrl,
+                        hintText: 'Middle Name (Optional)',
+                        icon: Icons.badge_outlined,
+                      ),
+                      const SizedBox(height: 12),
+
+                      // Phone Number (Required)
+                      _buildInputContainer(
+                        theme: theme,
+                        controller: phoneCtrl,
+                        hintText: 'Phone Number *',
+                        icon: Icons.phone_outlined,
+                        keyboardType: TextInputType.phone,
+                      ),
+                      const SizedBox(height: 12),
+
+                      // Gender Dropdown (Required)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: theme.cardColor,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: theme.dividerColor),
+                        ),
+                        child: DropdownButtonHideUnderline(
+                          child: DropdownButton<String>(
+                            value: selectedGender,
+                            isExpanded: true,
+                            hint: Row(
+                              children: [
+                                Icon(Icons.transgender, color: theme.primaryColor),
+                                const SizedBox(width: 12),
+                                Text(
+                                  'Gender *',
+                                  style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
+                                ),
+                              ],
+                            ),
+                            dropdownColor: theme.cardColor,
+                            icon: Icon(Icons.arrow_drop_down, color: theme.primaryColor),
+                            items: genderOptions.map((gender) {
+                              return DropdownMenuItem<String>(
+                                value: gender,
+                                child: Text(
+                                  gender,
+                                  style: TextStyle(color: theme.colorScheme.onSurface),
+                                ),
+                              );
+                            }).toList(),
+                            onChanged: (val) {
+                              setDialogState(() => selectedGender = val);
+                            },
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+
+                      // Address 1 (Required)
+                      _buildInputContainer(
+                        theme: theme,
+                        controller: addr1Ctrl,
+                        hintText: 'Address Line 1 *',
+                        icon: Icons.home_outlined,
+                      ),
+                      const SizedBox(height: 12),
+
+                      // Address 2 (Optional)
+                      _buildInputContainer(
+                        theme: theme,
+                        controller: addr2Ctrl,
+                        hintText: 'Address Line 2 (Optional)',
+                        icon: Icons.location_city_outlined,
+                      ),
+                      const SizedBox(height: 12),
+
+                      // City & State (Required)
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _buildInputContainer(
+                              theme: theme,
+                              controller: cityCtrl,
+                              hintText: 'City *',
+                              icon: Icons.location_on_outlined,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: _buildInputContainer(
+                              theme: theme,
+                              controller: stateCtrl,
+                              hintText: 'State *',
+                              icon: Icons.map_outlined,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+
+                      // Zip Code & Country (Required)
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _buildInputContainer(
+                              theme: theme,
+                              controller: zipCtrl,
+                              hintText: 'Zip Code *',
+                              icon: Icons.markunread_mailbox_outlined,
+                              keyboardType: TextInputType.number,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: _buildInputContainer(
+                              theme: theme,
+                              controller: countryCtrl,
+                              hintText: 'Country *',
+                              icon: Icons.public_outlined,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 24),
+
+                      // Buttons
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: () => Navigator.of(dialogCtx).pop(),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: theme.colorScheme.onSurface,
+                                padding: const EdgeInsets.symmetric(vertical: 14),
+                                side: BorderSide(color: theme.dividerColor),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                              child: const Text('Cancel'),
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: ElevatedButton(
+                              onPressed: () {
+                                final phone = phoneCtrl.text.trim();
+                                final first = firstCtrl.text.trim();
+                                final last = lastCtrl.text.trim();
+                                final middle = middleCtrl.text.trim();
+                                final addr1 = addr1Ctrl.text.trim();
+                                final addr2 = addr2Ctrl.text.trim();
+                                final city = cityCtrl.text.trim();
+                                final state = stateCtrl.text.trim();
+                                final zip = zipCtrl.text.trim();
+                                final country = countryCtrl.text.trim();
+
+                                // Validate all required fields including Zip Code
+                                if (phone.isEmpty ||
+                                    first.isEmpty ||
+                                    last.isEmpty ||
+                                    selectedGender == null ||
+                                    addr1.isEmpty ||
+                                    city.isEmpty ||
+                                    state.isEmpty ||
+                                    zip.isEmpty ||
+                                    country.isEmpty) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('Please fill in all required fields.'),
+                                      backgroundColor: Colors.redAccent,
+                                    ),
+                                  );
+                                  return;
+                                }
+
+                                // 1. Close dialog immediately
+                                Navigator.of(dialogCtx).pop();
+
+                                // 2. Save/Update to Firestore under users/{userId}
+                                final user = FirebaseAuth.instance.currentUser;
+                                if (user != null) {
+                                  FirebaseFirestore.instance
+                                      .collection('users')
+                                      .doc(user.uid)
+                                      .set({
+                                    'firstName': first,
+                                    'lastName': last,
+                                    'middleName': middle,
+                                    'phone': phone,
+                                    'gender': selectedGender,
+                                    'address1': addr1,
+                                    'address2': addr2,
+                                    'city': city,
+                                    'state': state,
+                                    'zipCode': zip,
+                                    'country': country,
+                                    'updatedAt': FieldValue.serverTimestamp(),
+                                  }, SetOptions(merge: true)).catchError((e) {
+                                    if (mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text('Failed to save profile: $e'),
+                                          backgroundColor: Colors.redAccent,
+                                        ),
+                                      );
+                                    }
+                                  });
+                                }
+                              },
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: theme.primaryColor,
+                                foregroundColor: Colors.black,
+                                padding: const EdgeInsets.symmetric(vertical: 14),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                              child: const Text('Confirm', style: TextStyle(fontWeight: FontWeight.bold)),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
   /// Displays vehicle detail modal when a card is clicked
   /// Displays vehicle detail modal when a card is clicked
   void _showVehicleDetails(Map<String, dynamic> data, String docId) {
@@ -820,22 +1319,18 @@ class _UserSpaceState extends State<UserSpace> {
     );
   }
 
-  Widget _buildBodyContent() {
+Widget _buildBodyContent() {
     switch (_currentIndex) {
       case 0:
         return AnimatedAddCard(
           title: 'No Locations Found',
           subtitle: 'Tap to add a new parking space',
-          onTap: () {},
+          onTap: _showAddSpaceDialog, // <--- Connected here
         );
       case 1:
         return _buildVehicleSection();
       case 2:
-        return AnimatedAddCard(
-          title: 'Profile Incomplete',
-          subtitle: 'Tap to add your contact information',
-          onTap: () {},
-        );
+        return _buildProfileSection();
       default:
         return const SizedBox.shrink();
     }
@@ -1048,6 +1543,8 @@ class UserAboutPage extends StatelessWidget {
     );
   }
 }
+
+
 
 // ==========================================
 // CUSTOM ANIMATED CARD
