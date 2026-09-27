@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_database/firebase_database.dart';
 import 'firebase_options.dart';
 
 void main() async {
@@ -13,27 +13,23 @@ void main() async {
 }
 
 // ==========================================
-// THEME CONFIGURATION (Dashboard Matching)
+// THEME CONFIGURATION
 // ==========================================
 
 final ValueNotifier<ThemeMode> themeNotifier = ValueNotifier(ThemeMode.dark);
 
-// Accent Palette from Web Console
-const Color accentVoltGreenDark = Color(0xFFC6F24A); // Primary volt-lime brand
-const Color accentVoltGreenLight = Color(0xFF6B8A08); // Contrast-adjusted volt for white mode
-const Color statusAmber = Color(0xFFF5A623);         // Alert / warning
-const Color statusCoral = Color(0xFFF2694C);         // Critical / offline
+const Color accentVoltGreenDark = Color(0xFFC6F24A);
+const Color accentVoltGreenLight = Color(0xFF6B8A08);
 
-// --- DARK THEME (Obsidian / Technical Console) ---
 final ThemeData darkTheme = ThemeData(
   brightness: Brightness.dark,
   primaryColor: accentVoltGreenDark,
-  scaffoldBackgroundColor: const Color(0xFF0F0F0D), // Exact dashboard deep background
-  cardColor: const Color(0xFF171714),               // Dashboard container card fill
-  dividerColor: const Color(0xFF2B2B25),            // Subtle boundary borders
+  scaffoldBackgroundColor: const Color(0xFF0F0F0D),
+  cardColor: const Color(0xFF171714),
+  dividerColor: const Color(0xFF2B2B25),
   dialogBackgroundColor: const Color(0xFF171714),
   appBarTheme: const AppBarTheme(
-    backgroundColor: Color(0xFF090908),            // Dark sidebar shade
+    backgroundColor: Color(0xFF090908),
     elevation: 0,
     iconTheme: IconThemeData(color: Color(0xFFF2F1EA)),
     titleTextStyle: TextStyle(
@@ -46,9 +42,9 @@ final ThemeData darkTheme = ThemeData(
   colorScheme: const ColorScheme.dark(
     primary: accentVoltGreenDark,
     surface: Color(0xFF171714),
-    onSurface: Color(0xFFF2F1EA),                  // Off-white headline text
-    onSurfaceVariant: Color(0xFF8E8C82),          // Muted console secondary text
-    outline: Color(0xFF2B2B25),                   // Input / card outlines
+    onSurface: Color(0xFFF2F1EA),
+    onSurfaceVariant: Color(0xFF8E8C82),
+    outline: Color(0xFF2B2B25),
   ),
   bottomNavigationBarTheme: const BottomNavigationBarThemeData(
     backgroundColor: Color(0xFF090908),
@@ -59,13 +55,12 @@ final ThemeData darkTheme = ThemeData(
   useMaterial3: true,
 );
 
-// --- LIGHT THEME (Clean Architectural Minimal) ---
 final ThemeData lightTheme = ThemeData(
   brightness: Brightness.light,
   primaryColor: accentVoltGreenLight,
-  scaffoldBackgroundColor: const Color(0xFFF7F6F2), // Crisp warm paper background
-  cardColor: const Color(0xFFFFFFFF),               // Pure card surfaces
-  dividerColor: const Color(0xFFE5E3DC),            // Light border edges
+  scaffoldBackgroundColor: const Color(0xFFF7F6F2),
+  cardColor: const Color(0xFFFFFFFF),
+  dividerColor: const Color(0xFFE5E3DC),
   dialogBackgroundColor: const Color(0xFFFFFFFF),
   appBarTheme: const AppBarTheme(
     backgroundColor: Color(0xFFFFFFFF),
@@ -81,8 +76,8 @@ final ThemeData lightTheme = ThemeData(
   colorScheme: const ColorScheme.light(
     primary: accentVoltGreenLight,
     surface: Color(0xFFFFFFFF),
-    onSurface: Color(0xFF171714),                  // Deep ink text
-    onSurfaceVariant: Color(0xFF706E66),          // Mid-gray sublabels
+    onSurface: Color(0xFF171714),
+    onSurfaceVariant: Color(0xFF706E66),
     outline: Color(0xFFE5E3DC),
   ),
   bottomNavigationBarTheme: const BottomNavigationBarThemeData(
@@ -93,6 +88,7 @@ final ThemeData lightTheme = ThemeData(
   ),
   useMaterial3: true,
 );
+
 // ==========================================
 // ROOT APP & AUTH LISTENER
 // ==========================================
@@ -487,7 +483,7 @@ class _HomeTab extends StatelessWidget {
 }
 
 // ==========================================
-// TAB 2: VEHICLES
+// TAB 2: VEHICLES (Realtime Database -> drivers)
 // ==========================================
 
 class _VehicleTab extends StatelessWidget {
@@ -501,7 +497,7 @@ class _VehicleTab extends StatelessWidget {
     );
   }
 
-  void _showVehicleDetails(BuildContext context, Map<String, dynamic> data, String docId) {
+  void _showVehicleDetails(BuildContext context, Map<String, dynamic> data, String key) {
     final theme = Theme.of(context);
     showDialog(
       context: context,
@@ -524,10 +520,10 @@ class _VehicleTab extends StatelessWidget {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            DetailInfoRow(label: 'Plate Number', value: data['plate'] ?? 'N/A'),
-            DetailInfoRow(label: 'Manufacturer', value: data['manufacturer'] ?? 'N/A'),
-            DetailInfoRow(label: 'Year', value: data['year'] ?? 'N/A'),
-            DetailInfoRow(label: 'Color', value: data['color'] ?? 'N/A'),
+            DetailInfoRow(label: 'Plate Number', value: data['plate']?.toString() ?? 'N/A'),
+            DetailInfoRow(label: 'Manufacturer', value: data['manufacturer']?.toString() ?? 'N/A'),
+            DetailInfoRow(label: 'Year', value: data['year']?.toString() ?? 'N/A'),
+            DetailInfoRow(label: 'Color', value: data['color']?.toString() ?? 'N/A'),
           ],
         ),
         actions: [
@@ -536,12 +532,10 @@ class _VehicleTab extends StatelessWidget {
               Navigator.of(ctx).pop();
               final uid = FirebaseAuth.instance.currentUser?.uid;
               if (uid != null) {
-                FirebaseFirestore.instance
-                    .collection('users')
-                    .doc(uid)
-                    .collection('vehicles')
-                    .doc(docId)
-                    .delete();
+                // Delete from Realtime Database under drivers
+                FirebaseDatabase.instance
+                    .ref('drivers/$uid/vehicles/$key')
+                    .remove();
               }
             },
             child: const Text('Delete Vehicle', style: TextStyle(color: Colors.redAccent)),
@@ -563,8 +557,9 @@ class _VehicleTab extends StatelessWidget {
 
     final theme = Theme.of(context);
 
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance.collection('users').doc(uid).collection('vehicles').snapshots(),
+    return StreamBuilder<DatabaseEvent>(
+      // Listen to Realtime Database at drivers/{uid}/vehicles
+      stream: FirebaseDatabase.instance.ref('drivers/$uid/vehicles').onValue,
       builder: (context, snapshot) {
         if (snapshot.hasError) {
           return Center(child: Text('Error: ${snapshot.error}', style: const TextStyle(color: Colors.redAccent)));
@@ -573,8 +568,8 @@ class _VehicleTab extends StatelessWidget {
           return const Center(child: CircularProgressIndicator());
         }
 
-        final docs = snapshot.data?.docs ?? [];
-        if (docs.isEmpty) {
+        final rawData = snapshot.data?.snapshot.value;
+        if (rawData == null) {
           return AnimatedAddCard(
             title: 'No Vehicle Found',
             subtitle: 'Tap to add a new vehicle to your account',
@@ -582,16 +577,20 @@ class _VehicleTab extends StatelessWidget {
           );
         }
 
+        final vehiclesMap = Map<dynamic, dynamic>.from(rawData as Map);
+        final vehicleEntries = vehiclesMap.entries.toList();
+
         return ListView(
           padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0),
           children: [
-            ...docs.map((doc) {
-              final data = doc.data() as Map<String, dynamic>;
+            ...vehicleEntries.map((entry) {
+              final key = entry.key.toString();
+              final data = Map<String, dynamic>.from(entry.value as Map);
               return Padding(
                 padding: const EdgeInsets.only(bottom: 12.0),
                 child: InkWell(
                   borderRadius: BorderRadius.circular(12),
-                  onTap: () => _showVehicleDetails(context, data, doc.id),
+                  onTap: () => _showVehicleDetails(context, data, key),
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
                     decoration: BoxDecoration(
@@ -603,11 +602,11 @@ class _VehicleTab extends StatelessWidget {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text(
-                          data['model'] ?? 'Unknown Model',
+                          data['model']?.toString() ?? 'Unknown Model',
                           style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: theme.colorScheme.onSurface),
                         ),
                         Text(
-                          data['plate'] ?? 'No Plate',
+                          data['plate']?.toString() ?? 'No Plate',
                           style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: theme.primaryColor),
                         ),
                       ],
@@ -672,13 +671,14 @@ class _VehicleFormDialogState extends State<_VehicleFormDialog> {
 
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid != null) {
-      FirebaseFirestore.instance.collection('users').doc(uid).collection('vehicles').add({
+      // Push new record to Realtime Database under drivers/{uid}/vehicles
+      FirebaseDatabase.instance.ref('drivers/$uid/vehicles').push().set({
         'manufacturer': _manufacturerCtrl.text.trim(),
         'model': model,
         'plate': plate,
         'year': _yearCtrl.text.trim(),
         'color': _colorCtrl.text.trim(),
-        'createdAt': FieldValue.serverTimestamp(),
+        'createdAt': ServerValue.timestamp,
       });
     }
   }
@@ -754,7 +754,7 @@ class _VehicleFormDialogState extends State<_VehicleFormDialog> {
 }
 
 // ==========================================
-// TAB 3: PROFILE
+// TAB 3: PROFILE (Realtime Database -> drivers)
 // ==========================================
 
 class _ProfileTab extends StatelessWidget {
@@ -775,15 +775,25 @@ class _ProfileTab extends StatelessWidget {
 
     final theme = Theme.of(context);
 
-    return StreamBuilder<DocumentSnapshot>(
-      stream: FirebaseFirestore.instance.collection('users').doc(user.uid).snapshots(),
+    return StreamBuilder<DatabaseEvent>(
+      // Listen to Realtime Database at drivers/{uid}/profile
+      stream: FirebaseDatabase.instance.ref('drivers/${user.uid}/profile').onValue,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
         }
 
-        final data = snapshot.data?.data() as Map<String, dynamic>?;
-        if (data == null || data['firstName'] == null) {
+        final rawData = snapshot.data?.snapshot.value;
+        if (rawData == null) {
+          return AnimatedAddCard(
+            title: 'Profile Incomplete',
+            subtitle: 'Tap to add your contact information',
+            onTap: () => _openContactDialog(context),
+          );
+        }
+
+        final data = Map<String, dynamic>.from(rawData as Map);
+        if (data['firstName'] == null) {
           return AnimatedAddCard(
             title: 'Profile Incomplete',
             subtitle: 'Tap to add your contact information',
@@ -850,9 +860,9 @@ class _ProfileTab extends StatelessWidget {
                       ),
                       child: Column(
                         children: [
-                          DetailInfoRow(label: 'Phone Number', value: data['phone'] ?? 'N/A'),
+                          DetailInfoRow(label: 'Phone Number', value: data['phone']?.toString() ?? 'N/A'),
                           const Divider(height: 20),
-                          DetailInfoRow(label: 'Gender', value: data['gender'] ?? 'N/A'),
+                          DetailInfoRow(label: 'Gender', value: data['gender']?.toString() ?? 'N/A'),
                           const Divider(height: 20),
                           DetailInfoRow(label: 'Address', value: fullAddress),
                         ],
@@ -902,17 +912,17 @@ class _ContactInfoDialogState extends State<_ContactInfoDialog> {
   void initState() {
     super.initState();
     final d = widget.existingData;
-    _phoneCtrl = TextEditingController(text: d?['phone'] ?? '');
-    _firstCtrl = TextEditingController(text: d?['firstName'] ?? '');
-    _lastCtrl = TextEditingController(text: d?['lastName'] ?? '');
-    _middleCtrl = TextEditingController(text: d?['middleName'] ?? '');
-    _addr1Ctrl = TextEditingController(text: d?['address1'] ?? '');
-    _addr2Ctrl = TextEditingController(text: d?['address2'] ?? '');
-    _cityCtrl = TextEditingController(text: d?['city'] ?? '');
-    _stateCtrl = TextEditingController(text: d?['state'] ?? '');
-    _zipCtrl = TextEditingController(text: d?['zipCode'] ?? '');
-    _countryCtrl = TextEditingController(text: d?['country'] ?? '');
-    _gender = d?['gender'];
+    _phoneCtrl = TextEditingController(text: d?['phone']?.toString() ?? '');
+    _firstCtrl = TextEditingController(text: d?['firstName']?.toString() ?? '');
+    _lastCtrl = TextEditingController(text: d?['lastName']?.toString() ?? '');
+    _middleCtrl = TextEditingController(text: d?['middleName']?.toString() ?? '');
+    _addr1Ctrl = TextEditingController(text: d?['address1']?.toString() ?? '');
+    _addr2Ctrl = TextEditingController(text: d?['address2']?.toString() ?? '');
+    _cityCtrl = TextEditingController(text: d?['city']?.toString() ?? '');
+    _stateCtrl = TextEditingController(text: d?['state']?.toString() ?? '');
+    _zipCtrl = TextEditingController(text: d?['zipCode']?.toString() ?? '');
+    _countryCtrl = TextEditingController(text: d?['country']?.toString() ?? '');
+    _gender = d?['gender']?.toString();
   }
 
   @override
@@ -948,7 +958,8 @@ class _ContactInfoDialogState extends State<_ContactInfoDialog> {
 
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid != null) {
-      FirebaseFirestore.instance.collection('users').doc(uid).set({
+      // Save profile to Realtime Database under drivers/{uid}/profile
+      FirebaseDatabase.instance.ref('drivers/$uid/profile').update({
         'firstName': _firstCtrl.text.trim(),
         'lastName': _lastCtrl.text.trim(),
         'middleName': _middleCtrl.text.trim(),
@@ -960,8 +971,8 @@ class _ContactInfoDialogState extends State<_ContactInfoDialog> {
         'state': _stateCtrl.text.trim(),
         'zipCode': _zipCtrl.text.trim(),
         'country': _countryCtrl.text.trim(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+        'updatedAt': ServerValue.timestamp,
+      });
     }
   }
 
@@ -1115,7 +1126,7 @@ class AppTextField extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: theme.cardColor,
-        borderRadius: BorderRadius.circular(8), // Aligned with web console input curves
+        borderRadius: BorderRadius.circular(8),
         border: Border.all(color: theme.dividerColor),
       ),
       child: TextField(
@@ -1158,10 +1169,10 @@ class PrimaryButton extends StatelessWidget {
         onPressed: isLoading ? null : onPressed,
         style: ElevatedButton.styleFrom(
           backgroundColor: theme.primaryColor,
-          foregroundColor: const Color(0xFF12110F), // Dark high-contrast label on volt green
+          foregroundColor: const Color(0xFF12110F),
           padding: const EdgeInsets.symmetric(vertical: 16),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-          elevation: 0, // Clean flat console button style
+          elevation: 0,
         ),
         child: isLoading
             ? const SizedBox(
