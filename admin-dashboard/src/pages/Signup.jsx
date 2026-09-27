@@ -4,6 +4,7 @@ import { ref, get } from "firebase/database";
 import { Link, useNavigate } from "react-router-dom";
 import { auth, database, emailKey } from "../firebase";
 import { c, mono } from "../theme";
+import logo from "../assets/smartcurb-logo.jpg";
 
 const inputStyle = { height: 44, padding: "0 12px", borderRadius: 6, border: `1px solid ${c.line}`, background: c.panel, color: c.text, fontSize: 14 };
 
@@ -51,11 +52,12 @@ function Signup() {
   return (
     <div style={{ height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: c.bg }}>
       <form onSubmit={handleSignUp} style={{ width: 400, background: c.panel, border: `1px solid ${c.line}`, borderRadius: 8, padding: 32, display: "flex", flexDirection: "column", gap: 14 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-          <div style={{ width: 28, height: 28, borderRadius: 6, background: c.accent, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <div style={{ width: 13, height: 5, borderRadius: 1, background: c.onAccent }} />
-          </div>
-          <div style={{ fontFamily: mono, fontSize: 12.5, fontWeight: 600 }}>SMART WHEEL STOP</div>
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: 4 }}>
+          <img
+            src={logo}
+            alt="Smart Curb"
+            style={{ width: 110, height: 110, borderRadius: 12, objectFit: "cover" }}
+          />
         </div>
 
         <h2 style={{ fontFamily: mono, margin: 0 }}>Create your account</h2>

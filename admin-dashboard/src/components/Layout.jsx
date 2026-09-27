@@ -4,6 +4,7 @@ import { onAuthStateChanged, signOut } from "firebase/auth";
 import { ref, get, set, update, remove, onValue } from "firebase/database";
 import { auth, database, emailKey } from "../firebase";
 import { c, mono } from "../theme";
+import logo from "../assets/smartcurb-logo.jpg";
 
 const navItems = [
   { label: "Overview", to: "/overview" },
@@ -78,9 +79,11 @@ function Layout() {
     <div style={{ display: "flex", height: "100vh", background: c.bg, color: c.text }}>
       <div style={{ width: 240, background: c.side, padding: "18px 12px", display: "flex", flexDirection: "column" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 6px 20px" }}>
-          <div style={{ width: 28, height: 28, borderRadius: 6, background: c.accent, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <div style={{ width: 13, height: 5, borderRadius: 1, background: c.onAccent }} />
-          </div>
+        <img
+            src={logo}
+            alt="Smart Curb"
+            style={{ width: 44, height: 44, borderRadius: 8, objectFit: "cover", flexShrink: 0 }}
+          />
           <div>
             <div style={{ fontFamily: mono, fontSize: 12.5, fontWeight: 600 }}>SMART WHEEL STOP</div>
             <div style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: 1.2, color: c.dim }}>ADMIN CONSOLE</div>

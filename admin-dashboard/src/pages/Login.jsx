@@ -3,6 +3,7 @@ import { signInWithEmailAndPassword, sendPasswordResetEmail } from "firebase/aut
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { auth } from "../firebase";
 import { c, mono } from "../theme";
+import logo from "../assets/smartcurb-logo.jpg";
 
 const inputStyle = { height: 44, padding: "0 12px", borderRadius: 6, border: `1px solid ${c.line}`, background: c.panel, color: c.text, fontSize: 14 };
 
@@ -45,10 +46,12 @@ function Login() {
   return (
     <div style={{ display: "flex", height: "100vh" }}>
       <div style={{ flex: 1, background: c.side, padding: 56, display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ width: 34, height: 34, borderRadius: 7, background: c.accent, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <div style={{ width: 16, height: 6, borderRadius: 1, background: c.onAccent }} />
-          </div>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 14 }}>
+          <img
+            src={logo}
+            alt="Smart Curb"
+            style={{ width: 150, height: 150, borderRadius: 14, objectFit: "cover" }}
+          />
           <div>
             <div style={{ fontFamily: mono, fontSize: 14, fontWeight: 600 }}>SMART WHEEL STOP</div>
             <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: 1.2, color: c.dim }}>ADMIN CONSOLE</div>
