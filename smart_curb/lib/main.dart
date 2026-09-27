@@ -13,66 +13,86 @@ void main() async {
 }
 
 // ==========================================
-// THEME CONFIGURATION
+// THEME CONFIGURATION (Dashboard Matching)
 // ==========================================
 
 final ValueNotifier<ThemeMode> themeNotifier = ValueNotifier(ThemeMode.dark);
 
-const Color accentNeonDark = Color(0xFFC5E01A);
-const Color accentNeonLight = Color(0xFF9EBA15);
+// Accent Palette from Web Console
+const Color accentVoltGreenDark = Color(0xFFC6F24A); // Primary volt-lime brand
+const Color accentVoltGreenLight = Color(0xFF6B8A08); // Contrast-adjusted volt for white mode
+const Color statusAmber = Color(0xFFF5A623);         // Alert / warning
+const Color statusCoral = Color(0xFFF2694C);         // Critical / offline
 
+// --- DARK THEME (Obsidian / Technical Console) ---
 final ThemeData darkTheme = ThemeData(
   brightness: Brightness.dark,
-  primaryColor: accentNeonDark,
-  scaffoldBackgroundColor: const Color(0xFF1A1D24),
-  cardColor: const Color(0xFF282C35),
-  dividerColor: Colors.white12,
+  primaryColor: accentVoltGreenDark,
+  scaffoldBackgroundColor: const Color(0xFF0F0F0D), // Exact dashboard deep background
+  cardColor: const Color(0xFF171714),               // Dashboard container card fill
+  dividerColor: const Color(0xFF2B2B25),            // Subtle boundary borders
+  dialogBackgroundColor: const Color(0xFF171714),
   appBarTheme: const AppBarTheme(
-    backgroundColor: Color(0xFF111318),
+    backgroundColor: Color(0xFF090908),            // Dark sidebar shade
     elevation: 0,
-    iconTheme: IconThemeData(color: Colors.white),
-    titleTextStyle: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+    iconTheme: IconThemeData(color: Color(0xFFF2F1EA)),
+    titleTextStyle: TextStyle(
+      color: Color(0xFFF2F1EA),
+      fontSize: 18,
+      fontWeight: FontWeight.w700,
+      letterSpacing: 0.5,
+    ),
   ),
   colorScheme: const ColorScheme.dark(
-    primary: accentNeonDark,
-    surface: Color(0xFF282C35),
-    onSurface: Colors.white,
-    onSurfaceVariant: Colors.white54,
+    primary: accentVoltGreenDark,
+    surface: Color(0xFF171714),
+    onSurface: Color(0xFFF2F1EA),                  // Off-white headline text
+    onSurfaceVariant: Color(0xFF8E8C82),          // Muted console secondary text
+    outline: Color(0xFF2B2B25),                   // Input / card outlines
   ),
   bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-    backgroundColor: Color(0xFF111318),
-    selectedItemColor: accentNeonDark,
-    unselectedItemColor: Colors.white54,
+    backgroundColor: Color(0xFF090908),
+    selectedItemColor: accentVoltGreenDark,
+    unselectedItemColor: Color(0xFF6E7C8F),
+    type: BottomNavigationBarType.fixed,
   ),
   useMaterial3: true,
 );
 
+// --- LIGHT THEME (Clean Architectural Minimal) ---
 final ThemeData lightTheme = ThemeData(
   brightness: Brightness.light,
-  primaryColor: accentNeonLight,
-  scaffoldBackgroundColor: const Color(0xFFF5F7FA),
-  cardColor: Colors.white,
-  dividerColor: Colors.black12,
+  primaryColor: accentVoltGreenLight,
+  scaffoldBackgroundColor: const Color(0xFFF7F6F2), // Crisp warm paper background
+  cardColor: const Color(0xFFFFFFFF),               // Pure card surfaces
+  dividerColor: const Color(0xFFE5E3DC),            // Light border edges
+  dialogBackgroundColor: const Color(0xFFFFFFFF),
   appBarTheme: const AppBarTheme(
-    backgroundColor: Colors.white,
+    backgroundColor: Color(0xFFFFFFFF),
     elevation: 0,
-    iconTheme: IconThemeData(color: Color(0xFF1A1D24)),
-    titleTextStyle: TextStyle(color: Color(0xFF1A1D24), fontSize: 20, fontWeight: FontWeight.bold),
+    iconTheme: IconThemeData(color: Color(0xFF171714)),
+    titleTextStyle: TextStyle(
+      color: Color(0xFF171714),
+      fontSize: 18,
+      fontWeight: FontWeight.w700,
+      letterSpacing: 0.5,
+    ),
   ),
   colorScheme: const ColorScheme.light(
-    primary: accentNeonLight,
-    surface: Colors.white,
-    onSurface: Color(0xFF1A1D24),
-    onSurfaceVariant: Colors.black54,
+    primary: accentVoltGreenLight,
+    surface: Color(0xFFFFFFFF),
+    onSurface: Color(0xFF171714),                  // Deep ink text
+    onSurfaceVariant: Color(0xFF706E66),          // Mid-gray sublabels
+    outline: Color(0xFFE5E3DC),
   ),
   bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-    backgroundColor: Colors.white,
-    selectedItemColor: accentNeonLight,
-    unselectedItemColor: Colors.black54,
+    backgroundColor: Color(0xFFFFFFFF),
+    selectedItemColor: accentVoltGreenLight,
+    unselectedItemColor: Color(0xFF9E9C94),
+    type: BottomNavigationBarType.fixed,
   ),
   useMaterial3: true,
 );
-
 // ==========================================
 // ROOT APP & AUTH LISTENER
 // ==========================================
@@ -1095,7 +1115,7 @@ class AppTextField extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: theme.cardColor,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(8), // Aligned with web console input curves
         border: Border.all(color: theme.dividerColor),
       ),
       child: TextField(
@@ -1105,10 +1125,10 @@ class AppTextField extends StatelessWidget {
         style: TextStyle(color: theme.colorScheme.onSurface),
         decoration: InputDecoration(
           border: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
           hintText: hintText,
-          hintStyle: TextStyle(color: theme.colorScheme.onSurfaceVariant),
-          prefixIcon: Icon(icon, color: theme.primaryColor),
+          hintStyle: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 14),
+          prefixIcon: Icon(icon, color: theme.primaryColor, size: 20),
         ),
       ),
     );
@@ -1138,23 +1158,25 @@ class PrimaryButton extends StatelessWidget {
         onPressed: isLoading ? null : onPressed,
         style: ElevatedButton.styleFrom(
           backgroundColor: theme.primaryColor,
-          foregroundColor: Colors.black,
+          foregroundColor: const Color(0xFF12110F), // Dark high-contrast label on volt green
           padding: const EdgeInsets.symmetric(vertical: 16),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          elevation: 6,
-          shadowColor: theme.primaryColor.withOpacity(0.5),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          elevation: 0, // Clean flat console button style
         ),
         child: isLoading
             ? const SizedBox(
                 height: 20,
                 width: 20,
-                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
+                child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF12110F)),
               )
             : Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   if (icon != null) ...[Icon(icon, size: 20), const SizedBox(width: 8)],
-                  Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  Text(
+                    title,
+                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, letterSpacing: 0.5),
+                  ),
                 ],
               ),
       ),
