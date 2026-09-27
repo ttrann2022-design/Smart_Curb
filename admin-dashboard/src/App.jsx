@@ -2,7 +2,9 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Login from "./pages/Login";
 import Overview from "./pages/Overview";
 import LotDetail from "./pages/LotDetail";
+import Units from "./pages/Units";
 import Layout from "./components/Layout";
+import Users from "./pages/Users";
 
 function ComingSoon({ title }) {
   return (
@@ -21,11 +23,11 @@ function App() {
         <Route element={<Layout />}>
           <Route path="/overview" element={<Overview />} />
           <Route path="/lots" element={<LotDetail />} />
-          <Route path="/units" element={<ComingSoon title="Curb units" />} />
+          <Route path="/units" element={<Units />} />
           <Route path="/cameras" element={<ComingSoon title="Cameras" />} />
           <Route path="/assistant" element={<ComingSoon title="Assistant" />} />
           <Route path="/analytics" element={<ComingSoon title="Analytics" />} />
-          <Route path="/users" element={<ComingSoon title="Users & roles" />} />
+          <Route path="/users" element={<Users />} />
         </Route>
       </Routes>
     </BrowserRouter>

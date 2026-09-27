@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ref, onValue, update } from "firebase/database";
 import { database } from "../firebase";
 import { c, mono } from "../theme";
+import { useOutletContext } from "react-router-dom";
 
 const ledColors = [
   { name: "red", hex: "#E5483A" },
@@ -25,6 +26,8 @@ function LotDetail() {
   const [ledColor, setLedColor] = useState("blue");
   const [panelText, setPanelText] = useState("");
   const [status, setStatus] = useState("");
+    const { role } = useOutletContext();
+  const canEdit = role === "operator" || role === "manager";
 
   useEffect(() => {
     const stopLots = onValue(ref(database, "lots"), (snap) => {
@@ -165,11 +168,17 @@ function LotDetail() {
                     style={{ height: 42, padding: "0 12px", borderRadius: 5, border: `1px solid ${c.line}`, background: c.bg, color: c.text, fontFamily: mono, fontSize: 14, letterSpacing: 1 }}
                   />
 
-                  <button
+                                    <button
                     onClick={applyChanges}
-                    style={{ height: 44, borderRadius: 5, border: "none", background: c.accent, color: c.onAccent, fontWeight: 600, fontSize: 13.5, cursor: "pointer" }}
+                    disabled={!canEdit}
+                    style={{
+                      height: 44, borderRadius: 5, border: "none", fontWeight: 600, fontSize: 13.5,
+                      background: canEdit ? c.accent : c.line,
+                      color: canEdit ? c.onAccent : c.dim,
+                      cursor: canEdit ? "pointer" : "not-allowed",
+                    }}
                   >
-                    Apply changes
+                    {canEdit ? "Apply changes" : "Viewers can't change LEDs"}
                   </button>
 
                   {status && <div style={{ fontSize: 12, color: c.dim }}>{status}</div>}

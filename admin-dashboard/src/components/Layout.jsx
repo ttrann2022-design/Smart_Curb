@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { onAuthStateChanged, signOut } from "firebase/auth";
-import { auth } from "../firebase";
+import { ref, get, set, update, onValue } from "firebase/database";
+import { auth, database } from "../firebase";
 import { c, mono } from "../theme";
 
 const navItems = [
@@ -16,18 +17,32 @@ const navItems = [
 
 function Layout() {
   const [userEmail, setUserEmail] = useState("");
+  const [role, setRole] = useState("viewer");
   const [checking, setChecking] = useState(true);
   const navigate = useNavigate();
 
   useEffect(() => {
-    const stop = onAuthStateChanged(auth, (user) => {
-      if (!user) navigate("/");
-      else {
-        setUserEmail(user.email);
-        setChecking(false);
+    let stopRole = () => {};
+    const stopAuth = onAuthStateChanged(auth, async (user) => {
+      stopRole();
+      if (!user) {
+        navigate("/");
+        return;
       }
+      setUserEmail(user.email);
+
+      const userRef = ref(database, `users/${user.uid}`);
+      const snap = await get(userRef);
+      if (!snap.exists()) {
+        await set(userRef, { email: user.email, role: "viewer", createdAt: Date.now(), lastActive: Date.now() });
+      } else {
+        await update(userRef, { lastActive: Date.now() });
+      }
+
+      stopRole = onValue(ref(database, `users/${user.uid}/role`), (s) => setRole(s.val() || "viewer"));
+      setChecking(false);
     });
-    return stop;
+    return () => { stopAuth(); stopRole(); };
   }, [navigate]);
 
   const handleSignOut = async () => {
@@ -71,14 +86,17 @@ function Layout() {
 
         <div style={{ padding: 12, borderRadius: 6, background: c.card }}>
           <div style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis" }}>{userEmail}</div>
-          <button onClick={handleSignOut} style={{ marginTop: 8, background: "transparent", border: "none", color: c.accent, fontSize: 12, fontWeight: 600, cursor: "pointer", padding: 0 }}>
+          <div style={{ fontFamily: mono, fontSize: 10.5, fontWeight: 600, letterSpacing: 0.8, color: c.accent, marginTop: 4 }}>
+            {role.toUpperCase()}
+          </div>
+          <button onClick={handleSignOut} style={{ marginTop: 8, background: "transparent", border: "none", color: c.dim, fontSize: 12, fontWeight: 600, cursor: "pointer", padding: 0 }}>
             Sign out
           </button>
         </div>
       </div>
 
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, overflowY: "auto" }}>
-        <Outlet />
+        <Outlet context={{ role }} />
       </div>
     </div>
   );
