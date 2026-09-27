@@ -1,12 +1,13 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Login from "./pages/Login";
+import Overview from "./pages/Overview";
 
 function App() {
   return (
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Login />} />
-        <Route path="/overview" element={<h1>Overview page coming soon</h1>} />
+        <Route path="/overview" element={<Overview />} />
       </Routes>
     </BrowserRouter>
   );
