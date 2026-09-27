@@ -16,3 +16,4 @@ const app = initializeApp(firebaseConfig);
 
 export const auth = getAuth(app);
 export const database = getDatabase(app);
+export const emailKey = (email) => email.trim().toLowerCase().replace(/\./g, ",");

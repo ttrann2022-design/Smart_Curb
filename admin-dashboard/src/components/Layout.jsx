@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { onAuthStateChanged, signOut } from "firebase/auth";
-import { ref, get, set, update, onValue } from "firebase/database";
-import { auth, database } from "../firebase";
+import { ref, get, set, update, remove, onValue } from "firebase/database";
+import { auth, database, emailKey } from "../firebase";
 import { c, mono } from "../theme";
 
 const navItems = [
@@ -21,27 +21,47 @@ function Layout() {
   const [checking, setChecking] = useState(true);
   const navigate = useNavigate();
 
-  useEffect(() => {
+    useEffect(() => {
     let stopRole = () => {};
+    let blocked = false;
+
     const stopAuth = onAuthStateChanged(auth, async (user) => {
       stopRole();
       if (!user) {
-        navigate("/");
+        if (!blocked) navigate("/");
         return;
       }
-      setUserEmail(user.email);
 
       const userRef = ref(database, `users/${user.uid}`);
       const snap = await get(userRef);
+
       if (!snap.exists()) {
-        await set(userRef, { email: user.email, role: "viewer", createdAt: Date.now(), lastActive: Date.now() });
+        const inviteRef = ref(database, `invites/${emailKey(user.email)}`);
+        const invite = await get(inviteRef);
+
+        if (!invite.exists()) {
+          blocked = true;
+          await signOut(auth);
+          navigate("/?noaccess=1");
+          return;
+        }
+
+        await set(userRef, {
+          email: user.email,
+          role: invite.val().role || "viewer",
+          createdAt: Date.now(),
+          lastActive: Date.now(),
+        });
+        await remove(inviteRef);
       } else {
         await update(userRef, { lastActive: Date.now() });
       }
 
+      setUserEmail(user.email);
       stopRole = onValue(ref(database, `users/${user.uid}/role`), (s) => setRole(s.val() || "viewer"));
       setChecking(false);
     });
+
     return () => { stopAuth(); stopRole(); };
   }, [navigate]);
 

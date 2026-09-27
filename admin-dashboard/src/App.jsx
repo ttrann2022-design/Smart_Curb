@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Login from "./pages/Login";
+import Signup from "./pages/Signup";
 import Overview from "./pages/Overview";
 import LotDetail from "./pages/LotDetail";
 import Units from "./pages/Units";
@@ -20,6 +21,7 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Login />} />
+        <Route path="/signup" element={<Signup />} />
         <Route element={<Layout />}>
           <Route path="/overview" element={<Overview />} />
           <Route path="/lots" element={<LotDetail />} />

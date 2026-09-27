@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useOutletContext } from "react-router-dom";
-import { ref, onValue, update } from "firebase/database";
-import { auth, database } from "../firebase";
+import { ref, onValue, update, set, remove } from "firebase/database";
+import { auth, database, emailKey } from "../firebase";
 import { c, mono } from "../theme";
 
 const permLabels = ["View occupancy", "View battery and status", "Change LED zones", "Edit panel text", "View camera footage", "Manage users"];
@@ -12,16 +12,26 @@ const roles = [
   { id: "manager", name: "Manager", who: "Facility and security leads", perms: [true, true, true, true, true, true] },
 ];
 
+const inputStyle = { height: 36, padding: "0 10px", borderRadius: 5, border: `1px solid ${c.line}`, background: c.bg, color: c.text, fontSize: 13 };
+
 function Users() {
   const { role } = useOutletContext();
   const [users, setUsers] = useState({});
+  const [invites, setInvites] = useState({});
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState("viewer");
   const [status, setStatus] = useState("");
   const isManager = role === "manager";
   const myUid = auth.currentUser?.uid;
 
-  useEffect(() => onValue(ref(database, "users"), (s) => setUsers(s.val() || {})), []);
+  useEffect(() => {
+    const stopUsers = onValue(ref(database, "users"), (s) => setUsers(s.val() || {}));
+    const stopInvites = onValue(ref(database, "invites"), (s) => setInvites(s.val() || {}));
+    return () => { stopUsers(); stopInvites(); };
+  }, []);
 
   const userList = Object.entries(users).sort(([, a], [, b]) => (a.email || "").localeCompare(b.email || ""));
+  const inviteList = Object.entries(invites).sort(([, a], [, b]) => (b.invitedAt || 0) - (a.invitedAt || 0));
   const countFor = (id) => userList.filter(([, u]) => u.role === id).length;
 
   const changeRole = async (uid, newRole) => {
@@ -37,6 +47,36 @@ function Users() {
     }
   };
 
+  const sendInvite = async (e) => {
+    e.preventDefault();
+    const email = inviteEmail.trim().toLowerCase();
+    if (!email.includes("@") || !email.includes(".")) {
+      setStatus("Enter a valid email address.");
+      return;
+    }
+    if (userList.some(([, u]) => (u.email || "").toLowerCase() === email)) {
+      setStatus("That person already has an account. Change their role in the table instead.");
+      return;
+    }
+    try {
+      await set(ref(database, `invites/${emailKey(email)}`), {
+        email,
+        role: inviteRole,
+        invitedBy: auth.currentUser?.email || "",
+        invitedAt: Date.now(),
+      });
+      setInviteEmail("");
+      setStatus(`Invited ${email} as ${inviteRole}. Send them the sign-up link — the dashboard doesn't email them automatically.`);
+    } catch (err) {
+      setStatus("Could not send invite: " + err.message);
+    }
+  };
+
+  const revokeInvite = async (key, email) => {
+    await remove(ref(database, `invites/${key}`));
+    setStatus(`Invite for ${email} revoked.`);
+  };
+
   const columns = "2fr 1fr 1.2fr";
   const headerCell = { fontSize: 11, fontWeight: 700, letterSpacing: 0.7, color: c.dim };
 
@@ -46,7 +86,7 @@ function Users() {
         <div>
           <div style={{ fontFamily: mono, fontSize: 19, fontWeight: 600 }}>Users & roles</div>
           <div style={{ fontSize: 12.5, color: c.dim }}>
-            {isManager ? "You can change anyone's access level" : "Only managers can change access levels"}
+            {isManager ? "Invite people and change anyone's access level" : "Only managers can invite people or change access"}
           </div>
         </div>
       </div>
@@ -75,6 +115,40 @@ function Users() {
           ))}
         </div>
 
+        {isManager && (
+          <div style={{ background: c.panel, border: `1px solid ${c.line}`, borderRadius: 6 }}>
+            <div style={{ padding: "12px 18px", borderBottom: `1px solid ${c.line}`, fontFamily: mono, fontSize: 14, fontWeight: 600 }}>Invite someone</div>
+            <form onSubmit={sendInvite} style={{ padding: "14px 18px", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <input type="email" placeholder="their@email.com" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} style={{ ...inputStyle, width: 280 }} required />
+              <select value={inviteRole} onChange={(e) => setInviteRole(e.target.value)} style={{ ...inputStyle, width: 140 }}>
+                <option value="viewer">Viewer</option>
+                <option value="operator">Operator</option>
+                <option value="manager">Manager</option>
+              </select>
+              <button type="submit" style={{ height: 36, padding: "0 16px", borderRadius: 5, border: "none", background: c.accent, color: c.onAccent, fontWeight: 600, fontSize: 13, cursor: "pointer" }}>
+                Send invite
+              </button>
+            </form>
+
+            {inviteList.length > 0 && (
+              <div style={{ borderTop: `1px solid ${c.line}` }}>
+                <div style={{ padding: "10px 18px", ...headerCell, background: "#1A1A17" }}>PENDING INVITES</div>
+                {inviteList.map(([key, inv]) => (
+                  <div key={key} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 18px", borderTop: `1px solid ${c.line}` }}>
+                    <div style={{ fontSize: 13 }}>
+                      {inv.email}
+                      <span style={{ fontFamily: mono, fontSize: 11, fontWeight: 600, color: c.accent, marginLeft: 10 }}>{(inv.role || "viewer").toUpperCase()}</span>
+                    </div>
+                    <button onClick={() => revokeInvite(key, inv.email)} style={{ background: "transparent", border: "none", color: c.busy, fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>
+                      Revoke
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         <div style={{ background: c.panel, border: `1px solid ${c.line}`, borderRadius: 6, overflow: "hidden" }}>
           <div style={{ padding: "12px 18px", borderBottom: `1px solid ${c.line}`, display: "flex", justifyContent: "space-between" }}>
             <span style={{ fontFamily: mono, fontSize: 14, fontWeight: 600 }}>People</span>
@@ -95,11 +169,7 @@ function Users() {
               </div>
               <div>
                 {isManager ? (
-                  <select
-                    value={u.role || "viewer"}
-                    onChange={(e) => changeRole(uid, e.target.value)}
-                    style={{ height: 32, padding: "0 8px", borderRadius: 5, border: `1px solid ${c.line}`, background: c.bg, color: c.text, fontSize: 12.5 }}
-                  >
+                  <select value={u.role || "viewer"} onChange={(e) => changeRole(uid, e.target.value)} style={{ ...inputStyle, height: 32 }}>
                     <option value="viewer">Viewer</option>
                     <option value="operator">Operator</option>
                     <option value="manager">Manager</option>
@@ -111,10 +181,6 @@ function Users() {
               <div style={{ fontSize: 12.5, color: c.dim }}>{u.lastActive ? new Date(u.lastActive).toLocaleString() : "—"}</div>
             </div>
           ))}
-
-          <div style={{ padding: "12px 18px", fontSize: 12, color: c.dim, background: "#1A1A17" }}>
-            To add someone, create their account in Firebase Authentication. They show up here as a Viewer after their first sign-in.
-          </div>
         </div>
 
         {status && <div style={{ fontSize: 12.5, color: c.dim }}>{status}</div>}
