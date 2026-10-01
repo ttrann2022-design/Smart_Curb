@@ -6,6 +6,7 @@ import LotDetail from "./pages/LotDetail";
 import Units from "./pages/Units";
 import Layout from "./components/Layout";
 import Users from "./pages/Users";
+import DemoControls from "./pages/DemoControls";
 
 function ComingSoon({ title }) {
   return (
@@ -29,6 +30,7 @@ function App() {
           <Route path="/assistant" element={<ComingSoon title="Assistant" />} />
           <Route path="/analytics" element={<ComingSoon title="Analytics" />} />
           <Route path="/users" element={<Users />} />
+          <Route path="/demo" element={<DemoControls />} />
         </Route>
       </Routes>
     </BrowserRouter>
