@@ -1,3 +1,6 @@
+import Sign from "./pages/Sign";
+import Assistant from "./pages/Assistant";
+import Analytics from "./pages/Analytics";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
@@ -22,12 +25,13 @@ function App() {
       <Routes>
         <Route path="/" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
+        <Route path="/sign" element={<Sign />} />
         <Route element={<Layout />}>
           <Route path="/overview" element={<Overview />} />
           <Route path="/lots" element={<LotDetail />} />
           <Route path="/units" element={<Units />} />
-          <Route path="/assistant" element={<ComingSoon title="Assistant" />} />
-          <Route path="/analytics" element={<ComingSoon title="Analytics" />} />
+          <Route path="/assistant" element={<Assistant />} />
+          <Route path="/analytics" element={<Analytics />} />
           <Route path="/users" element={<Users />} />
         </Route>
       </Routes>
