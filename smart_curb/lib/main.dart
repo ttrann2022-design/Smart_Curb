@@ -1,9 +1,14 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
+import 'package:geolocator/geolocator.dart';
 import 'firebase_options.dart';
-
+import 'dart:math' as math;
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(
@@ -111,7 +116,9 @@ class MyApp extends StatelessWidget {
             stream: FirebaseAuth.instance.authStateChanges(),
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Scaffold(body: Center(child: CircularProgressIndicator()));
+                return const Scaffold(
+                  body: Center(child: CircularProgressIndicator()),
+                );
               }
               return snapshot.hasData ? const UserSpace() : const LoginPage();
             },
@@ -154,7 +161,10 @@ class _LoginPageState extends State<LoginPage> {
     }
     setState(() => _isLoading = true);
     try {
-      await FirebaseAuth.instance.signInWithEmailAndPassword(email: email, password: password);
+      await FirebaseAuth.instance.signInWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
     } on FirebaseAuthException catch (e) {
       if (mounted) showErrorSnackBar(context, e.message ?? 'Login failed.');
     } finally {
@@ -176,15 +186,26 @@ class _LoginPageState extends State<LoginPage> {
                   'assets/logo.png',
                   height: 140,
                   fit: BoxFit.contain,
-                  errorBuilder: (_, __, ___) => Icon(Icons.radar, size: 100, color: theme.primaryColor),
+                  errorBuilder: (_, __, ___) =>
+                      Icon(Icons.radar, size: 100, color: theme.primaryColor),
                 ),
                 const SizedBox(height: 20),
                 RichText(
                   text: TextSpan(
-                    style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, letterSpacing: 1.5),
+                    style: const TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.5,
+                    ),
                     children: [
-                      TextSpan(text: 'SMART ', style: TextStyle(color: theme.colorScheme.onSurface)),
-                      TextSpan(text: 'CURB', style: TextStyle(color: theme.primaryColor)),
+                      TextSpan(
+                        text: 'SMART ',
+                        style: TextStyle(color: theme.colorScheme.onSurface),
+                      ),
+                      TextSpan(
+                        text: 'CURB',
+                        style: TextStyle(color: theme.primaryColor),
+                      ),
                     ],
                   ),
                 ),
@@ -226,7 +247,10 @@ class _LoginPageState extends State<LoginPage> {
                   ),
                   child: Text(
                     "Don't have an account? Register",
-                    style: TextStyle(color: theme.primaryColor, fontWeight: FontWeight.w600),
+                    style: TextStyle(
+                      color: theme.primaryColor,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ],
@@ -272,7 +296,10 @@ class _RegisterPageState extends State<RegisterPage> {
     }
     setState(() => _isLoading = true);
     try {
-      await FirebaseAuth.instance.createUserWithEmailAndPassword(email: email, password: password);
+      await FirebaseAuth.instance.createUserWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
       if (mounted) Navigator.pop(context);
     } on FirebaseAuthException catch (e) {
       if (mounted) showErrorSnackBar(context, e.message ?? 'Registration failed.');
@@ -296,7 +323,11 @@ class _RegisterPageState extends State<RegisterPage> {
                 const SizedBox(height: 16),
                 Text(
                   'Join Smart Curb',
-                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: theme.colorScheme.onSurface),
+                  style: TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: theme.colorScheme.onSurface,
+                  ),
                 ),
                 const SizedBox(height: 32),
                 AppTextField(
@@ -330,7 +361,10 @@ class _RegisterPageState extends State<RegisterPage> {
                   onPressed: () => Navigator.pop(context),
                   child: Text(
                     'Already have an account? Back to Login',
-                    style: TextStyle(color: theme.primaryColor, fontWeight: FontWeight.w600),
+                    style: TextStyle(
+                      color: theme.primaryColor,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ],
@@ -369,7 +403,9 @@ class _UserSpaceState extends State<UserSpace> {
         title: Container(
           height: 40,
           decoration: BoxDecoration(
-            color: theme.brightness == Brightness.dark ? Colors.white10 : Colors.grey[200],
+            color: theme.brightness == Brightness.dark
+                ? Colors.white10
+                : Colors.grey[200],
             borderRadius: BorderRadius.circular(20),
           ),
           child: TextField(
@@ -377,7 +413,10 @@ class _UserSpaceState extends State<UserSpace> {
             decoration: InputDecoration(
               hintText: 'Search...',
               hintStyle: TextStyle(color: theme.colorScheme.onSurfaceVariant),
-              prefixIcon: Icon(Icons.search, color: theme.colorScheme.onSurfaceVariant),
+              prefixIcon: Icon(
+                Icons.search,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
               border: InputBorder.none,
               contentPadding: const EdgeInsets.symmetric(vertical: 10),
             ),
@@ -391,7 +430,9 @@ class _UserSpaceState extends State<UserSpace> {
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             offset: const Offset(0, 50),
             onSelected: (val) {
-              final page = (val == 'settings') ? const UserSettingsPage() : const UserAboutPage();
+              final page = (val == 'settings')
+                  ? const UserSettingsPage()
+                  : const UserAboutPage();
               Navigator.push(context, MaterialPageRoute(builder: (_) => page));
             },
             itemBuilder: (_) => [
@@ -415,14 +456,22 @@ class _UserSpaceState extends State<UserSpace> {
         type: BottomNavigationBarType.fixed,
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
-          BottomNavigationBarItem(icon: Icon(Icons.directions_car), label: 'Vehicle'),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.directions_car),
+            label: 'Vehicle',
+          ),
           BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
         ],
       ),
     );
   }
 
-  PopupMenuItem<String> _buildMenuItem(String val, IconData icon, String label, ThemeData theme) {
+  PopupMenuItem<String> _buildMenuItem(
+    String val,
+    IconData icon,
+    String label,
+    ThemeData theme,
+  ) {
     return PopupMenuItem(
       value: val,
       child: Row(
@@ -437,14 +486,25 @@ class _UserSpaceState extends State<UserSpace> {
 }
 
 // ==========================================
-// TAB 1: HOME
+// TAB 1: HOME (Places & Campus Management)
 // ==========================================
 
 class _HomeTab extends StatelessWidget {
   const _HomeTab();
 
+  static const List<Map<String, String>> _availableCampuses = [
+    {
+      'id': 'fau_boca',
+      'shortName': 'FAU',
+      'fullName': 'Florida Atlantic University',
+      'address': '777 Glades Rd, Boca Raton, FL 33431',
+    },
+  ];
+
   void _showAddSpaceDialog(BuildContext context) {
     final theme = Theme.of(context);
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+
     showDialog(
       context: context,
       barrierDismissible: true,
@@ -454,17 +514,109 @@ class _HomeTab extends StatelessWidget {
         insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
         child: Container(
           width: double.infinity,
-          constraints: const BoxConstraints(maxWidth: 700, minHeight: 450),
-          padding: const EdgeInsets.all(16.0),
+          constraints: const BoxConstraints(maxWidth: 550, maxHeight: 600),
+          padding: const EdgeInsets.all(20.0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              IconButton(
-                icon: const Icon(Icons.close),
-                color: theme.colorScheme.onSurface,
-                onPressed: () => Navigator.of(dialogCtx).pop(),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    color: theme.colorScheme.onSurface,
+                    tooltip: 'Close',
+                    onPressed: () => Navigator.of(dialogCtx).pop(),
+                  ),
+                  Text(
+                    'Select Location',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: theme.colorScheme.onSurface,
+                    ),
+                  ),
+                  const SizedBox(width: 48),
+                ],
               ),
-              const Expanded(child: SizedBox()),
+              const Divider(height: 24),
+              Expanded(
+                child: ListView.builder(
+                  itemCount: _availableCampuses.length,
+                  itemBuilder: (context, index) {
+                    final campus = _availableCampuses[index];
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 12.0),
+                      padding: const EdgeInsets.all(16.0),
+                      decoration: BoxDecoration(
+                        color: theme.scaffoldBackgroundColor,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: theme.dividerColor),
+                      ),
+                      child: Row(
+                        children: [
+                          _buildCampusLogo(campus['shortName']!, theme),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  campus['fullName']!,
+                                  style: TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.bold,
+                                    color: theme.colorScheme.onSurface,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  campus['address']!,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: theme.colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          ElevatedButton(
+                            onPressed: () {
+                              Navigator.of(dialogCtx).pop();
+                              if (uid != null) {
+                                FirebaseDatabase.instance
+                                    .ref('drivers/$uid/locations/${campus['id']}')
+                                    .set({
+                                  'shortName': campus['shortName'],
+                                  'fullName': campus['fullName'],
+                                  'address': campus['address'],
+                                  'addedAt': ServerValue.timestamp,
+                                });
+                              }
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: theme.primaryColor,
+                              foregroundColor: const Color(0xFF12110F),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 10,
+                              ),
+                            ),
+                            child: const Text(
+                              'Add',
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
             ],
           ),
         ),
@@ -472,18 +624,1239 @@ class _HomeTab extends StatelessWidget {
     );
   }
 
+  static Widget _buildCampusLogo(String shortName, ThemeData theme) {
+    return Container(
+      width: 52,
+      height: 52,
+      decoration: BoxDecoration(
+        color: const Color(0xFF003366),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFCC0000), width: 1.5),
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        shortName,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 16,
+          fontWeight: FontWeight.w900,
+          letterSpacing: 1,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return AnimatedAddCard(
-      title: 'No Locations Found',
-      subtitle: 'Tap to add a new parking space',
-      onTap: () => _showAddSpaceDialog(context),
+    final theme = Theme.of(context);
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+
+    if (uid == null) {
+      return const Center(child: Text('User not signed in.'));
+    }
+
+    return StreamBuilder<DatabaseEvent>(
+      stream: FirebaseDatabase.instance.ref('drivers/$uid/locations').onValue,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
+        final rawData = snapshot.data?.snapshot.value;
+
+        if (rawData == null) {
+          return AnimatedAddCard(
+            title: 'No Locations Found',
+            subtitle: 'Tap to add a new parking space',
+            onTap: () => _showAddSpaceDialog(context),
+          );
+        }
+
+        final locationsMap = Map<dynamic, dynamic>.from(rawData as Map);
+        final locationEntries = locationsMap.entries.toList();
+
+        return ListView(
+          padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0),
+          children: [
+            ...locationEntries.map((entry) {
+              final locKey = entry.key.toString();
+              final data = Map<String, dynamic>.from(entry.value as Map);
+              final shortName = data['shortName']?.toString() ?? 'FAU';
+              final fullName =
+                  data['fullName']?.toString() ?? 'Florida Atlantic University';
+              final address = data['address']?.toString() ??
+                  '777 Glades Rd, Boca Raton, FL 33431';
+
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 12.0),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(16),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const FauMapScreen(),
+                      ),
+                    );
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.all(20.0),
+                    decoration: BoxDecoration(
+                      color: theme.cardColor,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: theme.dividerColor, width: 1.5),
+                    ),
+                    child: Row(
+                      children: [
+                        _buildCampusLogo(shortName, theme),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                fullName,
+                                style: TextStyle(
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.bold,
+                                  color: theme.colorScheme.onSurface,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                address,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline, size: 20),
+                          color: Colors.redAccent.withOpacity(0.7),
+                          tooltip: 'Remove Place',
+                          onPressed: () {
+                            FirebaseDatabase.instance
+                                .ref('drivers/$uid/locations/$locKey')
+                                .remove();
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }),
+            const SizedBox(height: 8),
+            OutlinedButton(
+              onPressed: () => _showAddSpaceDialog(context),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                side: BorderSide(color: theme.primaryColor, width: 1.5),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: Text(
+                'Add more place',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: theme.primaryColor,
+                ),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }
 
 // ==========================================
-// TAB 2: VEHICLES (Realtime Database -> drivers)
+// FAU CAMPUS MAP SCREEN (Destination Routing & Live/Cursor GPS)
+// ==========================================
+
+class FauBuilding {
+  final String id;
+  final String code;
+  final String name;
+  final LatLng position;
+  final String recommendedLotId;
+
+  const FauBuilding({
+    required this.id,
+    required this.code,
+    required this.name,
+    required this.position,
+    required this.recommendedLotId,
+  });
+}
+
+class FauMapScreen extends StatefulWidget {
+  const FauMapScreen({super.key});
+
+  @override
+  State<FauMapScreen> createState() => _FauMapScreenState();
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/// A walkable waypoint (intersection, building entrance, or parking lot exit).
+class CampusWaypoint {
+  final String id;
+  final LatLng position;
+  final List<String> neighbors; // IDs of reachable connected waypoints
+
+  const CampusWaypoint({
+    required this.id,
+    required this.position,
+    required this.neighbors,
+  });
+}
+
+/// The result returned by the pathfinder containing the chosen lot and exact path points.
+class PathResult {
+  final String lotId;
+  final List<LatLng> pathPoints;
+  final double totalDistanceMeters;
+
+  const PathResult({
+    required this.lotId,
+    required this.pathPoints,
+    required this.totalDistanceMeters,
+  });
+}
+
+class CampusPathfinder {
+  static const Distance _dist = Distance();
+
+  /// FAU Campus Walkway Graph:
+  /// Connects your lots (Lot 12, Lot 14) and buildings (ED-47, BC-71)
+  /// through main corridor waypoints.
+  /// To expand in the future, simply add new nodes and add their IDs to neighbors!
+static final Map<String, CampusWaypoint> walkwayGraph = {
+    // --- PARKING LOT ACCESS POINTS ---
+    'node_lot_12': const CampusWaypoint(
+      id: 'node_lot_12',
+      position: LatLng(26.373262, -80.106806),
+      neighbors: ['node_ed47_west'],
+    ),
+    'node_lot_14': const CampusWaypoint(
+      id: 'node_lot_14',
+      position: LatLng(26.373005, -80.099683),
+      neighbors: ['node_bc71_east'],
+    ),
+    // ⭐️ NEW: Lot 7
+    'node_lot_7': const CampusWaypoint(
+      id: 'node_lot_7',
+      position: LatLng(26.373999, -80.105842),
+      neighbors: ['node_ed47_west', 'node_lot_6'],
+    ),
+    // ⭐️ NEW: Lot 6
+    'node_lot_6': const CampusWaypoint(
+      id: 'node_lot_6',
+      position: LatLng(26.374013, -80.104280),
+      neighbors: ['node_lot_7', 'node_breezeway_west'],
+    ),
+
+    // --- BUILDING ACCESS POINTS ---
+    'node_ed47': const CampusWaypoint(
+      id: 'node_ed47',
+      position: LatLng(26.373358, -80.105828),
+      neighbors: ['node_ed47_west', 'node_breezeway_west'],
+    ),
+    'node_bc71': const CampusWaypoint(
+      id: 'node_bc71',
+      position: LatLng(26.373263, -80.100446),
+      neighbors: ['node_bc71_east', 'node_breezeway_east'],
+    ),
+    // ⭐️ NEW: CM-22 Computer Center
+    'node_cm22': const CampusWaypoint(
+      id: 'node_cm22',
+      position: LatLng(26.372528, -80.104044),
+      neighbors: ['node_breezeway_west', 'node_breezeway_center'],
+    ),
+
+    // --- INTERMEDIATE WALKWAY INTERSECTIONS ---
+    'node_ed47_west': const CampusWaypoint(
+      id: 'node_ed47_west',
+      position: LatLng(26.373300, -80.106300),
+      neighbors: ['node_lot_12', 'node_ed47', 'node_lot_7'], // Added node_lot_7
+    ),
+    'node_breezeway_west': const CampusWaypoint(
+      id: 'node_breezeway_west',
+      position: LatLng(26.373300, -80.103500),
+      neighbors: ['node_ed47', 'node_breezeway_center', 'node_lot_6', 'node_cm22'], // Added node_lot_6, node_cm22
+    ),
+    'node_breezeway_center': const CampusWaypoint(
+      id: 'node_breezeway_center',
+      position: LatLng(26.373280, -80.101700),
+      neighbors: ['node_breezeway_west', 'node_breezeway_east', 'node_cm22'], // Added node_cm22
+    ),
+    'node_breezeway_east': const CampusWaypoint(
+      id: 'node_breezeway_east',
+      position: LatLng(26.373270, -80.101000),
+      neighbors: ['node_breezeway_center', 'node_bc71'],
+    ),
+    'node_bc71_east': const CampusWaypoint(
+      id: 'node_bc71_east',
+      position: LatLng(26.373150, -80.099950),
+      neighbors: ['node_bc71', 'node_lot_14'],
+    ),
+  };
+
+  /// Evaluates available lots, skips full lots, and picks the one with
+  /// the shortest A* path to [buildingPos].
+  static PathResult? findBestAvailableRoute({
+    required LatLng buildingPos,
+    required Map<String, Map<String, dynamic>> lots,
+  }) {
+    PathResult? bestResult;
+    double shortestDistance = double.infinity;
+
+    for (final entry in lots.entries) {
+      final lotId = entry.key;
+      final lotData = entry.value;
+
+      // 1. Check capacity & skip full lots
+      final status = lotData['status']?.toString() ?? '0/1';
+      final parts = status.split('/');
+      final occupied = int.tryParse(parts.first.trim()) ?? 0;
+      final capacity = int.tryParse(parts.last.trim()) ?? 1;
+
+      if (occupied >= capacity) {
+        continue; // Skip this lot if 100% full!
+      }
+
+      final LatLng lotPos = lotData['position'] as LatLng;
+
+      // 2. Run A* from Lot to Building
+      final path = runAStar(start: lotPos, goal: buildingPos);
+      final dist = _calculatePathDistance(path);
+
+      // 3. Keep the lot with the lowest A* walking distance
+      if (dist < shortestDistance) {
+        shortestDistance = dist;
+        bestResult = PathResult(
+          lotId: lotId,
+          pathPoints: path,
+          totalDistanceMeters: dist,
+        );
+      }
+    }
+
+    return bestResult;
+  }
+
+  /// Core A* Algorithm
+  static List<LatLng> runAStar({
+    required LatLng start,
+    required LatLng goal,
+  }) {
+    final startNodeId = _findClosestWaypoint(start);
+    final goalNodeId = _findClosestWaypoint(goal);
+
+    if (startNodeId == goalNodeId) {
+      return [start, goal];
+    }
+
+    final List<String> openSet = [startNodeId];
+    final Map<String, String> cameFrom = {};
+
+    final Map<String, double> gScore = {
+      for (final k in walkwayGraph.keys) k: double.infinity,
+    };
+    gScore[startNodeId] = 0.0;
+
+    final Map<String, double> fScore = {
+      for (final k in walkwayGraph.keys) k: double.infinity,
+    };
+    fScore[startNodeId] = _dist.as(
+      LengthUnit.Meter,
+      walkwayGraph[startNodeId]!.position,
+      goal,
+    );
+
+    while (openSet.isNotEmpty) {
+      // Pick node in openSet with the lowest fScore
+      openSet.sort((a, b) => fScore[a]!.compareTo(fScore[b]!));
+      final current = openSet.removeAt(0);
+
+      // Goal reached
+      if (current == goalNodeId) {
+        final List<LatLng> path = [goal];
+        String curr = current;
+        while (cameFrom.containsKey(curr)) {
+          path.insert(0, walkwayGraph[curr]!.position);
+          curr = cameFrom[curr]!;
+        }
+        path.insert(0, walkwayGraph[startNodeId]!.position);
+        path.insert(0, start);
+        return path;
+      }
+
+      final currentNode = walkwayGraph[current];
+      if (currentNode == null) continue;
+
+      for (final neighborId in currentNode.neighbors) {
+        final neighborNode = walkwayGraph[neighborId];
+        if (neighborNode == null) continue;
+
+        final tentativeG = gScore[current]! +
+            _dist.as(
+              LengthUnit.Meter,
+              currentNode.position,
+              neighborNode.position,
+            );
+
+        if (tentativeG < (gScore[neighborId] ?? double.infinity)) {
+          cameFrom[neighborId] = current;
+          gScore[neighborId] = tentativeG;
+          fScore[neighborId] = tentativeG +
+              _dist.as(
+                LengthUnit.Meter,
+                neighborNode.position,
+                goal,
+              );
+
+          if (!openSet.contains(neighborId)) {
+            openSet.add(neighborId);
+          }
+        }
+      }
+    }
+
+    // Direct fallback if graph nodes don't have a contiguous link
+    return [start, goal];
+  }
+
+  static String _findClosestWaypoint(LatLng target) {
+    String closestId = walkwayGraph.keys.first;
+    double minMeters = double.infinity;
+
+    walkwayGraph.forEach((id, wp) {
+      final d = _dist.as(LengthUnit.Meter, target, wp.position);
+      if (d < minMeters) {
+        minMeters = d;
+        closestId = id;
+      }
+    });
+
+    return closestId;
+  }
+
+  static double _calculatePathDistance(List<LatLng> points) {
+    double total = 0.0;
+    for (int i = 0; i < points.length - 1; i++) {
+      total += _dist.as(LengthUnit.Meter, points[i], points[i + 1]);
+    }
+    return total;
+  }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+class _FauMapScreenState extends State<FauMapScreen> {
+  final MapController _mapController = MapController();
+  StreamSubscription<Position>? _positionStreamSub;
+  LatLng? _currentUserLocation;
+  bool _isLocating = false;
+  String _gpsStatus = 'Searching for GPS...';
+
+  // --- DEVELOPER / CURSOR GPS STATE ---
+  bool _developerMode = false;
+  LatLng? _cursorLocation;
+
+  FauBuilding? _selectedBuilding;
+  PathResult? _currentRoute; // Holds the A* result
+
+  // Strict campus boundaries covering Glades Rd up to Spanish River Blvd
+  static final LatLngBounds _fauBounds = LatLngBounds(
+    const LatLng(26.3630, -80.1170),
+    const LatLng(26.3860, -80.0890),
+  );
+
+  static const LatLng _fauCenter = LatLng(26.3745, -80.1030);
+
+
+
+  // Parking Lots
+
+  static final Map<String, Map<String, dynamic>> _lots = {
+    'fau_lot_12': {
+      'name': 'Lot 12',
+      'position': const LatLng(26.373262, -80.106806),
+      'status': '10/80',
+      'color': const Color.fromARGB(255, 48, 248, 22),
+    },
+    'fau_lot_14': {
+      'name': 'Lot 14',
+      'position': const LatLng(26.373005, -80.099683),
+      'status': '65/96',
+      'color': const Color(0xFFF5A623),
+    },
+      'fau_lot_7': {
+      'name': 'Lot 7',
+      'position': const LatLng(26.373999, -80.105842),
+      'status': '65/96',
+      'color': const Color(0xFFF5A623),
+    },
+       'fau_lot_6': {
+      'name': 'Lot 6',
+      'position': const LatLng(26.374013, -80.104280),
+      'status': '65/96',
+      'color': const Color(0xFFF5A623),
+    },
+    
+  };
+
+  static const List<FauBuilding> _campusBuildings = [
+    FauBuilding(
+      id: 'ed47',
+      code: 'ED-47',
+      name: 'College of Education (ED-47)',
+      position: LatLng(26.373358, -80.105828),
+      recommendedLotId: 'N/A', // Determined dynamically by A*
+    ),
+    FauBuilding(
+      id: 'bc71',
+      code: 'BC-71',
+      name: 'Charles E. Schmidt Biomedical Science Center (BC-71)',
+      position: LatLng(26.373263, -80.100446),
+      recommendedLotId: 'N/A', // Determined dynamically by A*
+    ),
+     FauBuilding(
+      id: 'cm22',
+      code: 'CM-22',
+      name: 'Computer Center (CM-22)',
+      position: LatLng(26.372528, -80.104044),
+      recommendedLotId: 'N/A', // Determined dynamically by A*
+    ),
+  ];
+
+  /// Runs the A* calculation when a building is tapped or selected
+  void _onBuildingSelected(FauBuilding building) {
+    final route = CampusPathfinder.findBestAvailableRoute(
+      buildingPos: building.position,
+      lots: _lots,
+    );
+
+    setState(() {
+      _selectedBuilding = building;
+      _currentRoute = route;
+    });
+
+    _mapController.move(building.position, 16.8);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _startLiveLocationTracking();
+  }
+
+  @override
+  void dispose() {
+    _positionStreamSub?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _startLiveLocationTracking() async {
+    setState(() {
+      _isLocating = true;
+      _gpsStatus = 'Requesting GPS permissions...';
+    });
+
+    try {
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        setState(() {
+          _isLocating = false;
+          _gpsStatus = 'Location services disabled.';
+        });
+        return;
+      }
+
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          setState(() {
+            _isLocating = false;
+            _gpsStatus = 'GPS permission denied.';
+          });
+          return;
+        }
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        setState(() {
+          _isLocating = false;
+          _gpsStatus = 'GPS permanently denied.';
+        });
+        return;
+      }
+
+      final initialPos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+      );
+
+      if (mounted) {
+        setState(() {
+          _currentUserLocation = LatLng(initialPos.latitude, initialPos.longitude);
+          _isLocating = false;
+          _gpsStatus = 'Live GPS: ${initialPos.latitude.toStringAsFixed(4)}, ${initialPos.longitude.toStringAsFixed(4)}';
+        });
+      }
+
+      _positionStreamSub = Geolocator.getPositionStream(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.bestForNavigation,
+          distanceFilter: 2,
+        ),
+      ).listen((Position position) {
+        if (!mounted) return;
+        setState(() {
+          _currentUserLocation = LatLng(position.latitude, position.longitude);
+          _isLocating = false;
+          _gpsStatus = 'Live GPS: ${position.latitude.toStringAsFixed(4)}, ${position.longitude.toStringAsFixed(4)}';
+        });
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLocating = false;
+          _gpsStatus = 'Error reading GPS: $e';
+        });
+      }
+    }
+  }
+
+  void _showBuildingSelector() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF171714),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Select Destination Building',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white70),
+                    onPressed: () => Navigator.pop(ctx),
+                  ),
+                ],
+              ),
+              const Divider(color: Colors.white24),
+              Expanded(
+                child: ListView.builder(
+                  itemCount: _campusBuildings.length,
+                  itemBuilder: (context, index) {
+                    final bldg = _campusBuildings[index];
+
+                    // 1. Run A* to find best available lot for this building
+                    final bestRoute = CampusPathfinder.findBestAvailableRoute(
+                      buildingPos: bldg.position,
+                      lots: _lots,
+                    );
+
+                    final lot = bestRoute != null ? _lots[bestRoute.lotId] : null;
+
+                    return ListTile(
+                      contentPadding: const EdgeInsets.symmetric(vertical: 4),
+                      leading: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.white10,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          bldg.code,
+                          style: const TextStyle(
+                            color: Color(0xFFC6F24A),
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                      title: Text(
+                        bldg.name,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      subtitle: Text(
+                        lot != null
+                            ? 'Best Lot: ${lot['name']} (${lot['status']} open • ${bestRoute!.totalDistanceMeters.round()}m)'
+                            : 'All nearby lots full',
+                        style: const TextStyle(color: Colors.white60, fontSize: 12),
+                      ),
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        _onBuildingSelected(bldg);
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final recommendedLot = _selectedBuilding != null
+        ? _lots[_selectedBuilding!.recommendedLotId]
+        : null;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'FAU Campus Map',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            Text(
+              _developerMode
+                  ? '🛠 Developer Mode Active'
+                  : 'Boca Raton Main Campus',
+              style: TextStyle(
+                fontSize: 12,
+                color: _developerMode
+                    ? Colors.cyanAccent
+                    : theme.colorScheme.onSurfaceVariant,
+                fontWeight: _developerMode ? FontWeight.bold : FontWeight.normal,
+              ),
+            ),
+          ],
+        ),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new, size: 20),
+          onPressed: () => Navigator.pop(context),
+        ),
+        actions: [
+          // Developer Mode Toggle Button
+          IconButton(
+            icon: Icon(
+              _developerMode ? Icons.developer_mode : Icons.developer_mode_outlined,
+              color: _developerMode ? Colors.cyanAccent : theme.colorScheme.onSurfaceVariant,
+            ),
+            tooltip: _developerMode ? 'Disable Developer Mode' : 'Enable Developer Mode',
+            onPressed: () {
+              setState(() {
+                _developerMode = !_developerMode;
+                if (!_developerMode) {
+                  _cursorLocation = null;
+                }
+              });
+            },
+          ),
+          IconButton(
+            icon: _isLocating
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Icon(Icons.my_location),
+            tooltip: 'My Location',
+            onPressed: () {
+              if (_currentUserLocation != null) {
+                _mapController.move(_currentUserLocation!, 17.5);
+              }
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.center_focus_strong),
+            tooltip: 'Reset Campus View',
+            onPressed: () {
+              setState(() => _selectedBuilding = null);
+              _mapController.move(_fauCenter, 15.3);
+            },
+          ),
+        ],
+      ),
+      body: Stack(
+        children: [
+          // MouseRegion tracks cursor movement across map surface
+          MouseRegion(
+            onHover: (PointerEvent event) {
+              if (_developerMode) {
+                try {
+                  // flutter_map 8.x uses math.Point with pointToLatLng
+                  final latLng = _mapController.camera.offsetToCrs(event.localPosition);
+                  setState(() {
+                    _cursorLocation = latLng;
+                  });
+                } catch (_) {}
+              }
+            },
+            onExit: (_) {
+              if (_developerMode) {
+                setState(() => _cursorLocation = null);
+              }
+            },
+
+            
+            child: FlutterMap(
+              mapController: _mapController,
+              options: MapOptions(
+                initialCenter: _fauCenter,
+                initialZoom: 15.3,
+                minZoom: 15.0,
+                maxZoom: 19.5,
+                cameraConstraint: CameraConstraint.containCenter(bounds: _fauBounds),
+                interactionOptions: const InteractionOptions(
+                  flags: InteractiveFlag.pinchZoom |
+                      InteractiveFlag.drag |
+                      InteractiveFlag.doubleTapZoom |
+                      InteractiveFlag.scrollWheelZoom,
+                ),
+              ),
+              children: [
+                TileLayer(
+                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                  userAgentPackageName: 'com.smartcurb.app',
+                  maxNativeZoom: 19,
+                  maxZoom: 20,
+                ),
+
+                // Dashed polyline to destination
+                if (_selectedBuilding != null && recommendedLot != null)
+                  PolylineLayer(
+                    polylines: [
+                      Polyline(
+                        points: [
+                          _selectedBuilding!.position,
+                          recommendedLot['position'] as LatLng,
+                        ],
+                        strokeWidth: 3.5,
+                        color: const Color(0xFFC6F24A),
+                        pattern: StrokePattern.dashed(segments: [8, 6]),
+                      ),
+                    ],
+                  ),
+
+                MarkerLayer(
+                  markers: [
+                    // 1. Live Device GPS Puck
+                    if (_currentUserLocation != null)
+                      Marker(
+                        point: _currentUserLocation!,
+                        alignment: Alignment.center,
+                        width: 34,
+                        height: 34,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFC6F24A),
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.black, width: 3),
+                          ),
+                          child: const Icon(
+                            Icons.navigation,
+                            size: 14,
+                            color: Colors.black,
+                          ),
+                        ),
+                      ),
+
+                    // 2. Interactive Campus Building Markers
+                    ..._campusBuildings.map((bldg) {
+                      final isSelected = _selectedBuilding?.id == bldg.id;
+
+                      return Marker(
+                        point: bldg.position,
+                        alignment: Alignment.center,
+                        width: isSelected ? 120 : 80,
+                        height: isSelected ? 48 : 30,
+                        child: GestureDetector(
+                          onTap: () {
+                            setState(() => _selectedBuilding = bldg);
+                            _mapController.move(bldg.position, 16.8);
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: isSelected ? Colors.cyanAccent : const Color(0xDD1F242A),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(
+                                color: isSelected ? Colors.white : Colors.cyanAccent.withOpacity(0.7),
+                                width: isSelected ? 2 : 1,
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: (isSelected ? Colors.cyanAccent : Colors.black).withOpacity(0.4),
+                                  blurRadius: 4,
+                                ),
+                              ],
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  Icons.business,
+                                  size: isSelected ? 14 : 11,
+                                  color: isSelected ? Colors.black : Colors.cyanAccent,
+                                ),
+                                const SizedBox(width: 4),
+                                Flexible(
+                                  child: Text(
+                                    bldg.code,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: isSelected ? Colors.black : Colors.white,
+                                      fontSize: isSelected ? 11 : 9,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      );
+                    }),
+
+                    // 3. Parking Lots
+                    ..._lots.entries.map((entry) {
+                      final isBest = _selectedBuilding != null &&
+                          _selectedBuilding!.recommendedLotId == entry.key;
+
+                      return _buildLotMarker(
+                        point: entry.value['position'] as LatLng,
+                        name: entry.value['name'] as String,
+                        status: entry.value['status'] as String,
+                        badgeColor: isBest
+                            ? const Color(0xFFC6F24A)
+                            : entry.value['color'] as Color,
+                        isHighlighted: isBest,
+                      );
+                    }),
+                  ],
+                ),
+              ],
+            ),
+          ),
+
+          // Top Floating Destination Selector Bar
+          Positioned(
+            top: 16,
+            left: 16,
+            right: 16,
+            child: GestureDetector(
+              onTap: _showBuildingSelector,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF171714),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: _selectedBuilding != null
+                        ? const Color(0xFFC6F24A)
+                        : Colors.white24,
+                    width: 1.5,
+                  ),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Colors.black54,
+                      blurRadius: 8,
+                      offset: Offset(0, 3),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.search,
+                      color: _selectedBuilding != null
+                          ? const Color(0xFFC6F24A)
+                          : Colors.white70,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        _selectedBuilding != null
+                            ? 'Destination: ${_selectedBuilding!.name}'
+                            : 'Choose a building destination...',
+                        style: TextStyle(
+                          color: _selectedBuilding != null
+                              ? Colors.white
+                              : Colors.white60,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 14,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (_selectedBuilding != null)
+                      GestureDetector(
+                        onTap: () => setState(() => _selectedBuilding = null),
+                        child: const Icon(
+                          Icons.cancel,
+                          color: Colors.white54,
+                          size: 20,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          // --- DEVELOPER MODE CURSOR GPS BANNER (Disappears when dev mode disabled) ---
+          if (_developerMode)
+            Positioned(
+              top: 80,
+              left: 20,
+              right: 20,
+              child: Center(
+                child: GestureDetector(
+                  onTap: () {
+                    if (_cursorLocation != null) {
+                      final str =
+                          'LatLng(${_cursorLocation!.latitude.toStringAsFixed(6)}, ${_cursorLocation!.longitude.toStringAsFixed(6)})';
+                      Clipboard.setData(ClipboardData(text: str));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Copied to clipboard: $str'),
+                          duration: const Duration(seconds: 2),
+                        ),
+                      );
+                    }
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xEE0B1A24),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: Colors.cyanAccent, width: 1.5),
+                      boxShadow: const [
+                        BoxShadow(color: Colors.black87, blurRadius: 8),
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.gps_fixed, color: Colors.cyanAccent, size: 16),
+                        const SizedBox(width: 8),
+                        Text(
+                          _cursorLocation != null
+                              ? 'Cursor GPS: Lat ${_cursorLocation!.latitude.toStringAsFixed(6)}, Lng ${_cursorLocation!.longitude.toStringAsFixed(6)} (Tap to copy)'
+                              : 'Move cursor over map to read coordinates',
+                          style: const TextStyle(
+                            color: Colors.cyanAccent,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+
+          // Bottom Guidance Card (Separated Device GPS Status)
+          Positioned(
+            bottom: 24,
+            left: 20,
+            right: 20,
+            child: Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: theme.cardColor,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: theme.dividerColor),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Colors.black54,
+                    blurRadius: 10,
+                    offset: Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    _selectedBuilding != null
+                        ? Icons.assistant_direction
+                        : Icons.my_location,
+                    color: theme.primaryColor,
+                    size: 24,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _selectedBuilding != null
+                              ? 'Best Lot: ${recommendedLot?['name']}'
+                              : 'FAU Boca Raton Main Campus',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: theme.colorScheme.onSurface,
+                          ),
+                        ),
+                        Text(
+                          _selectedBuilding != null
+                              ? 'Follow the dashed line from ${recommendedLot?['name']} to ${_selectedBuilding!.code}'
+                              : _gpsStatus,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Marker _buildLotMarker({
+    required LatLng point,
+    required String name,
+    required String status,
+    required Color badgeColor,
+    bool isHighlighted = false,
+  }) {
+    return Marker(
+      point: point,
+      alignment: Alignment.center,
+      width: isHighlighted ? 104 : 90,
+      height: isHighlighted ? 54 : 48,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: const Color(0xFF0F0F0D),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: badgeColor,
+            width: isHighlighted ? 3 : 2,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: badgeColor.withOpacity(isHighlighted ? 0.6 : 0.25),
+              blurRadius: isHighlighted ? 12 : 6,
+              spreadRadius: isHighlighted ? 2 : 0,
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              name,
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: isHighlighted ? FontWeight.w900 : FontWeight.bold,
+                fontSize: 11,
+              ),
+            ),
+            Text(
+              status,
+              style: TextStyle(
+                color: badgeColor,
+                fontWeight: FontWeight.w800,
+                fontSize: 11,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ==========================================
+// TAB 2: VEHICLES
 // ==========================================
 
 class _VehicleTab extends StatelessWidget {
@@ -497,7 +1870,11 @@ class _VehicleTab extends StatelessWidget {
     );
   }
 
-  void _showVehicleDetails(BuildContext context, Map<String, dynamic> data, String key) {
+  void _showVehicleDetails(
+    BuildContext context,
+    Map<String, dynamic> data,
+    String key,
+  ) {
     final theme = Theme.of(context);
     showDialog(
       context: context,
@@ -520,10 +1897,22 @@ class _VehicleTab extends StatelessWidget {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            DetailInfoRow(label: 'Plate Number', value: data['plate']?.toString() ?? 'N/A'),
-            DetailInfoRow(label: 'Manufacturer', value: data['manufacturer']?.toString() ?? 'N/A'),
-            DetailInfoRow(label: 'Year', value: data['year']?.toString() ?? 'N/A'),
-            DetailInfoRow(label: 'Color', value: data['color']?.toString() ?? 'N/A'),
+            DetailInfoRow(
+              label: 'Plate Number',
+              value: data['plate']?.toString() ?? 'N/A',
+            ),
+            DetailInfoRow(
+              label: 'Manufacturer',
+              value: data['manufacturer']?.toString() ?? 'N/A',
+            ),
+            DetailInfoRow(
+              label: 'Year',
+              value: data['year']?.toString() ?? 'N/A',
+            ),
+            DetailInfoRow(
+              label: 'Color',
+              value: data['color']?.toString() ?? 'N/A',
+            ),
           ],
         ),
         actions: [
@@ -532,17 +1921,22 @@ class _VehicleTab extends StatelessWidget {
               Navigator.of(ctx).pop();
               final uid = FirebaseAuth.instance.currentUser?.uid;
               if (uid != null) {
-                // Delete from Realtime Database under drivers
                 FirebaseDatabase.instance
                     .ref('drivers/$uid/vehicles/$key')
                     .remove();
               }
             },
-            child: const Text('Delete Vehicle', style: TextStyle(color: Colors.redAccent)),
+            child: const Text(
+              'Delete Vehicle',
+              style: TextStyle(color: Colors.redAccent),
+            ),
           ),
           ElevatedButton(
             onPressed: () => Navigator.of(ctx).pop(),
-            style: ElevatedButton.styleFrom(backgroundColor: theme.primaryColor, foregroundColor: Colors.black),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: theme.primaryColor,
+              foregroundColor: Colors.black,
+            ),
             child: const Text('Close'),
           ),
         ],
@@ -558,11 +1952,15 @@ class _VehicleTab extends StatelessWidget {
     final theme = Theme.of(context);
 
     return StreamBuilder<DatabaseEvent>(
-      // Listen to Realtime Database at drivers/{uid}/vehicles
       stream: FirebaseDatabase.instance.ref('drivers/$uid/vehicles').onValue,
       builder: (context, snapshot) {
         if (snapshot.hasError) {
-          return Center(child: Text('Error: ${snapshot.error}', style: const TextStyle(color: Colors.redAccent)));
+          return Center(
+            child: Text(
+              'Error: ${snapshot.error}',
+              style: const TextStyle(color: Colors.redAccent),
+            ),
+          );
         }
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
@@ -592,7 +1990,10 @@ class _VehicleTab extends StatelessWidget {
                   borderRadius: BorderRadius.circular(12),
                   onTap: () => _showVehicleDetails(context, data, key),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 24,
+                      vertical: 20,
+                    ),
                     decoration: BoxDecoration(
                       color: theme.cardColor,
                       borderRadius: BorderRadius.circular(12),
@@ -603,11 +2004,19 @@ class _VehicleTab extends StatelessWidget {
                       children: [
                         Text(
                           data['model']?.toString() ?? 'Unknown Model',
-                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: theme.colorScheme.onSurface),
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: theme.colorScheme.onSurface,
+                          ),
                         ),
                         Text(
                           data['plate']?.toString() ?? 'No Plate',
-                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: theme.primaryColor),
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: theme.primaryColor,
+                          ),
                         ),
                       ],
                     ),
@@ -621,11 +2030,17 @@ class _VehicleTab extends StatelessWidget {
               style: OutlinedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 side: BorderSide(color: theme.primaryColor, width: 1.5),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
               child: Text(
                 'Add more vehicle',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: theme.primaryColor),
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: theme.primaryColor,
+                ),
               ),
             ),
           ],
@@ -663,7 +2078,10 @@ class _VehicleFormDialogState extends State<_VehicleFormDialog> {
     final model = _modelCtrl.text.trim();
     final plate = _plateCtrl.text.trim();
     if (model.isEmpty || plate.isEmpty) {
-      showErrorSnackBar(context, 'Please fill out at least Model and License Plate.');
+      showErrorSnackBar(
+        context,
+        'Please fill out at least Model and License Plate.',
+      );
       return;
     }
 
@@ -671,7 +2089,6 @@ class _VehicleFormDialogState extends State<_VehicleFormDialog> {
 
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid != null) {
-      // Push new record to Realtime Database under drivers/{uid}/vehicles
       FirebaseDatabase.instance.ref('drivers/$uid/vehicles').push().set({
         'manufacturer': _manufacturerCtrl.text.trim(),
         'model': model,
@@ -698,22 +2115,57 @@ class _VehicleFormDialogState extends State<_VehicleFormDialog> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('Add New Vehicle', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: theme.colorScheme.onSurface)),
-                IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.of(context).pop()),
+                Text(
+                  'Add New Vehicle',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: theme.colorScheme.onSurface,
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
               ],
             ),
             const SizedBox(height: 16),
-            AppTextField(controller: _manufacturerCtrl, hintText: 'Manufacturer (e.g. Toyota)', icon: Icons.business),
+            AppTextField(
+              controller: _manufacturerCtrl,
+              hintText: 'Manufacturer (e.g. Toyota)',
+              icon: Icons.business,
+            ),
             const SizedBox(height: 12),
-            AppTextField(controller: _modelCtrl, hintText: 'Model (e.g. RAV 4)', icon: Icons.directions_car),
+            AppTextField(
+              controller: _modelCtrl,
+              hintText: 'Model (e.g. RAV 4)',
+              icon: Icons.directions_car,
+            ),
             const SizedBox(height: 12),
-            AppTextField(controller: _plateCtrl, hintText: 'License Plate (e.g. S108123)', icon: Icons.pin),
+            AppTextField(
+              controller: _plateCtrl,
+              hintText: 'License Plate (e.g. S108123)',
+              icon: Icons.pin,
+            ),
             const SizedBox(height: 12),
             Row(
               children: [
-                Expanded(child: AppTextField(controller: _yearCtrl, hintText: 'Year (e.g. 2024)', icon: Icons.calendar_today, keyboardType: TextInputType.number)),
+                Expanded(
+                  child: AppTextField(
+                    controller: _yearCtrl,
+                    hintText: 'Year (e.g. 2024)',
+                    icon: Icons.calendar_today,
+                    keyboardType: TextInputType.number,
+                  ),
+                ),
                 const SizedBox(width: 12),
-                Expanded(child: AppTextField(controller: _colorCtrl, hintText: 'Color (e.g. Silver)', icon: Icons.color_lens)),
+                Expanded(
+                  child: AppTextField(
+                    controller: _colorCtrl,
+                    hintText: 'Color (e.g. Silver)',
+                    icon: Icons.color_lens,
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 24),
@@ -726,7 +2178,9 @@ class _VehicleFormDialogState extends State<_VehicleFormDialog> {
                       foregroundColor: theme.colorScheme.onSurface,
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       side: BorderSide(color: theme.dividerColor),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
                     ),
                     child: const Text('Cancel'),
                   ),
@@ -739,9 +2193,14 @@ class _VehicleFormDialogState extends State<_VehicleFormDialog> {
                       backgroundColor: theme.primaryColor,
                       foregroundColor: Colors.black,
                       padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
                     ),
-                    child: const Text('Confirm', style: TextStyle(fontWeight: FontWeight.bold)),
+                    child: const Text(
+                      'Confirm',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
                   ),
                 ),
               ],
@@ -754,7 +2213,7 @@ class _VehicleFormDialogState extends State<_VehicleFormDialog> {
 }
 
 // ==========================================
-// TAB 3: PROFILE (Realtime Database -> drivers)
+// TAB 3: PROFILE
 // ==========================================
 
 class _ProfileTab extends StatelessWidget {
@@ -776,8 +2235,9 @@ class _ProfileTab extends StatelessWidget {
     final theme = Theme.of(context);
 
     return StreamBuilder<DatabaseEvent>(
-      // Listen to Realtime Database at drivers/{uid}/profile
-      stream: FirebaseDatabase.instance.ref('drivers/${user.uid}/profile').onValue,
+      stream: FirebaseDatabase.instance
+          .ref('drivers/${user.uid}/profile')
+          .onValue,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
@@ -831,7 +2291,11 @@ class _ProfileTab extends StatelessWidget {
                           CircleAvatar(
                             radius: 34,
                             backgroundColor: theme.scaffoldBackgroundColor,
-                            child: Icon(Icons.person, size: 38, color: theme.primaryColor),
+                            child: Icon(
+                              Icons.person,
+                              size: 38,
+                              color: theme.primaryColor,
+                            ),
                           ),
                           const SizedBox(width: 16),
                           Expanded(
@@ -840,10 +2304,20 @@ class _ProfileTab extends StatelessWidget {
                               children: [
                                 Text(
                                   fullName,
-                                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: theme.colorScheme.onSurface),
+                                  style: TextStyle(
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.bold,
+                                    color: theme.colorScheme.onSurface,
+                                  ),
                                 ),
                                 const SizedBox(height: 4),
-                                Text(user.email ?? '', style: TextStyle(fontSize: 14, color: theme.colorScheme.onSurfaceVariant)),
+                                Text(
+                                  user.email ?? '',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    color: theme.colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
                               ],
                             ),
                           ),
@@ -860,9 +2334,15 @@ class _ProfileTab extends StatelessWidget {
                       ),
                       child: Column(
                         children: [
-                          DetailInfoRow(label: 'Phone Number', value: data['phone']?.toString() ?? 'N/A'),
+                          DetailInfoRow(
+                            label: 'Phone Number',
+                            value: data['phone']?.toString() ?? 'N/A',
+                          ),
                           const Divider(height: 20),
-                          DetailInfoRow(label: 'Gender', value: data['gender']?.toString() ?? 'N/A'),
+                          DetailInfoRow(
+                            label: 'Gender',
+                            value: data['gender']?.toString() ?? 'N/A',
+                          ),
                           const Divider(height: 20),
                           DetailInfoRow(label: 'Address', value: fullAddress),
                         ],
@@ -872,7 +2352,10 @@ class _ProfileTab extends StatelessWidget {
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24.0,
+                  vertical: 16.0,
+                ),
                 child: PrimaryButton(
                   title: 'Edit Information',
                   icon: Icons.edit_outlined,
@@ -915,13 +2398,15 @@ class _ContactInfoDialogState extends State<_ContactInfoDialog> {
     _phoneCtrl = TextEditingController(text: d?['phone']?.toString() ?? '');
     _firstCtrl = TextEditingController(text: d?['firstName']?.toString() ?? '');
     _lastCtrl = TextEditingController(text: d?['lastName']?.toString() ?? '');
-    _middleCtrl = TextEditingController(text: d?['middleName']?.toString() ?? '');
+    _middleCtrl =
+        TextEditingController(text: d?['middleName']?.toString() ?? '');
     _addr1Ctrl = TextEditingController(text: d?['address1']?.toString() ?? '');
     _addr2Ctrl = TextEditingController(text: d?['address2']?.toString() ?? '');
     _cityCtrl = TextEditingController(text: d?['city']?.toString() ?? '');
     _stateCtrl = TextEditingController(text: d?['state']?.toString() ?? '');
     _zipCtrl = TextEditingController(text: d?['zipCode']?.toString() ?? '');
-    _countryCtrl = TextEditingController(text: d?['country']?.toString() ?? '');
+    _countryCtrl =
+        TextEditingController(text: d?['country']?.toString() ?? '');
     _gender = d?['gender']?.toString();
   }
 
@@ -958,7 +2443,6 @@ class _ContactInfoDialogState extends State<_ContactInfoDialog> {
 
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid != null) {
-      // Save profile to Realtime Database under drivers/{uid}/profile
       FirebaseDatabase.instance.ref('drivers/$uid/profile').update({
         'firstName': _firstCtrl.text.trim(),
         'lastName': _lastCtrl.text.trim(),
@@ -994,27 +2478,60 @@ class _ContactInfoDialogState extends State<_ContactInfoDialog> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    widget.existingData == null ? 'Add Contact Info' : 'Edit Contact Info',
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: theme.colorScheme.onSurface),
+                    widget.existingData == null
+                        ? 'Add Contact Info'
+                        : 'Edit Contact Info',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: theme.colorScheme.onSurface,
+                    ),
                   ),
-                  IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.of(context).pop()),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
                 ],
               ),
               const SizedBox(height: 16),
               Row(
                 children: [
-                  Expanded(child: AppTextField(controller: _firstCtrl, hintText: 'First Name *', icon: Icons.person_outline)),
+                  Expanded(
+                    child: AppTextField(
+                      controller: _firstCtrl,
+                      hintText: 'First Name *',
+                      icon: Icons.person_outline,
+                    ),
+                  ),
                   const SizedBox(width: 10),
-                  Expanded(child: AppTextField(controller: _lastCtrl, hintText: 'Last Name *', icon: Icons.person_outline)),
+                  Expanded(
+                    child: AppTextField(
+                      controller: _lastCtrl,
+                      hintText: 'Last Name *',
+                      icon: Icons.person_outline,
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 12),
-              AppTextField(controller: _middleCtrl, hintText: 'Middle Name (Optional)', icon: Icons.badge_outlined),
+              AppTextField(
+                controller: _middleCtrl,
+                hintText: 'Middle Name (Optional)',
+                icon: Icons.badge_outlined,
+              ),
               const SizedBox(height: 12),
-              AppTextField(controller: _phoneCtrl, hintText: 'Phone Number *', icon: Icons.phone_outlined, keyboardType: TextInputType.phone),
+              AppTextField(
+                controller: _phoneCtrl,
+                hintText: 'Phone Number *',
+                icon: Icons.phone_outlined,
+                keyboardType: TextInputType.phone,
+              ),
               const SizedBox(height: 12),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 4,
+                ),
                 decoration: BoxDecoration(
                   color: theme.cardColor,
                   borderRadius: BorderRadius.circular(12),
@@ -1028,7 +2545,12 @@ class _ContactInfoDialogState extends State<_ContactInfoDialog> {
                       children: [
                         Icon(Icons.transgender, color: theme.primaryColor),
                         const SizedBox(width: 12),
-                        Text('Gender *', style: TextStyle(color: theme.colorScheme.onSurfaceVariant)),
+                        Text(
+                          'Gender *',
+                          style: TextStyle(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
                       ],
                     ),
                     dropdownColor: theme.cardColor,
@@ -1043,23 +2565,56 @@ class _ContactInfoDialogState extends State<_ContactInfoDialog> {
                 ),
               ),
               const SizedBox(height: 12),
-              AppTextField(controller: _addr1Ctrl, hintText: 'Address Line 1 *', icon: Icons.home_outlined),
+              AppTextField(
+                controller: _addr1Ctrl,
+                hintText: 'Address Line 1 *',
+                icon: Icons.home_outlined,
+              ),
               const SizedBox(height: 12),
-              AppTextField(controller: _addr2Ctrl, hintText: 'Address Line 2 (Optional)', icon: Icons.location_city_outlined),
+              AppTextField(
+                controller: _addr2Ctrl,
+                hintText: 'Address Line 2 (Optional)',
+                icon: Icons.location_city_outlined,
+              ),
               const SizedBox(height: 12),
               Row(
                 children: [
-                  Expanded(child: AppTextField(controller: _cityCtrl, hintText: 'City *', icon: Icons.location_on_outlined)),
+                  Expanded(
+                    child: AppTextField(
+                      controller: _cityCtrl,
+                      hintText: 'City *',
+                      icon: Icons.location_on_outlined,
+                    ),
+                  ),
                   const SizedBox(width: 10),
-                  Expanded(child: AppTextField(controller: _stateCtrl, hintText: 'State *', icon: Icons.map_outlined)),
+                  Expanded(
+                    child: AppTextField(
+                      controller: _stateCtrl,
+                      hintText: 'State *',
+                      icon: Icons.map_outlined,
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 12),
               Row(
                 children: [
-                  Expanded(child: AppTextField(controller: _zipCtrl, hintText: 'Zip Code *', icon: Icons.markunread_mailbox_outlined, keyboardType: TextInputType.number)),
+                  Expanded(
+                    child: AppTextField(
+                      controller: _zipCtrl,
+                      hintText: 'Zip Code *',
+                      icon: Icons.markunread_mailbox_outlined,
+                      keyboardType: TextInputType.number,
+                    ),
+                  ),
                   const SizedBox(width: 10),
-                  Expanded(child: AppTextField(controller: _countryCtrl, hintText: 'Country *', icon: Icons.public_outlined)),
+                  Expanded(
+                    child: AppTextField(
+                      controller: _countryCtrl,
+                      hintText: 'Country *',
+                      icon: Icons.public_outlined,
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 24),
@@ -1072,7 +2627,9 @@ class _ContactInfoDialogState extends State<_ContactInfoDialog> {
                         foregroundColor: theme.colorScheme.onSurface,
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         side: BorderSide(color: theme.dividerColor),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
                       ),
                       child: const Text('Cancel'),
                     ),
@@ -1085,9 +2642,14 @@ class _ContactInfoDialogState extends State<_ContactInfoDialog> {
                         backgroundColor: theme.primaryColor,
                         foregroundColor: Colors.black,
                         padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
                       ),
-                      child: const Text('Confirm', style: TextStyle(fontWeight: FontWeight.bold)),
+                      child: const Text(
+                        'Confirm',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
                     ),
                   ),
                 ],
@@ -1136,9 +2698,15 @@ class AppTextField extends StatelessWidget {
         style: TextStyle(color: theme.colorScheme.onSurface),
         decoration: InputDecoration(
           border: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 16,
+          ),
           hintText: hintText,
-          hintStyle: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 14),
+          hintStyle: TextStyle(
+            color: theme.colorScheme.onSurfaceVariant,
+            fontSize: 14,
+          ),
           prefixIcon: Icon(icon, color: theme.primaryColor, size: 20),
         ),
       ),
@@ -1178,15 +2746,25 @@ class PrimaryButton extends StatelessWidget {
             ? const SizedBox(
                 height: 20,
                 width: 20,
-                child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF12110F)),
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Color(0xFF12110F),
+                ),
               )
             : Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  if (icon != null) ...[Icon(icon, size: 20), const SizedBox(width: 8)],
+                  if (icon != null) ...[
+                    Icon(icon, size: 20),
+                    const SizedBox(width: 8),
+                  ],
                   Text(
                     title,
-                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, letterSpacing: 0.5),
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.5,
+                    ),
                   ),
                 ],
               ),
@@ -1209,13 +2787,23 @@ class DetailInfoRow extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 14)),
+          Text(
+            label,
+            style: TextStyle(
+              color: theme.colorScheme.onSurfaceVariant,
+              fontSize: 14,
+            ),
+          ),
           const SizedBox(width: 8),
           Flexible(
             child: Text(
               value,
               textAlign: TextAlign.right,
-              style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: FontWeight.bold, fontSize: 14),
+              style: TextStyle(
+                color: theme.colorScheme.onSurface,
+                fontWeight: FontWeight.bold,
+                fontSize: 14,
+              ),
             ),
           ),
         ],
@@ -1267,11 +2855,19 @@ class _AnimatedAddCardState extends State<AnimatedAddCard> {
               color: theme.cardColor,
               borderRadius: BorderRadius.circular(16),
               border: Border.all(
-                color: _isPressed ? theme.primaryColor.withOpacity(0.6) : theme.dividerColor,
+                color: _isPressed
+                    ? theme.primaryColor.withOpacity(0.6)
+                    : theme.dividerColor,
                 width: 2,
               ),
               boxShadow: _isPressed
-                  ? [BoxShadow(color: theme.primaryColor.withOpacity(0.15), blurRadius: 20, spreadRadius: 2)]
+                  ? [
+                      BoxShadow(
+                        color: theme.primaryColor.withOpacity(0.15),
+                        blurRadius: 20,
+                        spreadRadius: 2,
+                      ),
+                    ]
                   : null,
             ),
             child: Column(
@@ -1285,7 +2881,9 @@ class _AnimatedAddCardState extends State<AnimatedAddCard> {
                     shape: BoxShape.circle,
                     boxShadow: [
                       BoxShadow(
-                        color: _isPressed ? theme.primaryColor.withOpacity(0.4) : theme.primaryColor.withOpacity(0.1),
+                        color: _isPressed
+                            ? theme.primaryColor.withOpacity(0.4)
+                            : theme.primaryColor.withOpacity(0.1),
                         blurRadius: _isPressed ? 25 : 15,
                         spreadRadius: _isPressed ? 8 : 5,
                       ),
@@ -1294,9 +2892,22 @@ class _AnimatedAddCardState extends State<AnimatedAddCard> {
                   child: Icon(Icons.add, size: 40, color: theme.primaryColor),
                 ),
                 const SizedBox(height: 20),
-                Text(widget.title, style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 18, fontWeight: FontWeight.bold)),
+                Text(
+                  widget.title,
+                  style: TextStyle(
+                    color: theme.colorScheme.onSurface,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
                 const SizedBox(height: 8),
-                Text(widget.subtitle, style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 14)),
+                Text(
+                  widget.subtitle,
+                  style: TextStyle(
+                    color: theme.colorScheme.onSurfaceVariant,
+                    fontSize: 14,
+                  ),
+                ),
               ],
             ),
           ),
@@ -1323,17 +2934,27 @@ class UserSettingsPage extends StatelessWidget {
         children: [
           ListTile(
             leading: Icon(Icons.dark_mode, color: theme.primaryColor),
-            title: Text('Dark Mode', style: TextStyle(color: theme.colorScheme.onSurface)),
+            title: Text(
+              'Dark Mode',
+              style: TextStyle(color: theme.colorScheme.onSurface),
+            ),
             trailing: Switch(
               value: themeNotifier.value == ThemeMode.dark,
-              onChanged: (val) => themeNotifier.value = val ? ThemeMode.dark : ThemeMode.light,
+              onChanged: (val) =>
+                  themeNotifier.value = val ? ThemeMode.dark : ThemeMode.light,
               activeColor: theme.scaffoldBackgroundColor,
               activeTrackColor: theme.primaryColor,
             ),
           ),
           ListTile(
-            leading: Icon(Icons.notifications_active, color: theme.primaryColor),
-            title: Text('Notifications', style: TextStyle(color: theme.colorScheme.onSurface)),
+            leading: Icon(
+              Icons.notifications_active,
+              color: theme.primaryColor,
+            ),
+            title: Text(
+              'Notifications',
+              style: TextStyle(color: theme.colorScheme.onSurface),
+            ),
             trailing: Switch(
               value: true,
               onChanged: (_) {},
@@ -1343,8 +2964,15 @@ class UserSettingsPage extends StatelessWidget {
           ),
           ListTile(
             leading: Icon(Icons.mail_outline, color: theme.primaryColor),
-            title: Text('Contact Us', style: TextStyle(color: theme.colorScheme.onSurface)),
-            trailing: Icon(Icons.arrow_forward_ios, color: theme.colorScheme.onSurfaceVariant, size: 16),
+            title: Text(
+              'Contact Us',
+              style: TextStyle(color: theme.colorScheme.onSurface),
+            ),
+            trailing: Icon(
+              Icons.arrow_forward_ios,
+              color: theme.colorScheme.onSurfaceVariant,
+              size: 16,
+            ),
             onTap: () {},
           ),
         ],
@@ -1370,14 +2998,22 @@ class UserAboutPage extends StatelessWidget {
             const SizedBox(height: 20),
             Text(
               'Smart Curb is an intelligent IoT parking sensing application designed to monitor space availability and manage vehicles for individual users.',
-              style: TextStyle(color: theme.colorScheme.onSurfaceVariant, height: 1.5, fontSize: 16),
+              style: TextStyle(
+                color: theme.colorScheme.onSurfaceVariant,
+                height: 1.5,
+                fontSize: 16,
+              ),
             ),
             const SizedBox(height: 30),
             Divider(color: theme.dividerColor),
             const SizedBox(height: 10),
             Text(
               'Version: 1.0.0 (Beta)',
-              style: TextStyle(color: theme.primaryColor, fontWeight: FontWeight.bold, fontSize: 14),
+              style: TextStyle(
+                color: theme.primaryColor,
+                fontWeight: FontWeight.bold,
+                fontSize: 14,
+              ),
             ),
           ],
         ),
@@ -1386,11 +3022,17 @@ class UserAboutPage extends StatelessWidget {
   }
 }
 
-// Global Helper
+// Global Alert Helper
 void showErrorSnackBar(BuildContext context, String message) {
   ScaffoldMessenger.of(context).showSnackBar(
     SnackBar(
-      content: Text(message, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+      content: Text(
+        message,
+        style: const TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
       backgroundColor: Colors.redAccent,
     ),
   );

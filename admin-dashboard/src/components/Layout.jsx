@@ -12,7 +12,7 @@ const navItems = [
   { label: "Curb units", to: "/units" },
   { label: "Assistant", to: "/assistant" },
   { label: "Analytics", to: "/analytics" },
-  { label: "Users & roles", to: "/users" },
+  { label: "Demo controls", to: "/demo" },
 ];
 
 function Layout() {
