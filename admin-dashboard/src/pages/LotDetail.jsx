@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { ref, onValue, update } from "firebase/database";
-import { database } from "../firebase";
+import { database, dataPath } from "../firebase";
 import { c, mono } from "../theme";
 import { useOutletContext } from "react-router-dom";
 
@@ -30,12 +30,12 @@ function LotDetail() {
   const canEdit = role === "operator" || role === "manager";
 
   useEffect(() => {
-    const stopLots = onValue(ref(database, "lots"), (snap) => {
+    const stopLots = onValue(ref(database, dataPath("lots")), (snap) => {
       const data = snap.val() || {};
       setLots(data);
       setSelectedLot((prev) => prev || Object.keys(data)[0] || null);
     });
-    const stopUnits = onValue(ref(database, "units"), (snap) => setUnits(snap.val() || {}));
+    const stopUnits = onValue(ref(database, dataPath("units")), (snap) => setUnits(snap.val() || {}));
     return () => { stopLots(); stopUnits(); };
   }, []);
 
@@ -58,7 +58,7 @@ function LotDetail() {
   const applyChanges = async () => {
     if (!selectedUnit) return;
     try {
-      await update(ref(database, `units/${selectedUnit}`), { ledColor, panelText });
+      await update(ref(database, dataPath(`units/${selectedUnit}`)), { ledColor, panelText });
       setStatus("Saved. The curb picks this up on its next sync.");
     } catch (err) {
       setStatus("Could not save: " + err.message);

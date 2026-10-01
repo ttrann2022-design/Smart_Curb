@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { ref, onValue } from "firebase/database";
-import { database } from "../firebase";
+import { database, dataPath } from "../firebase";
 import { c, mono } from "../theme";
 
 function Tile({ label, value, sub, color }) {
@@ -21,18 +21,26 @@ function Overview() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const stopLots = onValue(ref(database, "lots"), (snap) => {
+    const stopLots = onValue(ref(database, dataPath("lots")), (snap) => {
       setLots(snap.val() || {});
       setLoading(false);
     });
-    const stopUnits = onValue(ref(database, "units"), (snap) => setUnits(snap.val() || {}));
+    const stopUnits = onValue(ref(database, dataPath("units")), (snap) => setUnits(snap.val() || {}));
     return () => { stopLots(); stopUnits(); };
   }, []);
 
-  const lotList = Object.entries(lots);
-  const total = lotList.reduce((sum, [, l]) => sum + (l.totalSpots || 0), 0);
-  const open = lotList.reduce((sum, [, l]) => sum + (l.openSpots || 0), 0);
-  const occupied = total - open;
+  const unitList = Object.values(units);
+  const stats = {};
+  Object.keys(lots).forEach((id) => { stats[id] = { total: 0, open: 0 }; });
+  unitList.forEach((u) => {
+    if (!stats[u.lot]) return;
+    stats[u.lot].total += 1;
+    if (u.online && !u.occupied) stats[u.lot].open += 1;
+  });
+
+  const total = unitList.length;
+  const open = unitList.filter((u) => u.online && !u.occupied).length;
+  const occupied = unitList.filter((u) => u.online && u.occupied).length;
   const pct = (n) => (total ? Math.round((n / total) * 100) : 0);
   const alerts = Object.entries(units).filter(([, u]) => !u.online || u.battery < 20);
 
@@ -53,24 +61,25 @@ function Overview() {
             <Tile label="TOTAL SPOTS MONITORED" value={total} />
             <Tile label="AVAILABLE NOW" value={open} sub={`${pct(open)}%`} color={c.open} />
             <Tile label="OCCUPIED" value={occupied} sub={`${pct(occupied)}%`} color={c.busy} />
-            <Tile label="NEEDS ATTENTION" value={alerts.length} sub={`of ${Object.keys(units).length} units`} color={c.warn} />
+            <Tile label="NEEDS ATTENTION" value={alerts.length} sub={`of ${total} units`} color={c.warn} />
           </div>
 
           <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
             <div style={{ flex: 2, background: c.panel, border: `1px solid ${c.line}`, borderRadius: 6 }}>
               <div style={{ padding: "14px 18px", borderBottom: `1px solid ${c.line}`, fontFamily: mono, fontSize: 14, fontWeight: 600 }}>Parking lots</div>
               <div style={{ padding: "12px 18px", display: "flex", flexDirection: "column", gap: 10 }}>
-                {lotList.map(([id, lot]) => {
-                  const fill = lot.totalSpots ? Math.round(((lot.totalSpots - lot.openSpots) / lot.totalSpots) * 100) : 0;
+                {Object.entries(lots).map(([id, lot]) => {
+                  const s = stats[id] || { total: 0, open: 0 };
+                  const fill = s.total ? Math.round(((s.total - s.open) / s.total) * 100) : 0;
                   const tone = fill >= 90 ? c.busy : fill >= 70 ? c.warn : c.open;
                   return (
                     <div key={id} style={{ border: `1px solid ${c.line}`, borderRadius: 5, padding: "11px 13px" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 7 }}>
                         <span style={{ fontSize: 13.5, fontWeight: 600 }}>{lot.name}</span>
-                        <span style={{ fontSize: 12, color: c.dim }}>{lot.openSpots} of {lot.totalSpots} open</span>
+                        <span style={{ fontSize: 12, color: c.dim }}>{s.open} of {s.total} open</span>
                       </div>
                       <div style={{ height: 6, borderRadius: 3, background: c.line, overflow: "hidden" }}>
-                        <div style={{ width: `${fill}%`, height: 6, background: tone }} />
+                        <div style={{ width: `${fill}%`, height: 6, background: tone, transition: "width 0.6s ease" }} />
                       </div>
                     </div>
                   );

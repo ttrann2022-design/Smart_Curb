@@ -10,7 +10,6 @@ const navItems = [
   { label: "Overview", to: "/overview" },
   { label: "Parking lots", to: "/lots" },
   { label: "Curb units", to: "/units" },
-  { label: "Cameras", to: "/cameras" },
   { label: "Assistant", to: "/assistant" },
   { label: "Analytics", to: "/analytics" },
   { label: "Users & roles", to: "/users" },
