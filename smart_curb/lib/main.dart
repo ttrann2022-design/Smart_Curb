@@ -8,7 +8,8 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 import 'firebase_options.dart';
-
+import 'dart:convert'; // 👈 ADD THIS
+import 'package:http/http.dart' as http; // 👈 ADD THIS
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(
@@ -1061,6 +1062,78 @@ class FauMapScreen extends StatefulWidget {
   State<FauMapScreen> createState() => _FauMapScreenState();
 }
 
+
+
+
+
+
+
+
+
+
+
+
+
+// ---------------------------------------------------------
+// REAL STREET & DRIVEWAY ROUTING ENGINE (OSRM)
+// ---------------------------------------------------------
+
+class RealRoadRouter {
+  static const Distance _dist = Distance();
+
+  /// Snaps to actual campus asphalt roads, lanes, and parking driveways.
+  /// No clipping through walls, grass, or buildings.
+  static Future<List<LatLng>> getRoadRoute({
+    required LatLng start,
+    required LatLng destination,
+  }) async {
+    final url = Uri.parse(
+      'https://router.project-osrm.org/route/v1/driving/'
+      '${start.longitude},${start.latitude};'
+      '${destination.longitude},${destination.latitude}'
+      '?overview=full&geometries=geojson',
+    );
+
+    try {
+      final response = await http.get(url).timeout(const Duration(seconds: 4));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final routes = data['routes'] as List<dynamic>?;
+        if (routes != null && routes.isNotEmpty) {
+          final coordinates = routes[0]['geometry']['coordinates'] as List<dynamic>;
+          return coordinates
+              .map((pt) => LatLng((pt[1] as num).toDouble(), (pt[0] as num).toDouble()))
+              .toList();
+        }
+      }
+    } catch (_) {}
+
+    // Fallback if offline or timeout
+    return [start, destination];
+  }
+
+  static double calculateDistance(List<LatLng> points) {
+    double total = 0.0;
+    for (int i = 0; i < points.length - 1; i++) {
+      total += _dist.as(LengthUnit.Meter, points[i], points[i + 1]);
+    }
+    return total;
+  }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 class _FauMapScreenState extends State<FauMapScreen> {
   final MapController _mapController = MapController();
   StreamSubscription<Position>? _positionStreamSub;
@@ -1131,30 +1204,42 @@ class _FauMapScreenState extends State<FauMapScreen> {
     ),
   ];
 
-  void _updateNavigationRoute(FauBuilding building) {
-    if (_currentUserLocation != null) {
-      // Direct navigation path from live GPS to the calculated best lot
-      _currentRoute = CampusPathfinder.findRouteFromUserToBestLot(
-        userPos: _currentUserLocation!,
-        destinationBuildingPos: building.position,
-        lots: _lots,
-      );
-    } else {
-      // Fallback path between lot and building if user location not ready
-      _currentRoute = CampusPathfinder.findBestAvailableRoute(
-        buildingPos: building.position,
-        lots: _lots,
-      );
+Future<void> _updateNavigationRoute(FauBuilding building) async {
+    // 1. A* decides which available lot is closest to the destination building
+    final bestLotResult = CampusPathfinder.findBestAvailableRoute(
+      buildingPos: building.position,
+      lots: _lots,
+    );
+
+    if (bestLotResult == null) return;
+
+    final LatLng lotPos = _lots[bestLotResult.lotId]!['position'] as LatLng;
+    final LatLng startPos = _currentUserLocation ?? building.position;
+
+    // 2. OSRM calculates the route along real streets and parking lot driveways
+    final roadPoints = await RealRoadRouter.getRoadRoute(
+      start: startPos,
+      destination: lotPos,
+    );
+
+    if (mounted) {
+      setState(() {
+        _currentRoute = PathResult(
+          lotId: bestLotResult.lotId,
+          pathPoints: roadPoints,
+          totalDistanceMeters: RealRoadRouter.calculateDistance(roadPoints),
+        );
+      });
     }
   }
 
   void _onBuildingSelected(FauBuilding building) {
     setState(() {
       _selectedBuilding = building;
-      _updateNavigationRoute(building);
     });
+    _updateNavigationRoute(building);
 
-    _mapController.move(building.position, 16.8);
+    _mapController.move(building.position, 16.5);
   }
 
   @override
@@ -1526,15 +1611,22 @@ class _FauMapScreenState extends State<FauMapScreen> {
 
                 // Draw path directly connecting Live GPS / Building to the Best Parking Lot
                 if (_currentRoute != null && _currentRoute!.pathPoints.isNotEmpty)
-                  PolylineLayer(
-                    polylines: [
-                      Polyline(
-                        points: _currentRoute!.pathPoints,
-                        strokeWidth: 4.5,
-                        color: const Color(0xFFC6F24A),
-                      ),
-                    ],
-                  ),
+                PolylineLayer(
+                  polylines: [
+                    // Outer dark outline
+                    Polyline(
+                      points: _currentRoute!.pathPoints,
+                      strokeWidth: 6.5,
+                      color: Colors.black87,
+                    ),
+                    // High-contrast neon green route core
+                    Polyline(
+                      points: _currentRoute!.pathPoints,
+                      strokeWidth: 4.0,
+                      color: const Color(0xFFC6F24A),
+                    ),
+                  ],
+                ),
 
                 MarkerLayer(
                   markers: [
