@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
+import { useOutletContext } from "react-router-dom";
 import { ref, onValue, update } from "firebase/database";
 import { database, dataPath } from "../firebase";
 import { c, mono } from "../theme";
-import { useOutletContext } from "react-router-dom";
+import { useFlash } from "../motion";
 
 const ledColors = [
   { name: "red", hex: "#E5483A" },
@@ -18,6 +19,25 @@ function unitTone(u) {
   return { bg: "#1C2612", border: c.open, text: "#B4E86A" };
 }
 
+function CurbTile({ id, unit, selected, onPick }) {
+  const tone = unitTone(unit);
+  const status = !unit.online ? "offline" : unit.occupied ? "occupied" : "open";
+  const flash = useFlash(status);
+  return (
+    <button
+      onClick={onPick}
+      className={`sws-tile${flash ? " sws-flash" : ""}`}
+      style={{
+        height: 56, borderRadius: 5, cursor: "pointer", fontFamily: mono, fontSize: 12, fontWeight: 700,
+        background: tone.bg, color: tone.text,
+        border: selected ? `2px solid ${c.accent}` : `1px solid ${tone.border}`,
+      }}
+    >
+      {id}
+    </button>
+  );
+}
+
 function LotDetail() {
   const [lots, setLots] = useState({});
   const [units, setUnits] = useState({});
@@ -26,20 +46,22 @@ function LotDetail() {
   const [ledColor, setLedColor] = useState("blue");
   const [panelText, setPanelText] = useState("");
   const [status, setStatus] = useState("");
-    const { role } = useOutletContext();
+  const { role } = useOutletContext();
   const canEdit = role === "operator" || role === "manager";
 
   useEffect(() => {
     const stopLots = onValue(ref(database, dataPath("lots")), (snap) => {
       const data = snap.val() || {};
       setLots(data);
-      setSelectedLot((prev) => prev || Object.keys(data)[0] || null);
+      setSelectedLot((prev) => (prev && data[prev] ? prev : Object.keys(data)[0] || null));
     });
     const stopUnits = onValue(ref(database, dataPath("units")), (snap) => setUnits(snap.val() || {}));
     return () => { stopLots(); stopUnits(); };
   }, []);
 
-  const lotUnits = Object.entries(units).filter(([, u]) => u.lot === selectedLot);
+  const lotUnits = Object.entries(units)
+    .filter(([, u]) => u.lot === selectedLot)
+    .sort(([a], [b]) => a.localeCompare(b));
   const unit = selectedUnit ? units[selectedUnit] : null;
 
   const pickLot = (id) => {
@@ -56,7 +78,7 @@ function LotDetail() {
   };
 
   const applyChanges = async () => {
-    if (!selectedUnit) return;
+    if (!selectedUnit || !canEdit) return;
     try {
       await update(ref(database, dataPath(`units/${selectedUnit}`)), { ledColor, panelText });
       setStatus("Saved. The curb picks this up on its next sync.");
@@ -82,7 +104,7 @@ function LotDetail() {
       </div>
 
       <div style={{ padding: "22px 30px", display: "flex", flexDirection: "column", gap: 16 }}>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <div className="sws-enter" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {Object.entries(lots).map(([id, lot]) => (
             <button
               key={id}
@@ -92,6 +114,7 @@ function LotDetail() {
                 border: `1px solid ${id === selectedLot ? c.accent : c.line}`,
                 background: id === selectedLot ? c.navBg : c.panel,
                 color: id === selectedLot ? c.accent : c.text,
+                transition: "background-color 0.2s, border-color 0.2s, color 0.2s",
               }}
             >
               {lot.name}
@@ -100,41 +123,27 @@ function LotDetail() {
         </div>
 
         <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
-          <div style={{ flex: 1, background: c.panel, border: `1px solid ${c.line}`, borderRadius: 6, padding: 18 }}>
+          <div className="sws-enter" style={{ flex: 1, background: c.panel, border: `1px solid ${c.line}`, borderRadius: 6, padding: 18, "--d": "60ms" }}>
             <div style={{ fontFamily: mono, fontSize: 14, fontWeight: 600, marginBottom: 14 }}>Curb units</div>
             {lotUnits.length === 0 ? (
               <div style={{ fontSize: 12.5, color: c.dim }}>No units registered in this lot yet.</div>
             ) : (
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(96px, 1fr))", gap: 8 }}>
-                {lotUnits.map(([id, u]) => {
-                  const tone = unitTone(u);
-                  const isSelected = id === selectedUnit;
-                  return (
-                    <button
-                      key={id}
-                      onClick={() => pickUnit(id)}
-                      style={{
-                        height: 56, borderRadius: 5, cursor: "pointer", fontFamily: mono, fontSize: 12, fontWeight: 700,
-                        background: tone.bg, color: tone.text,
-                        border: isSelected ? `2px solid ${c.accent}` : `1px solid ${tone.border}`,
-                      }}
-                    >
-                      {id}
-                    </button>
-                  );
-                })}
+                {lotUnits.map(([id, u]) => (
+                  <CurbTile key={id} id={id} unit={u} selected={id === selectedUnit} onPick={() => pickUnit(id)} />
+                ))}
               </div>
             )}
           </div>
 
-          <div style={{ width: 340, background: c.panel, border: `1px solid ${c.line}`, borderRadius: 6, padding: 18, display: "flex", flexDirection: "column", gap: 14 }}>
+          <div className="sws-enter" style={{ width: 340, background: c.panel, border: `1px solid ${c.line}`, borderRadius: 6, padding: 18, "--d": "120ms" }}>
             {!unit ? (
               <div style={{ fontSize: 12.5, color: c.dim }}>Select a curb unit to see its status and control its LED panel.</div>
             ) : (
-              <>
+              <div key={selectedUnit} className="sws-enter" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                 <div style={{ fontFamily: mono, fontSize: 17, fontWeight: 600 }}>Curb {selectedUnit}</div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {infoRow("Status", unit.occupied ? "Occupied" : "Open")}
+                  {infoRow("Status", !unit.online ? "Offline" : unit.occupied ? "Occupied" : "Open")}
                   {infoRow("Online", unit.online ? "Yes" : "No")}
                   {infoRow("Battery", `${unit.battery}%`)}
                   {infoRow("Current LED", unit.ledColor || "not set")}
@@ -154,6 +163,7 @@ function LotDetail() {
                         style={{
                           flex: 1, height: 40, borderRadius: 5, cursor: "pointer", background: col.hex,
                           border: ledColor === col.name ? `3px solid ${c.accent}` : `1px solid ${c.line}`,
+                          transition: "border-color 0.15s",
                         }}
                       />
                     ))}
@@ -168,7 +178,7 @@ function LotDetail() {
                     style={{ height: 42, padding: "0 12px", borderRadius: 5, border: `1px solid ${c.line}`, background: c.bg, color: c.text, fontFamily: mono, fontSize: 14, letterSpacing: 1 }}
                   />
 
-                                    <button
+                  <button
                     onClick={applyChanges}
                     disabled={!canEdit}
                     style={{
@@ -181,9 +191,9 @@ function LotDetail() {
                     {canEdit ? "Apply changes" : "Viewers can't change LEDs"}
                   </button>
 
-                  {status && <div style={{ fontSize: 12, color: c.dim }}>{status}</div>}
+                  {status && <div className="sws-enter" style={{ fontSize: 12, color: c.dim }}>{status}</div>}
                 </div>
-              </>
+              </div>
             )}
           </div>
         </div>
