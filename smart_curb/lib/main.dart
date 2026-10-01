@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
@@ -7,7 +8,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 import 'firebase_options.dart';
-
+import 'dart:math' as math;
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(
@@ -775,8 +776,24 @@ class _HomeTab extends StatelessWidget {
 }
 
 // ==========================================
-// FAU CAMPUS MAP SCREEN (Bounded & Live GPS)
+// FAU CAMPUS MAP SCREEN (Destination Routing & Live/Cursor GPS)
 // ==========================================
+
+class FauBuilding {
+  final String id;
+  final String code;
+  final String name;
+  final LatLng position;
+  final String recommendedLotId;
+
+  const FauBuilding({
+    required this.id,
+    required this.code,
+    required this.name,
+    required this.position,
+    required this.recommendedLotId,
+  });
+}
 
 class FauMapScreen extends StatefulWidget {
   const FauMapScreen({super.key});
@@ -785,6 +802,313 @@ class FauMapScreen extends StatefulWidget {
   State<FauMapScreen> createState() => _FauMapScreenState();
 }
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/// A walkable waypoint (intersection, building entrance, or parking lot exit).
+class CampusWaypoint {
+  final String id;
+  final LatLng position;
+  final List<String> neighbors; // IDs of reachable connected waypoints
+
+  const CampusWaypoint({
+    required this.id,
+    required this.position,
+    required this.neighbors,
+  });
+}
+
+/// The result returned by the pathfinder containing the chosen lot and exact path points.
+class PathResult {
+  final String lotId;
+  final List<LatLng> pathPoints;
+  final double totalDistanceMeters;
+
+  const PathResult({
+    required this.lotId,
+    required this.pathPoints,
+    required this.totalDistanceMeters,
+  });
+}
+
+class CampusPathfinder {
+  static const Distance _dist = Distance();
+
+  /// FAU Campus Walkway Graph:
+  /// Connects your lots (Lot 12, Lot 14) and buildings (ED-47, BC-71)
+  /// through main corridor waypoints.
+  /// To expand in the future, simply add new nodes and add their IDs to neighbors!
+static final Map<String, CampusWaypoint> walkwayGraph = {
+    // --- PARKING LOT ACCESS POINTS ---
+    'node_lot_12': const CampusWaypoint(
+      id: 'node_lot_12',
+      position: LatLng(26.373262, -80.106806),
+      neighbors: ['node_ed47_west'],
+    ),
+    'node_lot_14': const CampusWaypoint(
+      id: 'node_lot_14',
+      position: LatLng(26.373005, -80.099683),
+      neighbors: ['node_bc71_east'],
+    ),
+    // ⭐️ NEW: Lot 7
+    'node_lot_7': const CampusWaypoint(
+      id: 'node_lot_7',
+      position: LatLng(26.373999, -80.105842),
+      neighbors: ['node_ed47_west', 'node_lot_6'],
+    ),
+    // ⭐️ NEW: Lot 6
+    'node_lot_6': const CampusWaypoint(
+      id: 'node_lot_6',
+      position: LatLng(26.374013, -80.104280),
+      neighbors: ['node_lot_7', 'node_breezeway_west'],
+    ),
+
+    // --- BUILDING ACCESS POINTS ---
+    'node_ed47': const CampusWaypoint(
+      id: 'node_ed47',
+      position: LatLng(26.373358, -80.105828),
+      neighbors: ['node_ed47_west', 'node_breezeway_west'],
+    ),
+    'node_bc71': const CampusWaypoint(
+      id: 'node_bc71',
+      position: LatLng(26.373263, -80.100446),
+      neighbors: ['node_bc71_east', 'node_breezeway_east'],
+    ),
+    // ⭐️ NEW: CM-22 Computer Center
+    'node_cm22': const CampusWaypoint(
+      id: 'node_cm22',
+      position: LatLng(26.372528, -80.104044),
+      neighbors: ['node_breezeway_west', 'node_breezeway_center'],
+    ),
+
+    // --- INTERMEDIATE WALKWAY INTERSECTIONS ---
+    'node_ed47_west': const CampusWaypoint(
+      id: 'node_ed47_west',
+      position: LatLng(26.373300, -80.106300),
+      neighbors: ['node_lot_12', 'node_ed47', 'node_lot_7'], // Added node_lot_7
+    ),
+    'node_breezeway_west': const CampusWaypoint(
+      id: 'node_breezeway_west',
+      position: LatLng(26.373300, -80.103500),
+      neighbors: ['node_ed47', 'node_breezeway_center', 'node_lot_6', 'node_cm22'], // Added node_lot_6, node_cm22
+    ),
+    'node_breezeway_center': const CampusWaypoint(
+      id: 'node_breezeway_center',
+      position: LatLng(26.373280, -80.101700),
+      neighbors: ['node_breezeway_west', 'node_breezeway_east', 'node_cm22'], // Added node_cm22
+    ),
+    'node_breezeway_east': const CampusWaypoint(
+      id: 'node_breezeway_east',
+      position: LatLng(26.373270, -80.101000),
+      neighbors: ['node_breezeway_center', 'node_bc71'],
+    ),
+    'node_bc71_east': const CampusWaypoint(
+      id: 'node_bc71_east',
+      position: LatLng(26.373150, -80.099950),
+      neighbors: ['node_bc71', 'node_lot_14'],
+    ),
+  };
+
+  /// Evaluates available lots, skips full lots, and picks the one with
+  /// the shortest A* path to [buildingPos].
+  static PathResult? findBestAvailableRoute({
+    required LatLng buildingPos,
+    required Map<String, Map<String, dynamic>> lots,
+  }) {
+    PathResult? bestResult;
+    double shortestDistance = double.infinity;
+
+    for (final entry in lots.entries) {
+      final lotId = entry.key;
+      final lotData = entry.value;
+
+      // 1. Check capacity & skip full lots
+      final status = lotData['status']?.toString() ?? '0/1';
+      final parts = status.split('/');
+      final occupied = int.tryParse(parts.first.trim()) ?? 0;
+      final capacity = int.tryParse(parts.last.trim()) ?? 1;
+
+      if (occupied >= capacity) {
+        continue; // Skip this lot if 100% full!
+      }
+
+      final LatLng lotPos = lotData['position'] as LatLng;
+
+      // 2. Run A* from Lot to Building
+      final path = runAStar(start: lotPos, goal: buildingPos);
+      final dist = _calculatePathDistance(path);
+
+      // 3. Keep the lot with the lowest A* walking distance
+      if (dist < shortestDistance) {
+        shortestDistance = dist;
+        bestResult = PathResult(
+          lotId: lotId,
+          pathPoints: path,
+          totalDistanceMeters: dist,
+        );
+      }
+    }
+
+    return bestResult;
+  }
+
+  /// Core A* Algorithm
+  static List<LatLng> runAStar({
+    required LatLng start,
+    required LatLng goal,
+  }) {
+    final startNodeId = _findClosestWaypoint(start);
+    final goalNodeId = _findClosestWaypoint(goal);
+
+    if (startNodeId == goalNodeId) {
+      return [start, goal];
+    }
+
+    final List<String> openSet = [startNodeId];
+    final Map<String, String> cameFrom = {};
+
+    final Map<String, double> gScore = {
+      for (final k in walkwayGraph.keys) k: double.infinity,
+    };
+    gScore[startNodeId] = 0.0;
+
+    final Map<String, double> fScore = {
+      for (final k in walkwayGraph.keys) k: double.infinity,
+    };
+    fScore[startNodeId] = _dist.as(
+      LengthUnit.Meter,
+      walkwayGraph[startNodeId]!.position,
+      goal,
+    );
+
+    while (openSet.isNotEmpty) {
+      // Pick node in openSet with the lowest fScore
+      openSet.sort((a, b) => fScore[a]!.compareTo(fScore[b]!));
+      final current = openSet.removeAt(0);
+
+      // Goal reached
+      if (current == goalNodeId) {
+        final List<LatLng> path = [goal];
+        String curr = current;
+        while (cameFrom.containsKey(curr)) {
+          path.insert(0, walkwayGraph[curr]!.position);
+          curr = cameFrom[curr]!;
+        }
+        path.insert(0, walkwayGraph[startNodeId]!.position);
+        path.insert(0, start);
+        return path;
+      }
+
+      final currentNode = walkwayGraph[current];
+      if (currentNode == null) continue;
+
+      for (final neighborId in currentNode.neighbors) {
+        final neighborNode = walkwayGraph[neighborId];
+        if (neighborNode == null) continue;
+
+        final tentativeG = gScore[current]! +
+            _dist.as(
+              LengthUnit.Meter,
+              currentNode.position,
+              neighborNode.position,
+            );
+
+        if (tentativeG < (gScore[neighborId] ?? double.infinity)) {
+          cameFrom[neighborId] = current;
+          gScore[neighborId] = tentativeG;
+          fScore[neighborId] = tentativeG +
+              _dist.as(
+                LengthUnit.Meter,
+                neighborNode.position,
+                goal,
+              );
+
+          if (!openSet.contains(neighborId)) {
+            openSet.add(neighborId);
+          }
+        }
+      }
+    }
+
+    // Direct fallback if graph nodes don't have a contiguous link
+    return [start, goal];
+  }
+
+  static String _findClosestWaypoint(LatLng target) {
+    String closestId = walkwayGraph.keys.first;
+    double minMeters = double.infinity;
+
+    walkwayGraph.forEach((id, wp) {
+      final d = _dist.as(LengthUnit.Meter, target, wp.position);
+      if (d < minMeters) {
+        minMeters = d;
+        closestId = id;
+      }
+    });
+
+    return closestId;
+  }
+
+  static double _calculatePathDistance(List<LatLng> points) {
+    double total = 0.0;
+    for (int i = 0; i < points.length - 1; i++) {
+      total += _dist.as(LengthUnit.Meter, points[i], points[i + 1]);
+    }
+    return total;
+  }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 class _FauMapScreenState extends State<FauMapScreen> {
   final MapController _mapController = MapController();
   StreamSubscription<Position>? _positionStreamSub;
@@ -792,14 +1116,91 @@ class _FauMapScreenState extends State<FauMapScreen> {
   bool _isLocating = false;
   String _gpsStatus = 'Searching for GPS...';
 
-  // Exact coordinates covering the full screenshot frame
+  // --- DEVELOPER / CURSOR GPS STATE ---
+  bool _developerMode = false;
+  LatLng? _cursorLocation;
+
+  FauBuilding? _selectedBuilding;
+  PathResult? _currentRoute; // Holds the A* result
+
+  // Strict campus boundaries covering Glades Rd up to Spanish River Blvd
   static final LatLngBounds _fauBounds = LatLngBounds(
-    const LatLng(26.3630, -80.1170), // South-West corner (Glades Rd / Airport Rd)
-    const LatLng(26.3860, -80.0890), // North-East corner (NW Spanish River Blvd / 1st Ave)
+    const LatLng(26.3630, -80.1170),
+    const LatLng(26.3860, -80.0890),
   );
 
-  // Exact center of the screenshot
   static const LatLng _fauCenter = LatLng(26.3745, -80.1030);
+
+
+
+  // Parking Lots
+
+  static final Map<String, Map<String, dynamic>> _lots = {
+    'fau_lot_12': {
+      'name': 'Lot 12',
+      'position': const LatLng(26.373262, -80.106806),
+      'status': '10/80',
+      'color': const Color.fromARGB(255, 48, 248, 22),
+    },
+    'fau_lot_14': {
+      'name': 'Lot 14',
+      'position': const LatLng(26.373005, -80.099683),
+      'status': '65/96',
+      'color': const Color(0xFFF5A623),
+    },
+      'fau_lot_7': {
+      'name': 'Lot 7',
+      'position': const LatLng(26.373999, -80.105842),
+      'status': '65/96',
+      'color': const Color(0xFFF5A623),
+    },
+       'fau_lot_6': {
+      'name': 'Lot 6',
+      'position': const LatLng(26.374013, -80.104280),
+      'status': '65/96',
+      'color': const Color(0xFFF5A623),
+    },
+    
+  };
+
+  static const List<FauBuilding> _campusBuildings = [
+    FauBuilding(
+      id: 'ed47',
+      code: 'ED-47',
+      name: 'College of Education (ED-47)',
+      position: LatLng(26.373358, -80.105828),
+      recommendedLotId: 'N/A', // Determined dynamically by A*
+    ),
+    FauBuilding(
+      id: 'bc71',
+      code: 'BC-71',
+      name: 'Charles E. Schmidt Biomedical Science Center (BC-71)',
+      position: LatLng(26.373263, -80.100446),
+      recommendedLotId: 'N/A', // Determined dynamically by A*
+    ),
+     FauBuilding(
+      id: 'cm22',
+      code: 'CM-22',
+      name: 'Computer Center (CM-22)',
+      position: LatLng(26.372528, -80.104044),
+      recommendedLotId: 'N/A', // Determined dynamically by A*
+    ),
+  ];
+
+  /// Runs the A* calculation when a building is tapped or selected
+  void _onBuildingSelected(FauBuilding building) {
+    final route = CampusPathfinder.findBestAvailableRoute(
+      buildingPos: building.position,
+      lots: _lots,
+    );
+
+    setState(() {
+      _selectedBuilding = building;
+      _currentRoute = route;
+    });
+
+    _mapController.move(building.position, 16.8);
+  }
 
   @override
   void initState() {
@@ -813,7 +1214,6 @@ class _FauMapScreenState extends State<FauMapScreen> {
     super.dispose();
   }
 
-  /// Request permissions and listen to continuous device GPS coordinates
   Future<void> _startLiveLocationTracking() async {
     setState(() {
       _isLocating = true;
@@ -825,7 +1225,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
       if (!serviceEnabled) {
         setState(() {
           _isLocating = false;
-          _gpsStatus = 'Location services are disabled.';
+          _gpsStatus = 'Location services disabled.';
         });
         return;
       }
@@ -845,12 +1245,11 @@ class _FauMapScreenState extends State<FauMapScreen> {
       if (permission == LocationPermission.deniedForever) {
         setState(() {
           _isLocating = false;
-          _gpsStatus = 'GPS permissions permanently denied.';
+          _gpsStatus = 'GPS permanently denied.';
         });
         return;
       }
 
-      // Read initial position
       final initialPos = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
       );
@@ -859,37 +1258,23 @@ class _FauMapScreenState extends State<FauMapScreen> {
         setState(() {
           _currentUserLocation = LatLng(initialPos.latitude, initialPos.longitude);
           _isLocating = false;
-          _gpsStatus =
-              'GPS Active: ${initialPos.latitude.toStringAsFixed(4)}, ${initialPos.longitude.toStringAsFixed(4)}';
+          _gpsStatus = 'Live GPS: ${initialPos.latitude.toStringAsFixed(4)}, ${initialPos.longitude.toStringAsFixed(4)}';
         });
       }
 
-      // Stream continuous movement
-      const locationSettings = LocationSettings(
-        accuracy: LocationAccuracy.bestForNavigation,
-        distanceFilter: 2, // Emits an update every 2 meters moved
-      );
-
       _positionStreamSub = Geolocator.getPositionStream(
-        locationSettings: locationSettings,
-      ).listen(
-        (Position position) {
-          if (!mounted) return;
-          setState(() {
-            _currentUserLocation = LatLng(position.latitude, position.longitude);
-            _isLocating = false;
-            _gpsStatus =
-                'Live GPS: ${position.latitude.toStringAsFixed(4)}, ${position.longitude.toStringAsFixed(4)}';
-          });
-        },
-        onError: (err) {
-          if (!mounted) return;
-          setState(() {
-            _isLocating = false;
-            _gpsStatus = 'GPS Stream Error: $err';
-          });
-        },
-      );
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.bestForNavigation,
+          distanceFilter: 2,
+        ),
+      ).listen((Position position) {
+        if (!mounted) return;
+        setState(() {
+          _currentUserLocation = LatLng(position.latitude, position.longitude);
+          _isLocating = false;
+          _gpsStatus = 'Live GPS: ${position.latitude.toStringAsFixed(4)}, ${position.longitude.toStringAsFixed(4)}';
+        });
+      });
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -900,28 +1285,102 @@ class _FauMapScreenState extends State<FauMapScreen> {
     }
   }
 
-  void _recenterOnUser() {
-    if (_currentUserLocation != null) {
-      if (_fauBounds.contains(_currentUserLocation!)) {
-        _mapController.move(_currentUserLocation!, 17.5);
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Your GPS (${_currentUserLocation!.latitude.toStringAsFixed(3)}, ${_currentUserLocation!.longitude.toStringAsFixed(3)}) is outside FAU campus bounds.',
-            ),
-            duration: const Duration(seconds: 3),
+  void _showBuildingSelector() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF171714),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Select Destination Building',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white70),
+                    onPressed: () => Navigator.pop(ctx),
+                  ),
+                ],
+              ),
+              const Divider(color: Colors.white24),
+              Expanded(
+                child: ListView.builder(
+                  itemCount: _campusBuildings.length,
+                  itemBuilder: (context, index) {
+                    final bldg = _campusBuildings[index];
+
+                    // 1. Run A* to find best available lot for this building
+                    final bestRoute = CampusPathfinder.findBestAvailableRoute(
+                      buildingPos: bldg.position,
+                      lots: _lots,
+                    );
+
+                    final lot = bestRoute != null ? _lots[bestRoute.lotId] : null;
+
+                    return ListTile(
+                      contentPadding: const EdgeInsets.symmetric(vertical: 4),
+                      leading: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.white10,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          bldg.code,
+                          style: const TextStyle(
+                            color: Color(0xFFC6F24A),
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                      title: Text(
+                        bldg.name,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      subtitle: Text(
+                        lot != null
+                            ? 'Best Lot: ${lot['name']} (${lot['status']} open • ${bestRoute!.totalDistanceMeters.round()}m)'
+                            : 'All nearby lots full',
+                        style: const TextStyle(color: Colors.white60, fontSize: 12),
+                      ),
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        _onBuildingSelected(bldg);
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
           ),
         );
-      }
-    } else {
-      _startLiveLocationTracking();
-    }
+      },
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final recommendedLot = _selectedBuilding != null
+        ? _lots[_selectedBuilding!.recommendedLotId]
+        : null;
 
     return Scaffold(
       appBar: AppBar(
@@ -933,10 +1392,15 @@ class _FauMapScreenState extends State<FauMapScreen> {
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             Text(
-              'Boca Raton Main Campus',
+              _developerMode
+                  ? '🛠 Developer Mode Active'
+                  : 'Boca Raton Main Campus',
               style: TextStyle(
                 fontSize: 12,
-                color: theme.colorScheme.onSurfaceVariant,
+                color: _developerMode
+                    ? Colors.cyanAccent
+                    : theme.colorScheme.onSurfaceVariant,
+                fontWeight: _developerMode ? FontWeight.bold : FontWeight.normal,
               ),
             ),
           ],
@@ -946,6 +1410,22 @@ class _FauMapScreenState extends State<FauMapScreen> {
           onPressed: () => Navigator.pop(context),
         ),
         actions: [
+          // Developer Mode Toggle Button
+          IconButton(
+            icon: Icon(
+              _developerMode ? Icons.developer_mode : Icons.developer_mode_outlined,
+              color: _developerMode ? Colors.cyanAccent : theme.colorScheme.onSurfaceVariant,
+            ),
+            tooltip: _developerMode ? 'Disable Developer Mode' : 'Enable Developer Mode',
+            onPressed: () {
+              setState(() {
+                _developerMode = !_developerMode;
+                if (!_developerMode) {
+                  _cursorLocation = null;
+                }
+              });
+            },
+          ),
           IconButton(
             icon: _isLocating
                 ? const SizedBox(
@@ -958,116 +1438,310 @@ class _FauMapScreenState extends State<FauMapScreen> {
                   )
                 : const Icon(Icons.my_location),
             tooltip: 'My Location',
-            onPressed: _recenterOnUser,
+            onPressed: () {
+              if (_currentUserLocation != null) {
+                _mapController.move(_currentUserLocation!, 17.5);
+              }
+            },
           ),
           IconButton(
             icon: const Icon(Icons.center_focus_strong),
-            tooltip: 'Campus Center',
-            onPressed: () => _mapController.move(_fauCenter, 15.3),
+            tooltip: 'Reset Campus View',
+            onPressed: () {
+              setState(() => _selectedBuilding = null);
+              _mapController.move(_fauCenter, 15.3);
+            },
           ),
         ],
       ),
       body: Stack(
         children: [
-          FlutterMap(
-            mapController: _mapController,
-            options: MapOptions(
-              // Opens centered on the FAU campus screenshot
-              initialCenter: _fauCenter,
-              initialZoom: 15.3,
-              // Hard floor: user CANNOT zoom out beyond this screenshot
-              minZoom: 15.0,
-              // Deep zoom: user CAN zoom in up to individual parking spaces
-              maxZoom: 19.5,
-              // Hard boundary: panning cannot leave the FAU perimeter
-              cameraConstraint: CameraConstraint.containCenter(bounds: _fauBounds),
-              interactionOptions: const InteractionOptions(
-                flags: InteractiveFlag.pinchZoom |
-                    InteractiveFlag.drag |
-                    InteractiveFlag.doubleTapZoom |
-                    InteractiveFlag.scrollWheelZoom,
+          // MouseRegion tracks cursor movement across map surface
+          MouseRegion(
+            onHover: (PointerEvent event) {
+              if (_developerMode) {
+                try {
+                  // flutter_map 8.x uses math.Point with pointToLatLng
+                  final latLng = _mapController.camera.offsetToCrs(event.localPosition);
+                  setState(() {
+                    _cursorLocation = latLng;
+                  });
+                } catch (_) {}
+              }
+            },
+            onExit: (_) {
+              if (_developerMode) {
+                setState(() => _cursorLocation = null);
+              }
+            },
+
+            
+            child: FlutterMap(
+              mapController: _mapController,
+              options: MapOptions(
+                initialCenter: _fauCenter,
+                initialZoom: 15.3,
+                minZoom: 15.0,
+                maxZoom: 19.5,
+                cameraConstraint: CameraConstraint.containCenter(bounds: _fauBounds),
+                interactionOptions: const InteractionOptions(
+                  flags: InteractiveFlag.pinchZoom |
+                      InteractiveFlag.drag |
+                      InteractiveFlag.doubleTapZoom |
+                      InteractiveFlag.scrollWheelZoom,
+                ),
               ),
-            ),
-            children: [
-              TileLayer(
-                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'com.smartcurb.app',
-                maxNativeZoom: 19,
-                maxZoom: 20,
-              ),
-              MarkerLayer(
-                markers: [
-                  // --- Live User GPS Location Puck ---
-                  if (_currentUserLocation != null)
-                    Marker(
-                      point: _currentUserLocation!,
-                      width: 38,
-                      height: 38,
-                      child: Stack(
+              children: [
+                TileLayer(
+                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                  userAgentPackageName: 'com.smartcurb.app',
+                  maxNativeZoom: 19,
+                  maxZoom: 20,
+                ),
+
+                // Dashed polyline to destination
+                if (_selectedBuilding != null && recommendedLot != null)
+                  PolylineLayer(
+                    polylines: [
+                      Polyline(
+                        points: [
+                          _selectedBuilding!.position,
+                          recommendedLot['position'] as LatLng,
+                        ],
+                        strokeWidth: 3.5,
+                        color: const Color(0xFFC6F24A),
+                        pattern: StrokePattern.dashed(segments: [8, 6]),
+                      ),
+                    ],
+                  ),
+
+                MarkerLayer(
+                  markers: [
+                    // 1. Live Device GPS Puck
+                    if (_currentUserLocation != null)
+                      Marker(
+                        point: _currentUserLocation!,
                         alignment: Alignment.center,
-                        children: [
-                          Container(
-                            width: 38,
-                            height: 38,
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFC6F24A).withOpacity(0.35),
-                              shape: BoxShape.circle,
-                            ),
+                        width: 34,
+                        height: 34,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFC6F24A),
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.black, width: 3),
                           ),
-                          Container(
-                            width: 22,
-                            height: 22,
+                          child: const Icon(
+                            Icons.navigation,
+                            size: 14,
+                            color: Colors.black,
+                          ),
+                        ),
+                      ),
+
+                    // 2. Interactive Campus Building Markers
+                    ..._campusBuildings.map((bldg) {
+                      final isSelected = _selectedBuilding?.id == bldg.id;
+
+                      return Marker(
+                        point: bldg.position,
+                        alignment: Alignment.center,
+                        width: isSelected ? 120 : 80,
+                        height: isSelected ? 48 : 30,
+                        child: GestureDetector(
+                          onTap: () {
+                            setState(() => _selectedBuilding = bldg);
+                            _mapController.move(bldg.position, 16.8);
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFC6F24A),
-                              shape: BoxShape.circle,
-                              border: Border.all(color: Colors.black, width: 2.5),
-                              boxShadow: const [
-                                BoxShadow(color: Colors.black45, blurRadius: 6),
+                              color: isSelected ? Colors.cyanAccent : const Color(0xDD1F242A),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(
+                                color: isSelected ? Colors.white : Colors.cyanAccent.withOpacity(0.7),
+                                width: isSelected ? 2 : 1,
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: (isSelected ? Colors.cyanAccent : Colors.black).withOpacity(0.4),
+                                  blurRadius: 4,
+                                ),
                               ],
                             ),
-                            child: const Center(
-                              child: Icon(
-                                Icons.navigation,
-                                size: 11,
-                                color: Color(0xFF12110F),
-                              ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  Icons.business,
+                                  size: isSelected ? 14 : 11,
+                                  color: isSelected ? Colors.black : Colors.cyanAccent,
+                                ),
+                                const SizedBox(width: 4),
+                                Flexible(
+                                  child: Text(
+                                    bldg.code,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: isSelected ? Colors.black : Colors.white,
+                                      fontSize: isSelected ? 11 : 9,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                        ],
-                      ),
-                    ),
+                        ),
+                      );
+                    }),
 
-                  // --- Parking Lot Status Badges ---
-                  _buildLotMarker(
-                    point: const LatLng(26.3742, -80.1042),
-                    name: 'Lot 12',
-                    status: '24/80',
-                    badgeColor: const Color(0xFFC6F24A),
-                  ),
-                  _buildLotMarker(
-                    point: const LatLng(26.3718, -80.1008),
-                    name: 'Lot 14',
-                    status: '65/96',
-                    badgeColor: const Color(0xFFF5A623),
-                  ),
-                  _buildLotMarker(
-                    point: const LatLng(26.3698, -80.1055),
-                    name: 'Garage 2',
-                    status: '158/160',
-                    badgeColor: const Color(0xFFF2694C),
-                  ),
-                ],
-              ),
-            ],
+                    // 3. Parking Lots
+                    ..._lots.entries.map((entry) {
+                      final isBest = _selectedBuilding != null &&
+                          _selectedBuilding!.recommendedLotId == entry.key;
+
+                      return _buildLotMarker(
+                        point: entry.value['position'] as LatLng,
+                        name: entry.value['name'] as String,
+                        status: entry.value['status'] as String,
+                        badgeColor: isBest
+                            ? const Color(0xFFC6F24A)
+                            : entry.value['color'] as Color,
+                        isHighlighted: isBest,
+                      );
+                    }),
+                  ],
+                ),
+              ],
+            ),
           ),
 
-          // Floating bottom status bar
+          // Top Floating Destination Selector Bar
+          Positioned(
+            top: 16,
+            left: 16,
+            right: 16,
+            child: GestureDetector(
+              onTap: _showBuildingSelector,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF171714),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: _selectedBuilding != null
+                        ? const Color(0xFFC6F24A)
+                        : Colors.white24,
+                    width: 1.5,
+                  ),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Colors.black54,
+                      blurRadius: 8,
+                      offset: Offset(0, 3),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.search,
+                      color: _selectedBuilding != null
+                          ? const Color(0xFFC6F24A)
+                          : Colors.white70,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        _selectedBuilding != null
+                            ? 'Destination: ${_selectedBuilding!.name}'
+                            : 'Choose a building destination...',
+                        style: TextStyle(
+                          color: _selectedBuilding != null
+                              ? Colors.white
+                              : Colors.white60,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 14,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (_selectedBuilding != null)
+                      GestureDetector(
+                        onTap: () => setState(() => _selectedBuilding = null),
+                        child: const Icon(
+                          Icons.cancel,
+                          color: Colors.white54,
+                          size: 20,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          // --- DEVELOPER MODE CURSOR GPS BANNER (Disappears when dev mode disabled) ---
+          if (_developerMode)
+            Positioned(
+              top: 80,
+              left: 20,
+              right: 20,
+              child: Center(
+                child: GestureDetector(
+                  onTap: () {
+                    if (_cursorLocation != null) {
+                      final str =
+                          'LatLng(${_cursorLocation!.latitude.toStringAsFixed(6)}, ${_cursorLocation!.longitude.toStringAsFixed(6)})';
+                      Clipboard.setData(ClipboardData(text: str));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Copied to clipboard: $str'),
+                          duration: const Duration(seconds: 2),
+                        ),
+                      );
+                    }
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xEE0B1A24),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: Colors.cyanAccent, width: 1.5),
+                      boxShadow: const [
+                        BoxShadow(color: Colors.black87, blurRadius: 8),
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.gps_fixed, color: Colors.cyanAccent, size: 16),
+                        const SizedBox(width: 8),
+                        Text(
+                          _cursorLocation != null
+                              ? 'Cursor GPS: Lat ${_cursorLocation!.latitude.toStringAsFixed(6)}, Lng ${_cursorLocation!.longitude.toStringAsFixed(6)} (Tap to copy)'
+                              : 'Move cursor over map to read coordinates',
+                          style: const TextStyle(
+                            color: Colors.cyanAccent,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+
+          // Bottom Guidance Card (Separated Device GPS Status)
           Positioned(
             bottom: 24,
             left: 20,
             right: 20,
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
                 color: theme.cardColor,
                 borderRadius: BorderRadius.circular(12),
@@ -1083,9 +1757,11 @@ class _FauMapScreenState extends State<FauMapScreen> {
               child: Row(
                 children: [
                   Icon(
-                    _currentUserLocation != null ? Icons.gps_fixed : Icons.gps_not_fixed,
-                    color: _currentUserLocation != null ? theme.primaryColor : Colors.amber,
-                    size: 22,
+                    _selectedBuilding != null
+                        ? Icons.assistant_direction
+                        : Icons.my_location,
+                    color: theme.primaryColor,
+                    size: 24,
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -1094,14 +1770,18 @@ class _FauMapScreenState extends State<FauMapScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Florida Atlantic University',
+                          _selectedBuilding != null
+                              ? 'Best Lot: ${recommendedLot?['name']}'
+                              : 'FAU Boca Raton Main Campus',
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
                             color: theme.colorScheme.onSurface,
                           ),
                         ),
                         Text(
-                          _gpsStatus,
+                          _selectedBuilding != null
+                              ? 'Follow the dashed line from ${recommendedLot?['name']} to ${_selectedBuilding!.code}'
+                              : _gpsStatus,
                           style: TextStyle(
                             fontSize: 12,
                             color: theme.colorScheme.onSurfaceVariant,
@@ -1125,21 +1805,27 @@ class _FauMapScreenState extends State<FauMapScreen> {
     required String name,
     required String status,
     required Color badgeColor,
+    bool isHighlighted = false,
   }) {
     return Marker(
       point: point,
-      width: 90,
-      height: 48,
+      alignment: Alignment.center,
+      width: isHighlighted ? 104 : 90,
+      height: isHighlighted ? 54 : 48,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         decoration: BoxDecoration(
           color: const Color(0xFF0F0F0D),
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: badgeColor, width: 2),
+          border: Border.all(
+            color: badgeColor,
+            width: isHighlighted ? 3 : 2,
+          ),
           boxShadow: [
             BoxShadow(
-              color: badgeColor.withOpacity(0.3),
-              blurRadius: 6,
+              color: badgeColor.withOpacity(isHighlighted ? 0.6 : 0.25),
+              blurRadius: isHighlighted ? 12 : 6,
+              spreadRadius: isHighlighted ? 2 : 0,
             ),
           ],
         ),
@@ -1148,9 +1834,9 @@ class _FauMapScreenState extends State<FauMapScreen> {
           children: [
             Text(
               name,
-              style: const TextStyle(
+              style: TextStyle(
                 color: Colors.white,
-                fontWeight: FontWeight.bold,
+                fontWeight: isHighlighted ? FontWeight.w900 : FontWeight.bold,
                 fontSize: 11,
               ),
             ),
@@ -2336,7 +3022,7 @@ class UserAboutPage extends StatelessWidget {
   }
 }
 
-// Global Helper
+// Global Alert Helper
 void showErrorSnackBar(BuildContext context, String message) {
   ScaffoldMessenger.of(context).showSnackBar(
     SnackBar(
