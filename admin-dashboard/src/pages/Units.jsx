@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { ref, onValue } from "firebase/database";
-import { database } from "../firebase";
+import { database, dataPath } from "../firebase";
 import { c, mono } from "../theme";
 
 const ledHex = { red: "#E5483A", blue: "#3B7DD8", green: "#35A96B", gold: "#E0A63C", white: "#E8E6DE" };
@@ -34,8 +34,8 @@ function Units() {
   const [search, setSearch] = useState("");
 
   useEffect(() => {
-    const stopLots = onValue(ref(database, "lots"), (snap) => setLots(snap.val() || {}));
-    const stopUnits = onValue(ref(database, "units"), (snap) => setUnits(snap.val() || {}));
+    const stopLots = onValue(ref(database, dataPath("lots")), (snap) => setLots(snap.val() || {}));
+    const stopUnits = onValue(ref(database, dataPath("units")), (snap) => setUnits(snap.val() || {}));
     return () => { stopLots(); stopUnits(); };
   }, []);
 

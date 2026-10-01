@@ -10,10 +10,9 @@ const navItems = [
   { label: "Overview", to: "/overview" },
   { label: "Parking lots", to: "/lots" },
   { label: "Curb units", to: "/units" },
-  { label: "Cameras", to: "/cameras" },
   { label: "Assistant", to: "/assistant" },
   { label: "Analytics", to: "/analytics" },
-  { label: "Users & roles", to: "/users" },
+  { label: "Demo controls", to: "/demo" },
 ];
 
 function Layout() {
@@ -107,6 +106,9 @@ function Layout() {
           ))}
         </div>
 
+                <a href="/sign" target="_blank" rel="noreferrer" style={{ marginBottom: 10, padding: "10px 12px", borderRadius: 5, fontSize: 13, fontWeight: 600, color: c.accent, textDecoration: "none", border: `1px dashed ${c.line}` }}>
+          Open lot sign ↗
+        </a>
         <div style={{ padding: 12, borderRadius: 6, background: c.card }}>
           <div style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis" }}>{userEmail}</div>
           <div style={{ fontFamily: mono, fontSize: 10.5, fontWeight: 600, letterSpacing: 0.8, color: c.accent, marginTop: 4 }}>
