@@ -98,7 +98,7 @@ function DemoControls() {
           <div style={title}>3. Scenarios</div>
           <div style={note}>One-click events to show specific features during the presentation.</div>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <Btn onClick={() => run(() => rushHour("lot20"))} disabled={busy}>Rush hour in Lot 20</Btn>
+            <Btn onClick={() => run(() => rushHour("lot06"))} disabled={busy}>Rush hour in Lot 6</Btn>
             <Btn danger onClick={() => run(knockCurbOffline)} disabled={busy}>Take a curb offline</Btn>
             <Btn onClick={() => run(restoreAllCurbs)} disabled={busy}>Bring all curbs online</Btn>
           </div>
