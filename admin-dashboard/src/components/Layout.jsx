@@ -12,7 +12,7 @@ const navItems = [
   { label: "Curb units", to: "/units" },
   { label: "Assistant", to: "/assistant" },
   { label: "Analytics", to: "/analytics" },
-  { label: "Demo controls", to: "/demo" },
+  ...(import.meta.env.VITE_DEMO_MODE === "true" ? [{ label: "Demo controls", to: "/demo" }] : []),
 ];
 
 function Layout() {

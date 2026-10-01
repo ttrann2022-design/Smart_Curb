@@ -25,7 +25,7 @@ function App() {
           <Route path="/assistant" element={<Assistant />} />
           <Route path="/analytics" element={<Analytics />} />
           <Route path="/users" element={<Users />} />
-          <Route path="/demo" element={<DemoControls />} />
+          {import.meta.env.VITE_DEMO_MODE === "true" && <Route path="/demo" element={<DemoControls />} />}
         </Route>
       </Routes>
     </BrowserRouter>

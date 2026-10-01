@@ -1,3 +1,51 @@
-* { box-sizing: border-box; }
-html, body, #root { margin: 0; padding: 0; height: 100%; }
-body { background: #0F0F0D; color: #F2F1EA; font-family: 'Archivo', system-ui, sans-serif; }
+/* ---------- Motion ---------- */
+@keyframes sws-fade-up {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+.sws-enter {
+  animation: sws-fade-up 0.45s ease-out both;
+  animation-delay: var(--d, 0ms);
+}
+
+@keyframes sws-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.8); }
+}
+.sws-live-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #8BD44A;
+  margin-right: 7px;
+  vertical-align: middle;
+  animation: sws-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes sws-flash {
+  0% { box-shadow: 0 0 0 0 rgba(198, 242, 74, 0.55); }
+  100% { box-shadow: 0 0 0 10px rgba(198, 242, 74, 0); }
+}
+.sws-flash { animation: sws-flash 0.9s ease-out; }
+
+@keyframes sws-pop {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+.sws-pop { animation: sws-pop 0.6s ease-out; }
+
+.sws-hover { transition: transform 0.18s ease, border-color 0.18s ease; }
+.sws-hover:hover { transform: translateY(-1px); border-color: #45453B !important; }
+
+.sws-tile { transition: background-color 0.5s ease, border-color 0.5s ease, color 0.5s ease, transform 0.18s ease; }
+.sws-tile:hover { transform: translateY(-1px); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
