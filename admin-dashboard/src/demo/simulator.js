@@ -1,4 +1,4 @@
-import { ref, get, update, onValue } from "firebase/database";
+import { ref, get, update, onValue, push } from "firebase/database";
 import { database, dataPath, DATA_ROOT } from "../firebase";
 
 export const DEMO_LOTS = {
@@ -39,6 +39,21 @@ function buildDemoData() {
   return { lots, units };
 }
 
+const WEEK_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const DAY_CURVE = [30, 55, 82, 92, 94, 90, 86, 88, 80, 66, 50, 36, 26, 18];
+const DAY_SCALE = [1, 1, 1, 1, 0.88, 0.55, 0.45];
+
+function buildWeek() {
+  const week = {};
+  WEEK_DAYS.forEach((day, i) => {
+    week[day] = DAY_CURVE.map((v) => {
+      const noisy = v * DAY_SCALE[i] + (Math.random() * 10 - 5);
+      return Math.max(4, Math.min(99, Math.round(noisy)));
+    });
+  });
+  return week;
+}
+
 export async function resetDemoData() {
   guard();
   stopSimulation();
@@ -46,11 +61,13 @@ export async function resetDemoData() {
   await update(ref(database), {
     [dataPath("lots")]: lots,
     [dataPath("units")]: units,
+    [dataPath("history")]: { week: buildWeek() },
   });
-  return `Loaded ${Object.keys(units).length} demo curbs across ${Object.keys(lots).length} lots.`;
+  return `Loaded ${Object.keys(units).length} demo curbs across ${Object.keys(lots).length} lots, plus a week of history.`;
 }
 
 let timer = null;
+let tickCount = 0;
 let latestUnits = {};
 let stopListening = null;
 const watchers = new Set();
@@ -63,6 +80,13 @@ export function watchSimulation(fn) {
   watchers.add(fn);
   fn(timer !== null);
   return () => { watchers.delete(fn); };
+}
+
+function recordSnapshot() {
+  const online = Object.values(latestUnits).filter((u) => u.online);
+  if (online.length === 0) return;
+  const pct = Math.round((online.filter((u) => u.occupied).length / online.length) * 100);
+  push(ref(database, dataPath("history/live")), { t: Date.now(), pct });
 }
 
 function tick() {
@@ -89,6 +113,9 @@ function tick() {
   if (Object.keys(changes).length > 0) {
     update(ref(database, dataPath("units")), changes);
   }
+
+  tickCount += 1;
+  if (tickCount % 3 === 0) recordSnapshot();
 }
 
 export function startSimulation() {
