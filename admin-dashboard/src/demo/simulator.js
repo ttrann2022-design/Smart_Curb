@@ -2,10 +2,10 @@ import { ref, get, update, onValue, push } from "firebase/database";
 import { database, dataPath, DATA_ROOT } from "../firebase";
 
 export const DEMO_LOTS = {
-  garage2: { name: "Garage 2 — 4 levels", count: 32, target: 0.72, led: "white", text: "GARAGE 2" },
-  lot12: { name: "Lot 12 — Red Permit", count: 20, target: 0.85, led: "red", text: "RED PERMIT" },
-  lot14: { name: "Lot 14 — Blue Permit", count: 24, target: 0.95, led: "blue", text: "BLUE PERMIT" },
-  lot20: { name: "Lot 20 — Visitor", count: 18, target: 0.55, led: "green", text: "VISITOR" },
+  lot06: { name: "Lot 6", count: 20, target: 0.55, led: "green", text: "LOT 6" },
+  lot07: { name: "Lot 7", count: 24, target: 0.75, led: "blue", text: "LOT 7" },
+  lot12: { name: "Lot 12", count: 28, target: 0.85, led: "red", text: "LOT 12" },
+  lot14: { name: "Lot 14", count: 22, target: 0.95, led: "gold", text: "LOT 14" },
 };
 
 function guard() {
@@ -14,12 +14,24 @@ function guard() {
   }
 }
 
+function lotStats(units) {
+  const stats = {};
+  Object.keys(DEMO_LOTS).forEach((lotId) => { stats[lotId] = { openSpots: 0, totalSpots: 0 }; });
+  Object.values(units).forEach((u) => {
+    const s = stats[u.lot];
+    if (!s) return;
+    s.totalSpots += 1;
+    if (u.online && !u.occupied) s.openSpots += 1;
+  });
+  return stats;
+}
+
 function buildDemoData() {
   const lots = {};
   const units = {};
   let n = 1;
   Object.entries(DEMO_LOTS).forEach(([lotId, lot]) => {
-    lots[lotId] = { name: lot.name };
+    lots[lotId] = { name: lot.name, units: {} };
     for (let i = 0; i < lot.count; i++) {
       const id = "C-" + String(n).padStart(3, "0");
       n += 1;
@@ -31,11 +43,15 @@ function buildDemoData() {
         ledColor: lot.led,
         panelText: lot.text,
       };
+      lots[lotId].units[id] = true;
     }
   });
   units["C-009"].online = false;
   units["C-041"].battery = 11;
   units["C-070"].battery = 16;
+
+  const stats = lotStats(units);
+  Object.keys(lots).forEach((lotId) => Object.assign(lots[lotId], stats[lotId]));
   return { lots, units };
 }
 
@@ -66,6 +82,29 @@ export async function resetDemoData() {
   return `Loaded ${Object.keys(units).length} demo curbs across ${Object.keys(lots).length} lots, plus a week of history.`;
 }
 
+function applyChanges(units, changes) {
+  const next = {};
+  Object.entries(units).forEach(([id, u]) => { next[id] = { ...u }; });
+  Object.entries(changes).forEach(([id, fields]) => { next[id] = { ...(next[id] || {}), ...fields }; });
+  return next;
+}
+
+function commit(currentUnits, changes) {
+  if (Object.keys(changes).length === 0) return Promise.resolve();
+  const next = applyChanges(currentUnits, changes);
+  const updates = {};
+  Object.entries(changes).forEach(([id, fields]) => {
+    Object.entries(fields).forEach(([key, value]) => {
+      updates[dataPath(`units/${id}/${key}`)] = value;
+    });
+  });
+  Object.entries(lotStats(next)).forEach(([lotId, s]) => {
+    updates[dataPath(`lots/${lotId}/openSpots`)] = s.openSpots;
+    updates[dataPath(`lots/${lotId}/totalSpots`)] = s.totalSpots;
+  });
+  return update(ref(database), updates);
+}
+
 let timer = null;
 let tickCount = 0;
 let latestUnits = {};
@@ -94,6 +133,7 @@ function tick() {
   if (ids.length === 0) return;
   const pick = () => ids[Math.floor(Math.random() * ids.length)];
   const changes = {};
+  const change = (id, fields) => { changes[id] = { ...(changes[id] || {}), ...fields }; };
 
   const moves = 2 + Math.floor(Math.random() * 3);
   for (let i = 0; i < moves; i++) {
@@ -101,18 +141,16 @@ function tick() {
     const u = latestUnits[id];
     if (!u || !u.online) continue;
     const target = DEMO_LOTS[u.lot]?.target ?? 0.7;
-    changes[`${id}/occupied`] = Math.random() < target;
+    change(id, { occupied: Math.random() < target });
   }
 
   const b = pick();
   const bu = latestUnits[b];
   if (bu && bu.battery > 20) {
-    changes[`${b}/battery`] = Math.min(100, Math.max(21, bu.battery + (Math.random() < 0.5 ? -1 : 1)));
+    change(b, { battery: Math.min(100, Math.max(21, bu.battery + (Math.random() < 0.5 ? -1 : 1))) });
   }
 
-  if (Object.keys(changes).length > 0) {
-    update(ref(database, dataPath("units")), changes);
-  }
+  commit(latestUnits, changes);
 
   tickCount += 1;
   if (tickCount % 3 === 0) recordSnapshot();
@@ -146,9 +184,9 @@ export async function rushHour(lotId) {
   const all = await readUnits();
   const changes = {};
   Object.entries(all).forEach(([id, u]) => {
-    if (u.lot === lotId && u.online && Math.random() < 0.9) changes[`${id}/occupied`] = true;
+    if (u.lot === lotId && u.online && Math.random() < 0.9) changes[id] = { occupied: true };
   });
-  await update(ref(database, dataPath("units")), changes);
+  await commit(all, changes);
   return `Rush hour: ${Object.keys(changes).length} cars just pulled into ${DEMO_LOTS[lotId].name}.`;
 }
 
@@ -158,7 +196,7 @@ export async function knockCurbOffline() {
   const online = Object.keys(all).filter((id) => all[id].online);
   if (online.length === 0) return "Every curb is already offline.";
   const id = online[Math.floor(Math.random() * online.length)];
-  await update(ref(database, dataPath(`units/${id}`)), { online: false });
+  await commit(all, { [id]: { online: false } });
   return `Curb ${id} stopped reporting. Check the alerts on the Overview.`;
 }
 
@@ -167,9 +205,9 @@ export async function restoreAllCurbs() {
   const all = await readUnits();
   const changes = {};
   Object.entries(all).forEach(([id, u]) => {
-    if (!u.online) changes[`${id}/online`] = true;
+    if (!u.online) changes[id] = { online: true };
   });
   if (Object.keys(changes).length === 0) return "All curbs are already online.";
-  await update(ref(database, dataPath("units")), changes);
+  await commit(all, changes);
   return `Brought ${Object.keys(changes).length} curb(s) back online.`;
 }
