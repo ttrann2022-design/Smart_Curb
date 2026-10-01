@@ -1,7 +1,11 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
+import 'package:geolocator/geolocator.dart';
 import 'firebase_options.dart';
 
 void main() async {
@@ -111,7 +115,9 @@ class MyApp extends StatelessWidget {
             stream: FirebaseAuth.instance.authStateChanges(),
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Scaffold(body: Center(child: CircularProgressIndicator()));
+                return const Scaffold(
+                  body: Center(child: CircularProgressIndicator()),
+                );
               }
               return snapshot.hasData ? const UserSpace() : const LoginPage();
             },
@@ -154,7 +160,10 @@ class _LoginPageState extends State<LoginPage> {
     }
     setState(() => _isLoading = true);
     try {
-      await FirebaseAuth.instance.signInWithEmailAndPassword(email: email, password: password);
+      await FirebaseAuth.instance.signInWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
     } on FirebaseAuthException catch (e) {
       if (mounted) showErrorSnackBar(context, e.message ?? 'Login failed.');
     } finally {
@@ -176,15 +185,26 @@ class _LoginPageState extends State<LoginPage> {
                   'assets/logo.png',
                   height: 140,
                   fit: BoxFit.contain,
-                  errorBuilder: (_, __, ___) => Icon(Icons.radar, size: 100, color: theme.primaryColor),
+                  errorBuilder: (_, __, ___) =>
+                      Icon(Icons.radar, size: 100, color: theme.primaryColor),
                 ),
                 const SizedBox(height: 20),
                 RichText(
                   text: TextSpan(
-                    style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, letterSpacing: 1.5),
+                    style: const TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.5,
+                    ),
                     children: [
-                      TextSpan(text: 'SMART ', style: TextStyle(color: theme.colorScheme.onSurface)),
-                      TextSpan(text: 'CURB', style: TextStyle(color: theme.primaryColor)),
+                      TextSpan(
+                        text: 'SMART ',
+                        style: TextStyle(color: theme.colorScheme.onSurface),
+                      ),
+                      TextSpan(
+                        text: 'CURB',
+                        style: TextStyle(color: theme.primaryColor),
+                      ),
                     ],
                   ),
                 ),
@@ -226,7 +246,10 @@ class _LoginPageState extends State<LoginPage> {
                   ),
                   child: Text(
                     "Don't have an account? Register",
-                    style: TextStyle(color: theme.primaryColor, fontWeight: FontWeight.w600),
+                    style: TextStyle(
+                      color: theme.primaryColor,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ],
@@ -272,7 +295,10 @@ class _RegisterPageState extends State<RegisterPage> {
     }
     setState(() => _isLoading = true);
     try {
-      await FirebaseAuth.instance.createUserWithEmailAndPassword(email: email, password: password);
+      await FirebaseAuth.instance.createUserWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
       if (mounted) Navigator.pop(context);
     } on FirebaseAuthException catch (e) {
       if (mounted) showErrorSnackBar(context, e.message ?? 'Registration failed.');
@@ -296,7 +322,11 @@ class _RegisterPageState extends State<RegisterPage> {
                 const SizedBox(height: 16),
                 Text(
                   'Join Smart Curb',
-                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: theme.colorScheme.onSurface),
+                  style: TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: theme.colorScheme.onSurface,
+                  ),
                 ),
                 const SizedBox(height: 32),
                 AppTextField(
@@ -330,7 +360,10 @@ class _RegisterPageState extends State<RegisterPage> {
                   onPressed: () => Navigator.pop(context),
                   child: Text(
                     'Already have an account? Back to Login',
-                    style: TextStyle(color: theme.primaryColor, fontWeight: FontWeight.w600),
+                    style: TextStyle(
+                      color: theme.primaryColor,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ],
@@ -369,7 +402,9 @@ class _UserSpaceState extends State<UserSpace> {
         title: Container(
           height: 40,
           decoration: BoxDecoration(
-            color: theme.brightness == Brightness.dark ? Colors.white10 : Colors.grey[200],
+            color: theme.brightness == Brightness.dark
+                ? Colors.white10
+                : Colors.grey[200],
             borderRadius: BorderRadius.circular(20),
           ),
           child: TextField(
@@ -377,7 +412,10 @@ class _UserSpaceState extends State<UserSpace> {
             decoration: InputDecoration(
               hintText: 'Search...',
               hintStyle: TextStyle(color: theme.colorScheme.onSurfaceVariant),
-              prefixIcon: Icon(Icons.search, color: theme.colorScheme.onSurfaceVariant),
+              prefixIcon: Icon(
+                Icons.search,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
               border: InputBorder.none,
               contentPadding: const EdgeInsets.symmetric(vertical: 10),
             ),
@@ -391,7 +429,9 @@ class _UserSpaceState extends State<UserSpace> {
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             offset: const Offset(0, 50),
             onSelected: (val) {
-              final page = (val == 'settings') ? const UserSettingsPage() : const UserAboutPage();
+              final page = (val == 'settings')
+                  ? const UserSettingsPage()
+                  : const UserAboutPage();
               Navigator.push(context, MaterialPageRoute(builder: (_) => page));
             },
             itemBuilder: (_) => [
@@ -415,14 +455,22 @@ class _UserSpaceState extends State<UserSpace> {
         type: BottomNavigationBarType.fixed,
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
-          BottomNavigationBarItem(icon: Icon(Icons.directions_car), label: 'Vehicle'),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.directions_car),
+            label: 'Vehicle',
+          ),
           BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
         ],
       ),
     );
   }
 
-  PopupMenuItem<String> _buildMenuItem(String val, IconData icon, String label, ThemeData theme) {
+  PopupMenuItem<String> _buildMenuItem(
+    String val,
+    IconData icon,
+    String label,
+    ThemeData theme,
+  ) {
     return PopupMenuItem(
       value: val,
       child: Row(
@@ -437,14 +485,25 @@ class _UserSpaceState extends State<UserSpace> {
 }
 
 // ==========================================
-// TAB 1: HOME
+// TAB 1: HOME (Places & Campus Management)
 // ==========================================
 
 class _HomeTab extends StatelessWidget {
   const _HomeTab();
 
+  static const List<Map<String, String>> _availableCampuses = [
+    {
+      'id': 'fau_boca',
+      'shortName': 'FAU',
+      'fullName': 'Florida Atlantic University',
+      'address': '777 Glades Rd, Boca Raton, FL 33431',
+    },
+  ];
+
   void _showAddSpaceDialog(BuildContext context) {
     final theme = Theme.of(context);
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+
     showDialog(
       context: context,
       barrierDismissible: true,
@@ -454,17 +513,109 @@ class _HomeTab extends StatelessWidget {
         insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
         child: Container(
           width: double.infinity,
-          constraints: const BoxConstraints(maxWidth: 700, minHeight: 450),
-          padding: const EdgeInsets.all(16.0),
+          constraints: const BoxConstraints(maxWidth: 550, maxHeight: 600),
+          padding: const EdgeInsets.all(20.0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              IconButton(
-                icon: const Icon(Icons.close),
-                color: theme.colorScheme.onSurface,
-                onPressed: () => Navigator.of(dialogCtx).pop(),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    color: theme.colorScheme.onSurface,
+                    tooltip: 'Close',
+                    onPressed: () => Navigator.of(dialogCtx).pop(),
+                  ),
+                  Text(
+                    'Select Location',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: theme.colorScheme.onSurface,
+                    ),
+                  ),
+                  const SizedBox(width: 48),
+                ],
               ),
-              const Expanded(child: SizedBox()),
+              const Divider(height: 24),
+              Expanded(
+                child: ListView.builder(
+                  itemCount: _availableCampuses.length,
+                  itemBuilder: (context, index) {
+                    final campus = _availableCampuses[index];
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 12.0),
+                      padding: const EdgeInsets.all(16.0),
+                      decoration: BoxDecoration(
+                        color: theme.scaffoldBackgroundColor,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: theme.dividerColor),
+                      ),
+                      child: Row(
+                        children: [
+                          _buildCampusLogo(campus['shortName']!, theme),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  campus['fullName']!,
+                                  style: TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.bold,
+                                    color: theme.colorScheme.onSurface,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  campus['address']!,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: theme.colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          ElevatedButton(
+                            onPressed: () {
+                              Navigator.of(dialogCtx).pop();
+                              if (uid != null) {
+                                FirebaseDatabase.instance
+                                    .ref('drivers/$uid/locations/${campus['id']}')
+                                    .set({
+                                  'shortName': campus['shortName'],
+                                  'fullName': campus['fullName'],
+                                  'address': campus['address'],
+                                  'addedAt': ServerValue.timestamp,
+                                });
+                              }
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: theme.primaryColor,
+                              foregroundColor: const Color(0xFF12110F),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 10,
+                              ),
+                            ),
+                            child: const Text(
+                              'Add',
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
             ],
           ),
         ),
@@ -472,18 +623,554 @@ class _HomeTab extends StatelessWidget {
     );
   }
 
+  static Widget _buildCampusLogo(String shortName, ThemeData theme) {
+    return Container(
+      width: 52,
+      height: 52,
+      decoration: BoxDecoration(
+        color: const Color(0xFF003366),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFCC0000), width: 1.5),
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        shortName,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 16,
+          fontWeight: FontWeight.w900,
+          letterSpacing: 1,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return AnimatedAddCard(
-      title: 'No Locations Found',
-      subtitle: 'Tap to add a new parking space',
-      onTap: () => _showAddSpaceDialog(context),
+    final theme = Theme.of(context);
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+
+    if (uid == null) {
+      return const Center(child: Text('User not signed in.'));
+    }
+
+    return StreamBuilder<DatabaseEvent>(
+      stream: FirebaseDatabase.instance.ref('drivers/$uid/locations').onValue,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
+        final rawData = snapshot.data?.snapshot.value;
+
+        if (rawData == null) {
+          return AnimatedAddCard(
+            title: 'No Locations Found',
+            subtitle: 'Tap to add a new parking space',
+            onTap: () => _showAddSpaceDialog(context),
+          );
+        }
+
+        final locationsMap = Map<dynamic, dynamic>.from(rawData as Map);
+        final locationEntries = locationsMap.entries.toList();
+
+        return ListView(
+          padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0),
+          children: [
+            ...locationEntries.map((entry) {
+              final locKey = entry.key.toString();
+              final data = Map<String, dynamic>.from(entry.value as Map);
+              final shortName = data['shortName']?.toString() ?? 'FAU';
+              final fullName =
+                  data['fullName']?.toString() ?? 'Florida Atlantic University';
+              final address = data['address']?.toString() ??
+                  '777 Glades Rd, Boca Raton, FL 33431';
+
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 12.0),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(16),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const FauMapScreen(),
+                      ),
+                    );
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.all(20.0),
+                    decoration: BoxDecoration(
+                      color: theme.cardColor,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: theme.dividerColor, width: 1.5),
+                    ),
+                    child: Row(
+                      children: [
+                        _buildCampusLogo(shortName, theme),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                fullName,
+                                style: TextStyle(
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.bold,
+                                  color: theme.colorScheme.onSurface,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                address,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline, size: 20),
+                          color: Colors.redAccent.withOpacity(0.7),
+                          tooltip: 'Remove Place',
+                          onPressed: () {
+                            FirebaseDatabase.instance
+                                .ref('drivers/$uid/locations/$locKey')
+                                .remove();
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }),
+            const SizedBox(height: 8),
+            OutlinedButton(
+              onPressed: () => _showAddSpaceDialog(context),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                side: BorderSide(color: theme.primaryColor, width: 1.5),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: Text(
+                'Add more place',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: theme.primaryColor,
+                ),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }
 
 // ==========================================
-// TAB 2: VEHICLES (Realtime Database -> drivers)
+// FAU CAMPUS MAP SCREEN (Bounded & Live GPS)
+// ==========================================
+
+class FauMapScreen extends StatefulWidget {
+  const FauMapScreen({super.key});
+
+  @override
+  State<FauMapScreen> createState() => _FauMapScreenState();
+}
+
+class _FauMapScreenState extends State<FauMapScreen> {
+  final MapController _mapController = MapController();
+  StreamSubscription<Position>? _positionStreamSub;
+  LatLng? _currentUserLocation;
+  bool _isLocating = false;
+  String _gpsStatus = 'Searching for GPS...';
+
+  // Exact coordinates covering the full screenshot frame
+  static final LatLngBounds _fauBounds = LatLngBounds(
+    const LatLng(26.3630, -80.1170), // South-West corner (Glades Rd / Airport Rd)
+    const LatLng(26.3860, -80.0890), // North-East corner (NW Spanish River Blvd / 1st Ave)
+  );
+
+  // Exact center of the screenshot
+  static const LatLng _fauCenter = LatLng(26.3745, -80.1030);
+
+  @override
+  void initState() {
+    super.initState();
+    _startLiveLocationTracking();
+  }
+
+  @override
+  void dispose() {
+    _positionStreamSub?.cancel();
+    super.dispose();
+  }
+
+  /// Request permissions and listen to continuous device GPS coordinates
+  Future<void> _startLiveLocationTracking() async {
+    setState(() {
+      _isLocating = true;
+      _gpsStatus = 'Requesting GPS permissions...';
+    });
+
+    try {
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        setState(() {
+          _isLocating = false;
+          _gpsStatus = 'Location services are disabled.';
+        });
+        return;
+      }
+
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          setState(() {
+            _isLocating = false;
+            _gpsStatus = 'GPS permission denied.';
+          });
+          return;
+        }
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        setState(() {
+          _isLocating = false;
+          _gpsStatus = 'GPS permissions permanently denied.';
+        });
+        return;
+      }
+
+      // Read initial position
+      final initialPos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+      );
+
+      if (mounted) {
+        setState(() {
+          _currentUserLocation = LatLng(initialPos.latitude, initialPos.longitude);
+          _isLocating = false;
+          _gpsStatus =
+              'GPS Active: ${initialPos.latitude.toStringAsFixed(4)}, ${initialPos.longitude.toStringAsFixed(4)}';
+        });
+      }
+
+      // Stream continuous movement
+      const locationSettings = LocationSettings(
+        accuracy: LocationAccuracy.bestForNavigation,
+        distanceFilter: 2, // Emits an update every 2 meters moved
+      );
+
+      _positionStreamSub = Geolocator.getPositionStream(
+        locationSettings: locationSettings,
+      ).listen(
+        (Position position) {
+          if (!mounted) return;
+          setState(() {
+            _currentUserLocation = LatLng(position.latitude, position.longitude);
+            _isLocating = false;
+            _gpsStatus =
+                'Live GPS: ${position.latitude.toStringAsFixed(4)}, ${position.longitude.toStringAsFixed(4)}';
+          });
+        },
+        onError: (err) {
+          if (!mounted) return;
+          setState(() {
+            _isLocating = false;
+            _gpsStatus = 'GPS Stream Error: $err';
+          });
+        },
+      );
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLocating = false;
+          _gpsStatus = 'Error reading GPS: $e';
+        });
+      }
+    }
+  }
+
+  void _recenterOnUser() {
+    if (_currentUserLocation != null) {
+      if (_fauBounds.contains(_currentUserLocation!)) {
+        _mapController.move(_currentUserLocation!, 17.5);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Your GPS (${_currentUserLocation!.latitude.toStringAsFixed(3)}, ${_currentUserLocation!.longitude.toStringAsFixed(3)}) is outside FAU campus bounds.',
+            ),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } else {
+      _startLiveLocationTracking();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'FAU Campus Map',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            Text(
+              'Boca Raton Main Campus',
+              style: TextStyle(
+                fontSize: 12,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new, size: 20),
+          onPressed: () => Navigator.pop(context),
+        ),
+        actions: [
+          IconButton(
+            icon: _isLocating
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Icon(Icons.my_location),
+            tooltip: 'My Location',
+            onPressed: _recenterOnUser,
+          ),
+          IconButton(
+            icon: const Icon(Icons.center_focus_strong),
+            tooltip: 'Campus Center',
+            onPressed: () => _mapController.move(_fauCenter, 15.3),
+          ),
+        ],
+      ),
+      body: Stack(
+        children: [
+          FlutterMap(
+            mapController: _mapController,
+            options: MapOptions(
+              // Opens centered on the FAU campus screenshot
+              initialCenter: _fauCenter,
+              initialZoom: 15.3,
+              // Hard floor: user CANNOT zoom out beyond this screenshot
+              minZoom: 15.0,
+              // Deep zoom: user CAN zoom in up to individual parking spaces
+              maxZoom: 19.5,
+              // Hard boundary: panning cannot leave the FAU perimeter
+              cameraConstraint: CameraConstraint.containCenter(bounds: _fauBounds),
+              interactionOptions: const InteractionOptions(
+                flags: InteractiveFlag.pinchZoom |
+                    InteractiveFlag.drag |
+                    InteractiveFlag.doubleTapZoom |
+                    InteractiveFlag.scrollWheelZoom,
+              ),
+            ),
+            children: [
+              TileLayer(
+                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                userAgentPackageName: 'com.smartcurb.app',
+                maxNativeZoom: 19,
+                maxZoom: 20,
+              ),
+              MarkerLayer(
+                markers: [
+                  // --- Live User GPS Location Puck ---
+                  if (_currentUserLocation != null)
+                    Marker(
+                      point: _currentUserLocation!,
+                      width: 38,
+                      height: 38,
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          Container(
+                            width: 38,
+                            height: 38,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFC6F24A).withOpacity(0.35),
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          Container(
+                            width: 22,
+                            height: 22,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFC6F24A),
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.black, width: 2.5),
+                              boxShadow: const [
+                                BoxShadow(color: Colors.black45, blurRadius: 6),
+                              ],
+                            ),
+                            child: const Center(
+                              child: Icon(
+                                Icons.navigation,
+                                size: 11,
+                                color: Color(0xFF12110F),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                  // --- Parking Lot Status Badges ---
+                  _buildLotMarker(
+                    point: const LatLng(26.3742, -80.1042),
+                    name: 'Lot 12',
+                    status: '24/80',
+                    badgeColor: const Color(0xFFC6F24A),
+                  ),
+                  _buildLotMarker(
+                    point: const LatLng(26.3718, -80.1008),
+                    name: 'Lot 14',
+                    status: '65/96',
+                    badgeColor: const Color(0xFFF5A623),
+                  ),
+                  _buildLotMarker(
+                    point: const LatLng(26.3698, -80.1055),
+                    name: 'Garage 2',
+                    status: '158/160',
+                    badgeColor: const Color(0xFFF2694C),
+                  ),
+                ],
+              ),
+            ],
+          ),
+
+          // Floating bottom status bar
+          Positioned(
+            bottom: 24,
+            left: 20,
+            right: 20,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              decoration: BoxDecoration(
+                color: theme.cardColor,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: theme.dividerColor),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Colors.black54,
+                    blurRadius: 10,
+                    offset: Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    _currentUserLocation != null ? Icons.gps_fixed : Icons.gps_not_fixed,
+                    color: _currentUserLocation != null ? theme.primaryColor : Colors.amber,
+                    size: 22,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Florida Atlantic University',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: theme.colorScheme.onSurface,
+                          ),
+                        ),
+                        Text(
+                          _gpsStatus,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Marker _buildLotMarker({
+    required LatLng point,
+    required String name,
+    required String status,
+    required Color badgeColor,
+  }) {
+    return Marker(
+      point: point,
+      width: 90,
+      height: 48,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: const Color(0xFF0F0F0D),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: badgeColor, width: 2),
+          boxShadow: [
+            BoxShadow(
+              color: badgeColor.withOpacity(0.3),
+              blurRadius: 6,
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              name,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 11,
+              ),
+            ),
+            Text(
+              status,
+              style: TextStyle(
+                color: badgeColor,
+                fontWeight: FontWeight.w800,
+                fontSize: 11,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ==========================================
+// TAB 2: VEHICLES
 // ==========================================
 
 class _VehicleTab extends StatelessWidget {
@@ -497,7 +1184,11 @@ class _VehicleTab extends StatelessWidget {
     );
   }
 
-  void _showVehicleDetails(BuildContext context, Map<String, dynamic> data, String key) {
+  void _showVehicleDetails(
+    BuildContext context,
+    Map<String, dynamic> data,
+    String key,
+  ) {
     final theme = Theme.of(context);
     showDialog(
       context: context,
@@ -520,10 +1211,22 @@ class _VehicleTab extends StatelessWidget {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            DetailInfoRow(label: 'Plate Number', value: data['plate']?.toString() ?? 'N/A'),
-            DetailInfoRow(label: 'Manufacturer', value: data['manufacturer']?.toString() ?? 'N/A'),
-            DetailInfoRow(label: 'Year', value: data['year']?.toString() ?? 'N/A'),
-            DetailInfoRow(label: 'Color', value: data['color']?.toString() ?? 'N/A'),
+            DetailInfoRow(
+              label: 'Plate Number',
+              value: data['plate']?.toString() ?? 'N/A',
+            ),
+            DetailInfoRow(
+              label: 'Manufacturer',
+              value: data['manufacturer']?.toString() ?? 'N/A',
+            ),
+            DetailInfoRow(
+              label: 'Year',
+              value: data['year']?.toString() ?? 'N/A',
+            ),
+            DetailInfoRow(
+              label: 'Color',
+              value: data['color']?.toString() ?? 'N/A',
+            ),
           ],
         ),
         actions: [
@@ -532,17 +1235,22 @@ class _VehicleTab extends StatelessWidget {
               Navigator.of(ctx).pop();
               final uid = FirebaseAuth.instance.currentUser?.uid;
               if (uid != null) {
-                // Delete from Realtime Database under drivers
                 FirebaseDatabase.instance
                     .ref('drivers/$uid/vehicles/$key')
                     .remove();
               }
             },
-            child: const Text('Delete Vehicle', style: TextStyle(color: Colors.redAccent)),
+            child: const Text(
+              'Delete Vehicle',
+              style: TextStyle(color: Colors.redAccent),
+            ),
           ),
           ElevatedButton(
             onPressed: () => Navigator.of(ctx).pop(),
-            style: ElevatedButton.styleFrom(backgroundColor: theme.primaryColor, foregroundColor: Colors.black),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: theme.primaryColor,
+              foregroundColor: Colors.black,
+            ),
             child: const Text('Close'),
           ),
         ],
@@ -558,11 +1266,15 @@ class _VehicleTab extends StatelessWidget {
     final theme = Theme.of(context);
 
     return StreamBuilder<DatabaseEvent>(
-      // Listen to Realtime Database at drivers/{uid}/vehicles
       stream: FirebaseDatabase.instance.ref('drivers/$uid/vehicles').onValue,
       builder: (context, snapshot) {
         if (snapshot.hasError) {
-          return Center(child: Text('Error: ${snapshot.error}', style: const TextStyle(color: Colors.redAccent)));
+          return Center(
+            child: Text(
+              'Error: ${snapshot.error}',
+              style: const TextStyle(color: Colors.redAccent),
+            ),
+          );
         }
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
@@ -592,7 +1304,10 @@ class _VehicleTab extends StatelessWidget {
                   borderRadius: BorderRadius.circular(12),
                   onTap: () => _showVehicleDetails(context, data, key),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 24,
+                      vertical: 20,
+                    ),
                     decoration: BoxDecoration(
                       color: theme.cardColor,
                       borderRadius: BorderRadius.circular(12),
@@ -603,11 +1318,19 @@ class _VehicleTab extends StatelessWidget {
                       children: [
                         Text(
                           data['model']?.toString() ?? 'Unknown Model',
-                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: theme.colorScheme.onSurface),
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: theme.colorScheme.onSurface,
+                          ),
                         ),
                         Text(
                           data['plate']?.toString() ?? 'No Plate',
-                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: theme.primaryColor),
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: theme.primaryColor,
+                          ),
                         ),
                       ],
                     ),
@@ -621,11 +1344,17 @@ class _VehicleTab extends StatelessWidget {
               style: OutlinedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 side: BorderSide(color: theme.primaryColor, width: 1.5),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
               child: Text(
                 'Add more vehicle',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: theme.primaryColor),
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: theme.primaryColor,
+                ),
               ),
             ),
           ],
@@ -663,7 +1392,10 @@ class _VehicleFormDialogState extends State<_VehicleFormDialog> {
     final model = _modelCtrl.text.trim();
     final plate = _plateCtrl.text.trim();
     if (model.isEmpty || plate.isEmpty) {
-      showErrorSnackBar(context, 'Please fill out at least Model and License Plate.');
+      showErrorSnackBar(
+        context,
+        'Please fill out at least Model and License Plate.',
+      );
       return;
     }
 
@@ -671,7 +1403,6 @@ class _VehicleFormDialogState extends State<_VehicleFormDialog> {
 
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid != null) {
-      // Push new record to Realtime Database under drivers/{uid}/vehicles
       FirebaseDatabase.instance.ref('drivers/$uid/vehicles').push().set({
         'manufacturer': _manufacturerCtrl.text.trim(),
         'model': model,
@@ -698,22 +1429,57 @@ class _VehicleFormDialogState extends State<_VehicleFormDialog> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('Add New Vehicle', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: theme.colorScheme.onSurface)),
-                IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.of(context).pop()),
+                Text(
+                  'Add New Vehicle',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: theme.colorScheme.onSurface,
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
               ],
             ),
             const SizedBox(height: 16),
-            AppTextField(controller: _manufacturerCtrl, hintText: 'Manufacturer (e.g. Toyota)', icon: Icons.business),
+            AppTextField(
+              controller: _manufacturerCtrl,
+              hintText: 'Manufacturer (e.g. Toyota)',
+              icon: Icons.business,
+            ),
             const SizedBox(height: 12),
-            AppTextField(controller: _modelCtrl, hintText: 'Model (e.g. RAV 4)', icon: Icons.directions_car),
+            AppTextField(
+              controller: _modelCtrl,
+              hintText: 'Model (e.g. RAV 4)',
+              icon: Icons.directions_car,
+            ),
             const SizedBox(height: 12),
-            AppTextField(controller: _plateCtrl, hintText: 'License Plate (e.g. S108123)', icon: Icons.pin),
+            AppTextField(
+              controller: _plateCtrl,
+              hintText: 'License Plate (e.g. S108123)',
+              icon: Icons.pin,
+            ),
             const SizedBox(height: 12),
             Row(
               children: [
-                Expanded(child: AppTextField(controller: _yearCtrl, hintText: 'Year (e.g. 2024)', icon: Icons.calendar_today, keyboardType: TextInputType.number)),
+                Expanded(
+                  child: AppTextField(
+                    controller: _yearCtrl,
+                    hintText: 'Year (e.g. 2024)',
+                    icon: Icons.calendar_today,
+                    keyboardType: TextInputType.number,
+                  ),
+                ),
                 const SizedBox(width: 12),
-                Expanded(child: AppTextField(controller: _colorCtrl, hintText: 'Color (e.g. Silver)', icon: Icons.color_lens)),
+                Expanded(
+                  child: AppTextField(
+                    controller: _colorCtrl,
+                    hintText: 'Color (e.g. Silver)',
+                    icon: Icons.color_lens,
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 24),
@@ -726,7 +1492,9 @@ class _VehicleFormDialogState extends State<_VehicleFormDialog> {
                       foregroundColor: theme.colorScheme.onSurface,
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       side: BorderSide(color: theme.dividerColor),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
                     ),
                     child: const Text('Cancel'),
                   ),
@@ -739,9 +1507,14 @@ class _VehicleFormDialogState extends State<_VehicleFormDialog> {
                       backgroundColor: theme.primaryColor,
                       foregroundColor: Colors.black,
                       padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
                     ),
-                    child: const Text('Confirm', style: TextStyle(fontWeight: FontWeight.bold)),
+                    child: const Text(
+                      'Confirm',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
                   ),
                 ),
               ],
@@ -754,7 +1527,7 @@ class _VehicleFormDialogState extends State<_VehicleFormDialog> {
 }
 
 // ==========================================
-// TAB 3: PROFILE (Realtime Database -> drivers)
+// TAB 3: PROFILE
 // ==========================================
 
 class _ProfileTab extends StatelessWidget {
@@ -776,8 +1549,9 @@ class _ProfileTab extends StatelessWidget {
     final theme = Theme.of(context);
 
     return StreamBuilder<DatabaseEvent>(
-      // Listen to Realtime Database at drivers/{uid}/profile
-      stream: FirebaseDatabase.instance.ref('drivers/${user.uid}/profile').onValue,
+      stream: FirebaseDatabase.instance
+          .ref('drivers/${user.uid}/profile')
+          .onValue,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
@@ -831,7 +1605,11 @@ class _ProfileTab extends StatelessWidget {
                           CircleAvatar(
                             radius: 34,
                             backgroundColor: theme.scaffoldBackgroundColor,
-                            child: Icon(Icons.person, size: 38, color: theme.primaryColor),
+                            child: Icon(
+                              Icons.person,
+                              size: 38,
+                              color: theme.primaryColor,
+                            ),
                           ),
                           const SizedBox(width: 16),
                           Expanded(
@@ -840,10 +1618,20 @@ class _ProfileTab extends StatelessWidget {
                               children: [
                                 Text(
                                   fullName,
-                                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: theme.colorScheme.onSurface),
+                                  style: TextStyle(
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.bold,
+                                    color: theme.colorScheme.onSurface,
+                                  ),
                                 ),
                                 const SizedBox(height: 4),
-                                Text(user.email ?? '', style: TextStyle(fontSize: 14, color: theme.colorScheme.onSurfaceVariant)),
+                                Text(
+                                  user.email ?? '',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    color: theme.colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
                               ],
                             ),
                           ),
@@ -860,9 +1648,15 @@ class _ProfileTab extends StatelessWidget {
                       ),
                       child: Column(
                         children: [
-                          DetailInfoRow(label: 'Phone Number', value: data['phone']?.toString() ?? 'N/A'),
+                          DetailInfoRow(
+                            label: 'Phone Number',
+                            value: data['phone']?.toString() ?? 'N/A',
+                          ),
                           const Divider(height: 20),
-                          DetailInfoRow(label: 'Gender', value: data['gender']?.toString() ?? 'N/A'),
+                          DetailInfoRow(
+                            label: 'Gender',
+                            value: data['gender']?.toString() ?? 'N/A',
+                          ),
                           const Divider(height: 20),
                           DetailInfoRow(label: 'Address', value: fullAddress),
                         ],
@@ -872,7 +1666,10 @@ class _ProfileTab extends StatelessWidget {
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24.0,
+                  vertical: 16.0,
+                ),
                 child: PrimaryButton(
                   title: 'Edit Information',
                   icon: Icons.edit_outlined,
@@ -915,13 +1712,15 @@ class _ContactInfoDialogState extends State<_ContactInfoDialog> {
     _phoneCtrl = TextEditingController(text: d?['phone']?.toString() ?? '');
     _firstCtrl = TextEditingController(text: d?['firstName']?.toString() ?? '');
     _lastCtrl = TextEditingController(text: d?['lastName']?.toString() ?? '');
-    _middleCtrl = TextEditingController(text: d?['middleName']?.toString() ?? '');
+    _middleCtrl =
+        TextEditingController(text: d?['middleName']?.toString() ?? '');
     _addr1Ctrl = TextEditingController(text: d?['address1']?.toString() ?? '');
     _addr2Ctrl = TextEditingController(text: d?['address2']?.toString() ?? '');
     _cityCtrl = TextEditingController(text: d?['city']?.toString() ?? '');
     _stateCtrl = TextEditingController(text: d?['state']?.toString() ?? '');
     _zipCtrl = TextEditingController(text: d?['zipCode']?.toString() ?? '');
-    _countryCtrl = TextEditingController(text: d?['country']?.toString() ?? '');
+    _countryCtrl =
+        TextEditingController(text: d?['country']?.toString() ?? '');
     _gender = d?['gender']?.toString();
   }
 
@@ -958,7 +1757,6 @@ class _ContactInfoDialogState extends State<_ContactInfoDialog> {
 
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid != null) {
-      // Save profile to Realtime Database under drivers/{uid}/profile
       FirebaseDatabase.instance.ref('drivers/$uid/profile').update({
         'firstName': _firstCtrl.text.trim(),
         'lastName': _lastCtrl.text.trim(),
@@ -994,27 +1792,60 @@ class _ContactInfoDialogState extends State<_ContactInfoDialog> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    widget.existingData == null ? 'Add Contact Info' : 'Edit Contact Info',
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: theme.colorScheme.onSurface),
+                    widget.existingData == null
+                        ? 'Add Contact Info'
+                        : 'Edit Contact Info',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: theme.colorScheme.onSurface,
+                    ),
                   ),
-                  IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.of(context).pop()),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
                 ],
               ),
               const SizedBox(height: 16),
               Row(
                 children: [
-                  Expanded(child: AppTextField(controller: _firstCtrl, hintText: 'First Name *', icon: Icons.person_outline)),
+                  Expanded(
+                    child: AppTextField(
+                      controller: _firstCtrl,
+                      hintText: 'First Name *',
+                      icon: Icons.person_outline,
+                    ),
+                  ),
                   const SizedBox(width: 10),
-                  Expanded(child: AppTextField(controller: _lastCtrl, hintText: 'Last Name *', icon: Icons.person_outline)),
+                  Expanded(
+                    child: AppTextField(
+                      controller: _lastCtrl,
+                      hintText: 'Last Name *',
+                      icon: Icons.person_outline,
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 12),
-              AppTextField(controller: _middleCtrl, hintText: 'Middle Name (Optional)', icon: Icons.badge_outlined),
+              AppTextField(
+                controller: _middleCtrl,
+                hintText: 'Middle Name (Optional)',
+                icon: Icons.badge_outlined,
+              ),
               const SizedBox(height: 12),
-              AppTextField(controller: _phoneCtrl, hintText: 'Phone Number *', icon: Icons.phone_outlined, keyboardType: TextInputType.phone),
+              AppTextField(
+                controller: _phoneCtrl,
+                hintText: 'Phone Number *',
+                icon: Icons.phone_outlined,
+                keyboardType: TextInputType.phone,
+              ),
               const SizedBox(height: 12),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 4,
+                ),
                 decoration: BoxDecoration(
                   color: theme.cardColor,
                   borderRadius: BorderRadius.circular(12),
@@ -1028,7 +1859,12 @@ class _ContactInfoDialogState extends State<_ContactInfoDialog> {
                       children: [
                         Icon(Icons.transgender, color: theme.primaryColor),
                         const SizedBox(width: 12),
-                        Text('Gender *', style: TextStyle(color: theme.colorScheme.onSurfaceVariant)),
+                        Text(
+                          'Gender *',
+                          style: TextStyle(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
                       ],
                     ),
                     dropdownColor: theme.cardColor,
@@ -1043,23 +1879,56 @@ class _ContactInfoDialogState extends State<_ContactInfoDialog> {
                 ),
               ),
               const SizedBox(height: 12),
-              AppTextField(controller: _addr1Ctrl, hintText: 'Address Line 1 *', icon: Icons.home_outlined),
+              AppTextField(
+                controller: _addr1Ctrl,
+                hintText: 'Address Line 1 *',
+                icon: Icons.home_outlined,
+              ),
               const SizedBox(height: 12),
-              AppTextField(controller: _addr2Ctrl, hintText: 'Address Line 2 (Optional)', icon: Icons.location_city_outlined),
+              AppTextField(
+                controller: _addr2Ctrl,
+                hintText: 'Address Line 2 (Optional)',
+                icon: Icons.location_city_outlined,
+              ),
               const SizedBox(height: 12),
               Row(
                 children: [
-                  Expanded(child: AppTextField(controller: _cityCtrl, hintText: 'City *', icon: Icons.location_on_outlined)),
+                  Expanded(
+                    child: AppTextField(
+                      controller: _cityCtrl,
+                      hintText: 'City *',
+                      icon: Icons.location_on_outlined,
+                    ),
+                  ),
                   const SizedBox(width: 10),
-                  Expanded(child: AppTextField(controller: _stateCtrl, hintText: 'State *', icon: Icons.map_outlined)),
+                  Expanded(
+                    child: AppTextField(
+                      controller: _stateCtrl,
+                      hintText: 'State *',
+                      icon: Icons.map_outlined,
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 12),
               Row(
                 children: [
-                  Expanded(child: AppTextField(controller: _zipCtrl, hintText: 'Zip Code *', icon: Icons.markunread_mailbox_outlined, keyboardType: TextInputType.number)),
+                  Expanded(
+                    child: AppTextField(
+                      controller: _zipCtrl,
+                      hintText: 'Zip Code *',
+                      icon: Icons.markunread_mailbox_outlined,
+                      keyboardType: TextInputType.number,
+                    ),
+                  ),
                   const SizedBox(width: 10),
-                  Expanded(child: AppTextField(controller: _countryCtrl, hintText: 'Country *', icon: Icons.public_outlined)),
+                  Expanded(
+                    child: AppTextField(
+                      controller: _countryCtrl,
+                      hintText: 'Country *',
+                      icon: Icons.public_outlined,
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 24),
@@ -1072,7 +1941,9 @@ class _ContactInfoDialogState extends State<_ContactInfoDialog> {
                         foregroundColor: theme.colorScheme.onSurface,
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         side: BorderSide(color: theme.dividerColor),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
                       ),
                       child: const Text('Cancel'),
                     ),
@@ -1085,9 +1956,14 @@ class _ContactInfoDialogState extends State<_ContactInfoDialog> {
                         backgroundColor: theme.primaryColor,
                         foregroundColor: Colors.black,
                         padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
                       ),
-                      child: const Text('Confirm', style: TextStyle(fontWeight: FontWeight.bold)),
+                      child: const Text(
+                        'Confirm',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
                     ),
                   ),
                 ],
@@ -1136,9 +2012,15 @@ class AppTextField extends StatelessWidget {
         style: TextStyle(color: theme.colorScheme.onSurface),
         decoration: InputDecoration(
           border: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 16,
+          ),
           hintText: hintText,
-          hintStyle: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 14),
+          hintStyle: TextStyle(
+            color: theme.colorScheme.onSurfaceVariant,
+            fontSize: 14,
+          ),
           prefixIcon: Icon(icon, color: theme.primaryColor, size: 20),
         ),
       ),
@@ -1178,15 +2060,25 @@ class PrimaryButton extends StatelessWidget {
             ? const SizedBox(
                 height: 20,
                 width: 20,
-                child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF12110F)),
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Color(0xFF12110F),
+                ),
               )
             : Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  if (icon != null) ...[Icon(icon, size: 20), const SizedBox(width: 8)],
+                  if (icon != null) ...[
+                    Icon(icon, size: 20),
+                    const SizedBox(width: 8),
+                  ],
                   Text(
                     title,
-                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, letterSpacing: 0.5),
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.5,
+                    ),
                   ),
                 ],
               ),
@@ -1209,13 +2101,23 @@ class DetailInfoRow extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 14)),
+          Text(
+            label,
+            style: TextStyle(
+              color: theme.colorScheme.onSurfaceVariant,
+              fontSize: 14,
+            ),
+          ),
           const SizedBox(width: 8),
           Flexible(
             child: Text(
               value,
               textAlign: TextAlign.right,
-              style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: FontWeight.bold, fontSize: 14),
+              style: TextStyle(
+                color: theme.colorScheme.onSurface,
+                fontWeight: FontWeight.bold,
+                fontSize: 14,
+              ),
             ),
           ),
         ],
@@ -1267,11 +2169,19 @@ class _AnimatedAddCardState extends State<AnimatedAddCard> {
               color: theme.cardColor,
               borderRadius: BorderRadius.circular(16),
               border: Border.all(
-                color: _isPressed ? theme.primaryColor.withOpacity(0.6) : theme.dividerColor,
+                color: _isPressed
+                    ? theme.primaryColor.withOpacity(0.6)
+                    : theme.dividerColor,
                 width: 2,
               ),
               boxShadow: _isPressed
-                  ? [BoxShadow(color: theme.primaryColor.withOpacity(0.15), blurRadius: 20, spreadRadius: 2)]
+                  ? [
+                      BoxShadow(
+                        color: theme.primaryColor.withOpacity(0.15),
+                        blurRadius: 20,
+                        spreadRadius: 2,
+                      ),
+                    ]
                   : null,
             ),
             child: Column(
@@ -1285,7 +2195,9 @@ class _AnimatedAddCardState extends State<AnimatedAddCard> {
                     shape: BoxShape.circle,
                     boxShadow: [
                       BoxShadow(
-                        color: _isPressed ? theme.primaryColor.withOpacity(0.4) : theme.primaryColor.withOpacity(0.1),
+                        color: _isPressed
+                            ? theme.primaryColor.withOpacity(0.4)
+                            : theme.primaryColor.withOpacity(0.1),
                         blurRadius: _isPressed ? 25 : 15,
                         spreadRadius: _isPressed ? 8 : 5,
                       ),
@@ -1294,9 +2206,22 @@ class _AnimatedAddCardState extends State<AnimatedAddCard> {
                   child: Icon(Icons.add, size: 40, color: theme.primaryColor),
                 ),
                 const SizedBox(height: 20),
-                Text(widget.title, style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 18, fontWeight: FontWeight.bold)),
+                Text(
+                  widget.title,
+                  style: TextStyle(
+                    color: theme.colorScheme.onSurface,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
                 const SizedBox(height: 8),
-                Text(widget.subtitle, style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 14)),
+                Text(
+                  widget.subtitle,
+                  style: TextStyle(
+                    color: theme.colorScheme.onSurfaceVariant,
+                    fontSize: 14,
+                  ),
+                ),
               ],
             ),
           ),
@@ -1323,17 +2248,27 @@ class UserSettingsPage extends StatelessWidget {
         children: [
           ListTile(
             leading: Icon(Icons.dark_mode, color: theme.primaryColor),
-            title: Text('Dark Mode', style: TextStyle(color: theme.colorScheme.onSurface)),
+            title: Text(
+              'Dark Mode',
+              style: TextStyle(color: theme.colorScheme.onSurface),
+            ),
             trailing: Switch(
               value: themeNotifier.value == ThemeMode.dark,
-              onChanged: (val) => themeNotifier.value = val ? ThemeMode.dark : ThemeMode.light,
+              onChanged: (val) =>
+                  themeNotifier.value = val ? ThemeMode.dark : ThemeMode.light,
               activeColor: theme.scaffoldBackgroundColor,
               activeTrackColor: theme.primaryColor,
             ),
           ),
           ListTile(
-            leading: Icon(Icons.notifications_active, color: theme.primaryColor),
-            title: Text('Notifications', style: TextStyle(color: theme.colorScheme.onSurface)),
+            leading: Icon(
+              Icons.notifications_active,
+              color: theme.primaryColor,
+            ),
+            title: Text(
+              'Notifications',
+              style: TextStyle(color: theme.colorScheme.onSurface),
+            ),
             trailing: Switch(
               value: true,
               onChanged: (_) {},
@@ -1343,8 +2278,15 @@ class UserSettingsPage extends StatelessWidget {
           ),
           ListTile(
             leading: Icon(Icons.mail_outline, color: theme.primaryColor),
-            title: Text('Contact Us', style: TextStyle(color: theme.colorScheme.onSurface)),
-            trailing: Icon(Icons.arrow_forward_ios, color: theme.colorScheme.onSurfaceVariant, size: 16),
+            title: Text(
+              'Contact Us',
+              style: TextStyle(color: theme.colorScheme.onSurface),
+            ),
+            trailing: Icon(
+              Icons.arrow_forward_ios,
+              color: theme.colorScheme.onSurfaceVariant,
+              size: 16,
+            ),
             onTap: () {},
           ),
         ],
@@ -1370,14 +2312,22 @@ class UserAboutPage extends StatelessWidget {
             const SizedBox(height: 20),
             Text(
               'Smart Curb is an intelligent IoT parking sensing application designed to monitor space availability and manage vehicles for individual users.',
-              style: TextStyle(color: theme.colorScheme.onSurfaceVariant, height: 1.5, fontSize: 16),
+              style: TextStyle(
+                color: theme.colorScheme.onSurfaceVariant,
+                height: 1.5,
+                fontSize: 16,
+              ),
             ),
             const SizedBox(height: 30),
             Divider(color: theme.dividerColor),
             const SizedBox(height: 10),
             Text(
               'Version: 1.0.0 (Beta)',
-              style: TextStyle(color: theme.primaryColor, fontWeight: FontWeight.bold, fontSize: 14),
+              style: TextStyle(
+                color: theme.primaryColor,
+                fontWeight: FontWeight.bold,
+                fontSize: 14,
+              ),
             ),
           ],
         ),
@@ -1390,7 +2340,13 @@ class UserAboutPage extends StatelessWidget {
 void showErrorSnackBar(BuildContext context, String message) {
   ScaffoldMessenger.of(context).showSnackBar(
     SnackBar(
-      content: Text(message, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+      content: Text(
+        message,
+        style: const TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
       backgroundColor: Colors.redAccent,
     ),
   );
