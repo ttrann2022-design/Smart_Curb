@@ -44,7 +44,7 @@ function Login() {
   };
 
   return (
-    <div style={{ display: "flex", height: "100vh" }}>
+    <div className="sws-login" style={{ display: "flex", height: "100vh" }}>
       <div className="sws-login-brand" style={{ flex: 1, background: c.side, padding: 56, display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 14 }}>
           <img

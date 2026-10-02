@@ -117,7 +117,13 @@ body { background: #0F0F0D; color: #F2F1EA; font-family: 'Archivo', system-ui, s
   .sws-heatmap { gap: 2px !important; }
   .sws-heatmap > div { font-size: 8px !important; }
 
-  .sws-login-brand { display: none !important; }
+  .sws-login { flex-direction: column !important; height: auto !important; min-height: 100dvh; }
+  .sws-login-brand { flex: 0 0 auto !important; padding: 28px 20px !important; gap: 18px; }
+  .sws-login-brand img { width: 72px !important; height: 72px !important; }
+  .sws-login-brand h1 { font-size: 24px !important; }
+  .sws-login-brand { align-items: center; text-align: center; }
+  .sws-login-brand > div { align-items: center !important; }
+  .sws-login-brand p { margin-left: auto !important; margin-right: auto !important; }
   .sws-auth-form { width: calc(100% - 32px) !important; max-width: 400px; }
 }
 
