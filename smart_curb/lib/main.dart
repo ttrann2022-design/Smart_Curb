@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -9,6 +10,7 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:flutter_compass/flutter_compass.dart';
 import 'firebase_options.dart';
 
 void main() async {
@@ -825,7 +827,6 @@ class CampusPathfinder {
   static const Distance _dist = Distance();
 
   static final Map<String, CampusWaypoint> walkwayGraph = {
-    // --- PARKING LOT ACCESS POINTS (Exact DB Keys) ---
     'node_lot12': const CampusWaypoint(
       id: 'node_lot12',
       position: LatLng(26.373262, -80.106806),
@@ -836,20 +837,17 @@ class CampusPathfinder {
       position: LatLng(26.373005, -80.099683),
       neighbors: ['node_bc71_east'],
     ),
-    // ⭐️ Lot 07 (Reverted from lot20)
     'node_lot07': const CampusWaypoint(
       id: 'node_lot07',
       position: LatLng(26.373999, -80.105842),
       neighbors: ['node_ed47_west', 'node_lot06'],
     ),
-    // ⭐️ Lot 06 (Reverted from garage2)
     'node_lot06': const CampusWaypoint(
       id: 'node_lot06',
       position: LatLng(26.374013, -80.104280),
       neighbors: ['node_lot07', 'node_breezeway_west'],
     ),
 
-    // --- BUILDING ACCESS POINTS ---
     'node_ed47': const CampusWaypoint(
       id: 'node_ed47',
       position: LatLng(26.373358, -80.105828),
@@ -866,7 +864,6 @@ class CampusPathfinder {
       neighbors: ['node_breezeway_west', 'node_breezeway_center'],
     ),
 
-    // --- INTERMEDIATE WALKWAY INTERSECTIONS ---
     'node_ed47_west': const CampusWaypoint(
       id: 'node_ed47_west',
       position: LatLng(26.373300, -80.106300),
@@ -894,7 +891,6 @@ class CampusPathfinder {
     ),
   };
 
-  /// Evaluates lots, skips full ones, and selects the one with the shortest A* path to the building.
   static PathResult? findBestAvailableRoute({
     required LatLng buildingPos,
     required Map<String, Map<String, dynamic>> lots,
@@ -909,12 +905,10 @@ class CampusPathfinder {
       final occupied = lotData['occupied'] as int? ?? 0;
       final capacity = lotData['capacity'] as int? ?? 1;
 
-      // Skip full lots
       if (capacity > 0 && occupied >= capacity) {
         continue;
       }
 
-      // Route from the waypoint if it exists, otherwise fallback to GPS
       final String nodeKey = 'node_$lotId';
       final LatLng lotPos = walkwayGraph.containsKey(nodeKey)
           ? walkwayGraph[nodeKey]!.position
@@ -1093,16 +1087,20 @@ class _FauMapScreenState extends State<FauMapScreen> {
   final MapController _mapController = MapController();
   StreamSubscription<Position>? _positionStreamSub;
   StreamSubscription<DatabaseEvent>? _parkingSub;
+  StreamSubscription<CompassEvent>? _compassSub;
 
   LatLng? _currentUserLocation;
+  double _currentHeading = 0.0;
   bool _isLocating = false;
   String _gpsStatus = 'Searching for GPS...';
 
+  bool _isNavigationTracking = false;
   bool _developerMode = false;
   LatLng? _cursorLocation;
 
   FauBuilding? _selectedBuilding;
   PathResult? _currentRoute;
+  int _routeRequestId = 0;
 
   static final LatLngBounds _fauBounds = LatLngBounds(
     const LatLng(26.3630, -80.1170),
@@ -1111,7 +1109,6 @@ class _FauMapScreenState extends State<FauMapScreen> {
 
   static const LatLng _fauCenter = LatLng(26.3745, -80.1030);
 
-  // Physical coordinates on campus (keys match Firebase IDs: lot06, lot07, lot12, lot14)
   static final Map<String, LatLng> _lotPositions = {
     'lot12': const LatLng(26.373262, -80.106806),
     'lot14': const LatLng(26.373005, -80.099683),
@@ -1119,7 +1116,6 @@ class _FauMapScreenState extends State<FauMapScreen> {
     'lot06': const LatLng(26.374013, -80.104280),
   };
 
-  // Live aggregated lots from Firebase
   Map<String, Map<String, dynamic>> _liveLots = {};
 
   static const List<FauBuilding> _campusBuildings = [
@@ -1147,17 +1143,36 @@ class _FauMapScreenState extends State<FauMapScreen> {
   void initState() {
     super.initState();
     _startLiveLocationTracking();
+    _startCompassTracking();
     _listenToFirebaseParking();
   }
 
   @override
   void dispose() {
     _positionStreamSub?.cancel();
+    _compassSub?.cancel();
     _parkingSub?.cancel();
     super.dispose();
   }
 
-  /// Listens to Firebase Realtime Database 'demo' node to aggregate live curbs into lot totals
+  void _startCompassTracking() {
+    _compassSub = FlutterCompass.events?.listen((CompassEvent event) {
+      if (!mounted) return;
+      if (event.heading != null) {
+        setState(() {
+          _currentHeading = event.heading!;
+        });
+
+        final bool isCampus = _currentUserLocation != null &&
+            _fauBounds.contains(_currentUserLocation!);
+
+        if (_isNavigationTracking && isCampus) {
+          _mapController.rotate(-event.heading!);
+        }
+      }
+    });
+  }
+
   void _listenToFirebaseParking() {
     _parkingSub = FirebaseDatabase.instance.ref('demo').onValue.listen((event) {
       final rawData = event.snapshot.value;
@@ -1171,7 +1186,6 @@ class _FauMapScreenState extends State<FauMapScreen> {
           ? Map<dynamic, dynamic>.from(rootData['units'] as Map)
           : <dynamic, dynamic>{};
 
-      // 1. Group all curb units by lot to dynamically count capacity & occupied
       final Map<String, int> capacityMap = {};
       final Map<String, int> occupiedMap = {};
 
@@ -1190,14 +1204,12 @@ class _FauMapScreenState extends State<FauMapScreen> {
         }
       });
 
-      // 2. Build live lots dictionary
       final Map<String, Map<String, dynamic>> updatedLots = {};
 
       rawLots.forEach((lotKey, lotVal) {
         final String lotId = lotKey.toString();
         final lotData = lotVal is Map ? Map<String, dynamic>.from(lotVal) : <String, dynamic>{};
 
-        // Formats labels as Lot 6, Lot 7, etc.
         final String lotName = lotData['name']?.toString() ??
             (lotId == 'lot06'
                 ? 'Lot 6'
@@ -1208,17 +1220,16 @@ class _FauMapScreenState extends State<FauMapScreen> {
         final int totalUnits = capacityMap[lotId] ?? 0;
         final int occupiedUnits = occupiedMap[lotId] ?? 0;
 
-        // Visual color thresholds
         final double ratio = totalUnits > 0 ? (occupiedUnits / totalUnits) : 0.0;
         Color badgeColor;
         if (totalUnits == 0) {
           badgeColor = Colors.grey;
         } else if (ratio < 0.60) {
-          badgeColor = const Color(0xFFC6F24A); // Volt Green
+          badgeColor = const Color(0xFFC6F24A);
         } else if (ratio < 0.90) {
-          badgeColor = const Color(0xFFF5A623); // Orange
+          badgeColor = const Color(0xFFF5A623);
         } else {
-          badgeColor = const Color(0xFFF2694C); // Red (Full)
+          badgeColor = const Color(0xFFF2694C);
         }
 
         updatedLots[lotId] = {
@@ -1236,7 +1247,6 @@ class _FauMapScreenState extends State<FauMapScreen> {
           _liveLots = updatedLots;
         });
 
-        // 3. ⭐️ Real-time Rerouting: If a building is selected, recalculate with fresh occupancy
         if (_selectedBuilding != null) {
           _updateNavigationRoute(_selectedBuilding!);
         }
@@ -1247,7 +1257,8 @@ class _FauMapScreenState extends State<FauMapScreen> {
   Future<void> _updateNavigationRoute(FauBuilding building) async {
     if (_liveLots.isEmpty) return;
 
-    // A* selects closest available lot
+    final currentReqId = ++_routeRequestId;
+
     final bestLotResult = CampusPathfinder.findBestAvailableRoute(
       buildingPos: building.position,
       lots: _liveLots,
@@ -1262,29 +1273,23 @@ class _FauMapScreenState extends State<FauMapScreen> {
 
     final LatLng lotPos = _liveLots[bestLotResult.lotId]!['position'] as LatLng;
 
-    // Check if live GPS is on campus, otherwise route from Glades Rd main entrance
-    final bool isUserOnCampus = _currentUserLocation != null &&
-        _fauBounds.contains(_currentUserLocation!);
+    // ⭐️ FIX: Prioritize live GPS coordinate immediately if available
+    final LatLng startPos = _currentUserLocation ?? const LatLng(26.3685, -80.1020);
 
-    final LatLng startPos = isUserOnCampus
-        ? _currentUserLocation!
-        : const LatLng(26.3685, -80.1020);
-
-    // Fetch road-snapped polyline
     final roadPoints = await RealRoadRouter.getRoadRoute(
       start: startPos,
       destination: lotPos,
     );
 
-    if (mounted) {
-      setState(() {
-        _currentRoute = PathResult(
-          lotId: bestLotResult.lotId,
-          pathPoints: roadPoints,
-          totalDistanceMeters: RealRoadRouter.calculateDistance(roadPoints),
-        );
-      });
-    }
+    if (!mounted || currentReqId != _routeRequestId) return;
+
+    setState(() {
+      _currentRoute = PathResult(
+        lotId: bestLotResult.lotId,
+        pathPoints: roadPoints,
+        totalDistanceMeters: RealRoadRouter.calculateDistance(roadPoints),
+      );
+    });
   }
 
   void _onBuildingSelected(FauBuilding building) {
@@ -1336,11 +1341,19 @@ class _FauMapScreenState extends State<FauMapScreen> {
       );
 
       if (mounted) {
+        final loc = LatLng(initialPos.latitude, initialPos.longitude);
+        final bool isCampus = _fauBounds.contains(loc);
+
         setState(() {
-          _currentUserLocation = LatLng(initialPos.latitude, initialPos.longitude);
+          _currentUserLocation = loc;
           _isLocating = false;
           _gpsStatus =
               'Live GPS: ${initialPos.latitude.toStringAsFixed(4)}, ${initialPos.longitude.toStringAsFixed(4)}';
+
+          if (!isCampus && _isNavigationTracking) {
+            _isNavigationTracking = false;
+          }
+
           if (_selectedBuilding != null) {
             _updateNavigationRoute(_selectedBuilding!);
           }
@@ -1349,16 +1362,32 @@ class _FauMapScreenState extends State<FauMapScreen> {
 
       _positionStreamSub = Geolocator.getPositionStream(
         locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
+          accuracy: LocationAccuracy.bestForNavigation,
           distanceFilter: 2,
         ),
       ).listen((Position position) {
         if (!mounted) return;
+        final loc = LatLng(position.latitude, position.longitude);
+        final bool isCampus = _fauBounds.contains(loc);
+
         setState(() {
-          _currentUserLocation = LatLng(position.latitude, position.longitude);
+          _currentUserLocation = loc;
           _isLocating = false;
           _gpsStatus =
               'Live GPS: ${position.latitude.toStringAsFixed(4)}, ${position.longitude.toStringAsFixed(4)}';
+
+          if (_isNavigationTracking && isCampus) {
+            _mapController.move(loc, 18.2);
+          } else if (!isCampus && _isNavigationTracking) {
+            _isNavigationTracking = false;
+            _mapController.rotate(0);
+          }
+
+          // ⭐️ Smooth route anchoring: connect start node directly to live position
+          if (_currentRoute != null && _currentRoute!.pathPoints.isNotEmpty) {
+            _currentRoute!.pathPoints[0] = loc;
+          }
+
           if (_selectedBuilding != null) {
             _updateNavigationRoute(_selectedBuilding!);
           }
@@ -1519,7 +1548,6 @@ class _FauMapScreenState extends State<FauMapScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    // Resolve recommended lot safely
     Map<String, dynamic>? recommendedLot;
     if (_currentRoute != null && _liveLots.containsKey(_currentRoute!.lotId)) {
       recommendedLot = _liveLots[_currentRoute!.lotId];
@@ -1546,16 +1574,21 @@ class _FauMapScreenState extends State<FauMapScreen> {
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             Text(
-              _developerMode
-                  ? '🛠 Developer Mode Active'
-                  : 'Boca Raton Main Campus',
+              _isNavigationTracking && isInsideCampus
+                  ? '🎯 Navigation Mode Active'
+                  : (_developerMode
+                      ? '🛠 Developer Mode Active'
+                      : 'Boca Raton Main Campus'),
               style: TextStyle(
                 fontSize: 12,
-                color: _developerMode
-                    ? Colors.cyanAccent
-                    : theme.colorScheme.onSurfaceVariant,
-                fontWeight:
-                    _developerMode ? FontWeight.bold : FontWeight.normal,
+                color: (_isNavigationTracking && isInsideCampus)
+                    ? const Color(0xFFC6F24A)
+                    : (_developerMode
+                        ? Colors.cyanAccent
+                        : theme.colorScheme.onSurfaceVariant),
+                fontWeight: ((_isNavigationTracking && isInsideCampus) || _developerMode)
+                    ? FontWeight.bold
+                    : FontWeight.normal,
               ),
             ),
           ],
@@ -1586,24 +1619,46 @@ class _FauMapScreenState extends State<FauMapScreen> {
               });
             },
           ),
-          IconButton(
-            icon: _isLocating
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Colors.white,
+
+          if (isInsideCampus)
+            IconButton(
+              icon: _isLocating
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : Icon(
+                      _isNavigationTracking
+                          ? Icons.navigation
+                          : Icons.my_location,
+                      color: _isNavigationTracking
+                          ? const Color(0xFFC6F24A)
+                          : Colors.white,
                     ),
-                  )
-                : const Icon(Icons.my_location),
-            tooltip: 'My Location',
-            onPressed: () {
-              if (_currentUserLocation != null) {
-                _mapController.move(_currentUserLocation!, 17.5);
-              }
-            },
-          ),
+              tooltip: _isNavigationTracking
+                  ? 'Disable Navigation Focus'
+                  : 'Follow GPS Live (Turn-by-Turn Mode)',
+              onPressed: () {
+                if (_currentUserLocation != null) {
+                  setState(() {
+                    _isNavigationTracking = !_isNavigationTracking;
+                  });
+
+                  if (_isNavigationTracking) {
+                    _mapController.move(_currentUserLocation!, 18.2);
+                    _mapController.rotate(-_currentHeading);
+                  } else {
+                    _mapController.rotate(0);
+                    _mapController.move(_currentUserLocation!, 16.5);
+                  }
+                }
+              },
+            ),
+
           IconButton(
             icon: const Icon(Icons.center_focus_strong),
             tooltip: 'Reset Campus View',
@@ -1611,7 +1666,9 @@ class _FauMapScreenState extends State<FauMapScreen> {
               setState(() {
                 _selectedBuilding = null;
                 _currentRoute = null;
+                _isNavigationTracking = false;
               });
+              _mapController.rotate(0);
               _mapController.move(_fauCenter, 15.3);
             },
           ),
@@ -1645,11 +1702,19 @@ class _FauMapScreenState extends State<FauMapScreen> {
                 maxZoom: 19.5,
                 cameraConstraint:
                     CameraConstraint.containCenter(bounds: _fauBounds),
+                onPositionChanged: (pos, hasGesture) {
+                  if (hasGesture && _isNavigationTracking) {
+                    setState(() {
+                      _isNavigationTracking = false;
+                    });
+                  }
+                },
                 interactionOptions: const InteractionOptions(
                   flags: InteractiveFlag.pinchZoom |
                       InteractiveFlag.drag |
                       InteractiveFlag.doubleTapZoom |
-                      InteractiveFlag.scrollWheelZoom,
+                      InteractiveFlag.scrollWheelZoom |
+                      InteractiveFlag.rotate,
                 ),
               ),
               children: [
@@ -1660,7 +1725,6 @@ class _FauMapScreenState extends State<FauMapScreen> {
                   maxZoom: 20,
                 ),
 
-                // Real-time Road Navigation Polyline
                 if (_currentRoute != null && _currentRoute!.pathPoints.isNotEmpty)
                   PolylineLayer(
                     polylines: [
@@ -1679,28 +1743,57 @@ class _FauMapScreenState extends State<FauMapScreen> {
 
                 MarkerLayer(
                   markers: [
-                    // 1. Live Device GPS Puck
                     if (_currentUserLocation != null)
                       Marker(
                         point: _currentUserLocation!,
                         alignment: Alignment.center,
-                        width: 34,
-                        height: 34,
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFC6F24A),
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.black, width: 3),
-                          ),
-                          child: const Icon(
-                            Icons.navigation,
-                            size: 14,
-                            color: Colors.black,
+                        width: 52,
+                        height: 52,
+                        child: Transform.rotate(
+                          angle: (_isNavigationTracking && isInsideCampus)
+                              ? 0
+                              : (_currentHeading * (math.pi / 180)),
+                          child: Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              Container(
+                                width: 44,
+                                height: 44,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: const Color(0xFFC6F24A).withOpacity(0.25),
+                                ),
+                              ),
+                              Container(
+                                width: 34,
+                                height: 34,
+                                decoration: BoxDecoration(
+                                  color: Colors.black,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: const Color(0xFFC6F24A),
+                                    width: 2.5,
+                                  ),
+                                  boxShadow: const [
+                                    BoxShadow(
+                                      color: Colors.black54,
+                                      blurRadius: 6,
+                                    ),
+                                  ],
+                                ),
+                                child: const Center(
+                                  child: Icon(
+                                    Icons.navigation,
+                                    size: 18,
+                                    color: Color(0xFFC6F24A),
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ),
 
-                    // 2. Interactive Campus Building Markers
                     ..._campusBuildings.map((bldg) {
                       final isSelected = _selectedBuilding?.id == bldg.id;
 
@@ -1768,7 +1861,6 @@ class _FauMapScreenState extends State<FauMapScreen> {
                       );
                     }),
 
-                    // 3. Dynamic Parking Lots Markers from Firebase
                     ..._liveLots.entries.map((entry) {
                       final isBest = _currentRoute != null &&
                           _currentRoute!.lotId == entry.key;
@@ -1789,7 +1881,6 @@ class _FauMapScreenState extends State<FauMapScreen> {
             ),
           ),
 
-          // Top Floating Destination Selector Bar
           Positioned(
             top: 16,
             left: 16,
@@ -1858,7 +1949,6 @@ class _FauMapScreenState extends State<FauMapScreen> {
             ),
           ),
 
-          // Cursor GPS Banner
           if (_developerMode)
             Positioned(
               top: 80,
@@ -1914,7 +2004,6 @@ class _FauMapScreenState extends State<FauMapScreen> {
               ),
             ),
 
-          // Bottom Guidance Card
           Positioned(
             bottom: 24,
             left: 20,
