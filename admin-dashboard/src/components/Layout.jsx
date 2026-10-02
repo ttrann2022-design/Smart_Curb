@@ -12,16 +12,30 @@ const navItems = [
   { label: "Curb units", to: "/units" },
   { label: "Assistant", to: "/assistant" },
   { label: "Analytics", to: "/analytics" },
+  { label: "Users & roles", to: "/users" },
   ...(import.meta.env.VITE_DEMO_MODE === "true" ? [{ label: "Demo controls", to: "/demo" }] : []),
 ];
+
+function Brand({ size = 44 }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <img src={logo} alt="Smart Curb" style={{ width: size, height: size, borderRadius: 8, objectFit: "cover", flexShrink: 0 }} />
+      <div>
+        <div style={{ fontFamily: mono, fontSize: 12.5, fontWeight: 600 }}>SMART WHEEL STOP</div>
+        <div style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: 1.2, color: c.dim }}>ADMIN CONSOLE</div>
+      </div>
+    </div>
+  );
+}
 
 function Layout() {
   const [userEmail, setUserEmail] = useState("");
   const [role, setRole] = useState("viewer");
   const [checking, setChecking] = useState(true);
+  const [menuOpen, setMenuOpen] = useState(false);
   const navigate = useNavigate();
 
-    useEffect(() => {
+  useEffect(() => {
     let stopRole = () => {};
     let blocked = false;
 
@@ -70,23 +84,19 @@ function Layout() {
     navigate("/");
   };
 
+  const closeMenu = () => setMenuOpen(false);
+
   if (checking) {
     return <div style={{ padding: 30, color: c.dim, background: c.bg, height: "100vh" }}>Checking sign-in…</div>;
   }
 
   return (
-    <div style={{ display: "flex", height: "100vh", background: c.bg, color: c.text }}>
-      <div style={{ width: 240, background: c.side, padding: "18px 12px", display: "flex", flexDirection: "column" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 6px 20px" }}>
-        <img
-            src={logo}
-            alt="Smart Curb"
-            style={{ width: 44, height: 44, borderRadius: 8, objectFit: "cover", flexShrink: 0 }}
-          />
-          <div>
-            <div style={{ fontFamily: mono, fontSize: 12.5, fontWeight: 600 }}>SMART WHEEL STOP</div>
-            <div style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: 1.2, color: c.dim }}>ADMIN CONSOLE</div>
-          </div>
+    <div className="sws-shell" style={{ display: "flex", height: "100vh", background: c.bg, color: c.text }}>
+      {menuOpen && <div className="sws-backdrop" onClick={closeMenu} />}
+
+      <div className={`sws-sidebar${menuOpen ? " open" : ""}`} style={{ width: 240, flexShrink: 0, background: c.side, padding: "18px 12px", display: "flex", flexDirection: "column" }}>
+        <div style={{ padding: "0 6px 20px" }}>
+          <Brand />
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 2, flexGrow: 1 }}>
@@ -94,6 +104,7 @@ function Layout() {
             <NavLink
               key={item.to}
               to={item.to}
+              onClick={closeMenu}
               style={({ isActive }) => ({
                 padding: "10px 12px", borderRadius: 5, fontSize: 13.5, textDecoration: "none",
                 background: isActive ? c.navBg : "transparent",
@@ -106,9 +117,10 @@ function Layout() {
           ))}
         </div>
 
-                <a href="/sign" target="_blank" rel="noreferrer" style={{ marginBottom: 10, padding: "10px 12px", borderRadius: 5, fontSize: 13, fontWeight: 600, color: c.accent, textDecoration: "none", border: `1px dashed ${c.line}` }}>
+        <a href="/sign" target="_blank" rel="noreferrer" style={{ marginBottom: 10, padding: "10px 12px", borderRadius: 5, fontSize: 13, fontWeight: 600, color: c.accent, textDecoration: "none", border: `1px dashed ${c.line}` }}>
           Open lot sign ↗
         </a>
+
         <div style={{ padding: 12, borderRadius: 6, background: c.card }}>
           <div style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis" }}>{userEmail}</div>
           <div style={{ fontFamily: mono, fontSize: 10.5, fontWeight: 600, letterSpacing: 0.8, color: c.accent, marginTop: 4 }}>
@@ -120,8 +132,14 @@ function Layout() {
         </div>
       </div>
 
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, overflowY: "auto" }}>
-        <Outlet context={{ role }} />
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+        <div className="sws-topbar">
+          <Brand size={34} />
+          <button className="sws-menu-btn" onClick={() => setMenuOpen(true)} aria-label="Open menu">☰</button>
+        </div>
+        <div className="sws-main" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", minWidth: 0, overflowY: "auto" }}>
+          <Outlet context={{ role }} />
+        </div>
       </div>
     </div>
   );

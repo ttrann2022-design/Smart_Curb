@@ -45,7 +45,7 @@ function Login() {
 
   return (
     <div style={{ display: "flex", height: "100vh" }}>
-      <div style={{ flex: 1, background: c.side, padding: 56, display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+      <div className="sws-login-brand" style={{ flex: 1, background: c.side, padding: 56, display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 14 }}>
           <img
             src={logo}
@@ -67,7 +67,7 @@ function Login() {
       </div>
 
       <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", background: c.bg }}>
-        <form onSubmit={handleSignIn} style={{ width: 380, display: "flex", flexDirection: "column", gap: 14 }}>
+        <form onSubmit={handleSignIn} className="sws-auth-form" style={{ width: 380, display: "flex", flexDirection: "column", gap: 14 }}>
           <h2 style={{ fontFamily: mono, margin: "0 0 4px" }}>Sign in</h2>
 
           {noAccess && (

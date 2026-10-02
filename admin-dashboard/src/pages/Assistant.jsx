@@ -142,14 +142,14 @@ function Assistant() {
 
   return (
     <>
-      <div style={{ height: 68, flexShrink: 0, background: c.panel, borderBottom: `1px solid ${c.line}`, padding: "0 30px", display: "flex", alignItems: "center" }}>
+      <div className="sws-page-head" style={{ height: 68, flexShrink: 0, background: c.panel, borderBottom: `1px solid ${c.line}`, padding: "0 30px", display: "flex", alignItems: "center" }}>
         <div>
           <div style={{ fontFamily: mono, fontSize: 19, fontWeight: 600 }}>Assistant</div>
           <div style={{ fontSize: 12.5, color: c.dim }}>Answers from live data · AI language model integration planned</div>
         </div>
       </div>
 
-      <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", padding: "18px 30px 22px", gap: 14 }}>
+      <div className="sws-page-body" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", padding: "18px 30px 22px", gap: 14 }}>
         <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 12, paddingRight: 4 }}>
           {messages.map((m, i) => (
             <div key={i} style={{ display: "flex", justifyContent: m.from === "user" ? "flex-end" : "flex-start" }}>

@@ -66,21 +66,21 @@ function Analytics() {
 
   return (
     <>
-      <div style={{ height: 68, flexShrink: 0, background: c.panel, borderBottom: `1px solid ${c.line}`, padding: "0 30px", display: "flex", alignItems: "center" }}>
+      <div className="sws-page-head" style={{ height: 68, flexShrink: 0, background: c.panel, borderBottom: `1px solid ${c.line}`, padding: "0 30px", display: "flex", alignItems: "center" }}>
         <div>
           <div style={{ fontFamily: mono, fontSize: 19, fontWeight: 600 }}>Analytics</div>
           <div style={{ fontSize: 12.5, color: c.dim }}>Occupancy trends across all lots</div>
         </div>
       </div>
 
-      <div style={{ padding: "22px 30px", display: "flex", flexDirection: "column", gap: 16 }}>
+      <div className="sws-page-body" style={{ padding: "22px 30px", display: "flex", flexDirection: "column", gap: 16 }}>
         {!hasWeek && live.length === 0 ? (
           <div style={{ ...card, color: c.dim, fontSize: 13 }}>
             No history yet. Occupancy is recorded as curbs report in, and charts will appear here once there's data.
           </div>
         ) : (
           <>
-            <div style={{ display: "flex", gap: 14 }}>
+            <div className="sws-tiles" style={{ display: "flex", gap: 14 }}>
               <Tile label="AVERAGE OCCUPANCY" value={hasWeek ? `${avg}%` : "—"} sub="past week" />
               <Tile label="PEAK HOUR" value={peakHour} sub="all week" />
               <Tile label="BUSIEST DAY" value={busiestDay} />
@@ -90,7 +90,7 @@ function Analytics() {
             {hasWeek && (
               <div style={card}>
                 <div style={{ fontFamily: mono, fontSize: 14, fontWeight: 600 }}>Average occupancy by day and hour</div>
-                <div style={{ display: "grid", gridTemplateColumns: "44px repeat(14, minmax(0, 1fr))", gap: 4 }}>
+                <div className="sws-heatmap" style={{ display: "grid", gridTemplateColumns: "44px repeat(14, minmax(0, 1fr))", gap: 4 }}>
                   <div />
                   {HOURS.map((h) => <div key={h} style={{ fontSize: 10.5, color: c.dim, textAlign: "center" }}>{h}</div>)}
                   {DAYS.map((d) => [

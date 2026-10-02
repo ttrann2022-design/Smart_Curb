@@ -82,7 +82,7 @@ function Users() {
 
   return (
     <>
-      <div style={{ height: 68, flexShrink: 0, background: c.panel, borderBottom: `1px solid ${c.line}`, padding: "0 30px", display: "flex", alignItems: "center" }}>
+      <div className="sws-page-head" style={{ height: 68, flexShrink: 0, background: c.panel, borderBottom: `1px solid ${c.line}`, padding: "0 30px", display: "flex", alignItems: "center" }}>
         <div>
           <div style={{ fontFamily: mono, fontSize: 19, fontWeight: 600 }}>Users & roles</div>
           <div style={{ fontSize: 12.5, color: c.dim }}>
@@ -91,8 +91,8 @@ function Users() {
         </div>
       </div>
 
-      <div style={{ padding: "22px 30px", display: "flex", flexDirection: "column", gap: 18 }}>
-        <div style={{ display: "flex", gap: 14 }}>
+      <div className="sws-page-body" style={{ padding: "22px 30px", display: "flex", flexDirection: "column", gap: 18 }}>
+        <div className="sws-tiles" style={{ display: "flex", gap: 14 }}>
           {roles.map((r) => (
             <div key={r.id} style={{ flex: 1, background: r.id === role ? "#1E2313" : c.panel, border: `1px solid ${r.id === role ? c.accent : c.line}`, borderRadius: 6, padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
@@ -149,7 +149,7 @@ function Users() {
           </div>
         )}
 
-        <div style={{ background: c.panel, border: `1px solid ${c.line}`, borderRadius: 6, overflow: "hidden" }}>
+        <div style={{ background: c.panel, border: `1px solid ${c.line}`, borderRadius: 6, overflow: "hidden" }} className="sws-table">
           <div style={{ padding: "12px 18px", borderBottom: `1px solid ${c.line}`, display: "flex", justifyContent: "space-between" }}>
             <span style={{ fontFamily: mono, fontSize: 14, fontWeight: 600 }}>People</span>
             <span style={{ fontSize: 12, color: c.dim }}>{userList.length} accounts</span>

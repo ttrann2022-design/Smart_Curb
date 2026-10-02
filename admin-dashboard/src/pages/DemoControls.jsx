@@ -68,14 +68,14 @@ function DemoControls() {
 
   return (
     <>
-      <div style={{ height: 68, flexShrink: 0, background: c.panel, borderBottom: `1px solid ${c.line}`, padding: "0 30px", display: "flex", alignItems: "center" }}>
+      <div className="sws-page-head" style={{ height: 68, flexShrink: 0, background: c.panel, borderBottom: `1px solid ${c.line}`, padding: "0 30px", display: "flex", alignItems: "center" }}>
         <div>
           <div style={{ fontFamily: mono, fontSize: 19, fontWeight: 600 }}>Demo controls</div>
           <div style={{ fontSize: 12.5, color: c.dim }}>Everything here writes to the demo section of the database. Real data is never touched.</div>
         </div>
       </div>
 
-      <div style={{ padding: "22px 30px", display: "flex", flexDirection: "column", gap: 16, maxWidth: 820 }}>
+      <div className="sws-page-body" style={{ padding: "22px 30px", display: "flex", flexDirection: "column", gap: 16, maxWidth: 820 }}>
         <div style={card}>
           <div style={title}>1. Demo data</div>
           <div style={note}>Creates 94 curbs across 4 lots, with one offline curb and two low batteries so the alerts panel has something to show. Run this right before presenting to start from a clean slate.</div>

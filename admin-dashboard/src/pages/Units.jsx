@@ -55,14 +55,14 @@ function Units() {
 
   return (
     <>
-      <div style={{ height: 68, flexShrink: 0, background: c.panel, borderBottom: `1px solid ${c.line}`, padding: "0 30px", display: "flex", alignItems: "center" }}>
+      <div className="sws-page-head" style={{ height: 68, flexShrink: 0, background: c.panel, borderBottom: `1px solid ${c.line}`, padding: "0 30px", display: "flex", alignItems: "center" }}>
         <div>
           <div style={{ fontFamily: mono, fontSize: 19, fontWeight: 600 }}>Curb units</div>
           <div style={{ fontSize: 12.5, color: c.dim }}>Every unit across every lot, live from Firebase</div>
         </div>
       </div>
 
-      <div style={{ padding: "22px 30px", display: "flex", flexDirection: "column", gap: 16 }}>
+      <div className="sws-page-body" style={{ padding: "22px 30px", display: "flex", flexDirection: "column", gap: 16 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {filters.map((f) => (
@@ -88,7 +88,7 @@ function Units() {
           />
         </div>
 
-        <div style={{ background: c.panel, border: `1px solid ${c.line}`, borderRadius: 6, overflow: "hidden" }}>
+        <div style={{ background: c.panel, border: `1px solid ${c.line}`, borderRadius: 6, overflow: "hidden" }} className="sws-table">
           <div style={{ padding: "12px 18px", borderBottom: `1px solid ${c.line}`, display: "flex", justifyContent: "space-between" }}>
             <span style={{ fontFamily: mono, fontSize: 14, fontWeight: 600 }}>Units</span>
             <span style={{ fontSize: 12, color: c.dim }}>{rows.length} of {allUnits.length} units</span>

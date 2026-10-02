@@ -51,7 +51,7 @@ function Signup() {
 
   return (
     <div style={{ height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: c.bg }}>
-      <form onSubmit={handleSignUp} style={{ width: 400, background: c.panel, border: `1px solid ${c.line}`, borderRadius: 8, padding: 32, display: "flex", flexDirection: "column", gap: 14 }}>
+      <form onSubmit={handleSignUp} className="sws-auth-form" style={{ width: 400, background: c.panel, border: `1px solid ${c.line}`, borderRadius: 8, padding: 32, display: "flex", flexDirection: "column", gap: 14 }}>
         <div style={{ display: "flex", justifyContent: "center", marginBottom: 4 }}>
           <img
             src={logo}

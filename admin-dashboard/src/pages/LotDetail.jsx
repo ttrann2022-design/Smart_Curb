@@ -96,14 +96,14 @@ function LotDetail() {
 
   return (
     <>
-      <div style={{ height: 68, flexShrink: 0, background: c.panel, borderBottom: `1px solid ${c.line}`, padding: "0 30px", display: "flex", alignItems: "center" }}>
+      <div className="sws-page-head" style={{ height: 68, flexShrink: 0, background: c.panel, borderBottom: `1px solid ${c.line}`, padding: "0 30px", display: "flex", alignItems: "center" }}>
         <div>
           <div style={{ fontFamily: mono, fontSize: 19, fontWeight: 600 }}>Parking lots</div>
           <div style={{ fontSize: 12.5, color: c.dim }}>Pick a lot, then a curb unit to control it</div>
         </div>
       </div>
 
-      <div style={{ padding: "22px 30px", display: "flex", flexDirection: "column", gap: 16 }}>
+      <div className="sws-page-body" style={{ padding: "22px 30px", display: "flex", flexDirection: "column", gap: 16 }}>
         <div className="sws-enter" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {Object.entries(lots).map(([id, lot]) => (
             <button
@@ -122,7 +122,7 @@ function LotDetail() {
           ))}
         </div>
 
-        <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
+        <div className="sws-stack" style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
           <div className="sws-enter" style={{ flex: 1, background: c.panel, border: `1px solid ${c.line}`, borderRadius: 6, padding: 18, "--d": "60ms" }}>
             <div style={{ fontFamily: mono, fontSize: 14, fontWeight: 600, marginBottom: 14 }}>Curb units</div>
             {lotUnits.length === 0 ? (
