@@ -439,6 +439,20 @@ class _UserSpaceState extends State<UserSpace> {
                   : const UserAboutPage();
               Navigator.push(context, MaterialPageRoute(builder: (_) => page));
             },
+
+
+          
+
+
+
+
+
+
+
+
+
+
+
             itemBuilder: (_) => [
               _buildMenuItem('settings', Icons.settings, 'Settings', theme),
               _buildMenuItem('about', Icons.info_outline, 'About App', theme),
@@ -847,7 +861,6 @@ class CampusPathfinder {
       position: LatLng(26.374013, -80.104280),
       neighbors: ['node_lot07', 'node_breezeway_west'],
     ),
-
     'node_ed47': const CampusWaypoint(
       id: 'node_ed47',
       position: LatLng(26.373358, -80.105828),
@@ -863,7 +876,6 @@ class CampusPathfinder {
       position: LatLng(26.372528, -80.104044),
       neighbors: ['node_breezeway_west', 'node_breezeway_center'],
     ),
-
     'node_ed47_west': const CampusWaypoint(
       id: 'node_ed47_west',
       position: LatLng(26.373300, -80.106300),
@@ -877,7 +889,7 @@ class CampusPathfinder {
     'node_breezeway_center': const CampusWaypoint(
       id: 'node_breezeway_center',
       position: LatLng(26.373280, -80.101700),
-      neighbors: ['node_breezeway_west', 'node_breezeway_east', 'node_cm22'],
+      neighbors: ['node_breezeway_west', 'node_breezeway_center'],
     ),
     'node_breezeway_east': const CampusWaypoint(
       id: 'node_breezeway_east',
@@ -885,7 +897,7 @@ class CampusPathfinder {
       neighbors: ['node_breezeway_center', 'node_bc71'],
     ),
     'node_bc71_east': const CampusWaypoint(
-      id: 'node_bc71_east',
+      id: 'node_bc71',
       position: LatLng(26.373150, -80.099950),
       neighbors: ['node_bc71', 'node_lot14'],
     ),
@@ -1083,11 +1095,21 @@ class FauMapScreen extends StatefulWidget {
   State<FauMapScreen> createState() => _FauMapScreenState();
 }
 
-class _FauMapScreenState extends State<FauMapScreen> {
+class _FauMapScreenState extends State<FauMapScreen> with SingleTickerProviderStateMixin {
   final MapController _mapController = MapController();
+  List<LatLng> _fullCalculatedPoints = [];
   StreamSubscription<Position>? _positionStreamSub;
   StreamSubscription<DatabaseEvent>? _parkingSub;
   StreamSubscription<CompassEvent>? _compassSub;
+
+  // ⭐️ Smooth Camera Turn Animation Controllers
+  AnimationController? _cameraAnimController;
+  Animation<double>? _rotationAnimation;
+  Animation<LatLng>? _positionAnimation;
+
+  Timer? _simulationTimer;
+  bool _isSimulatingRoute = false;
+  int _currentSimIndex = 0;
 
   LatLng? _currentUserLocation;
   double _currentHeading = 0.0;
@@ -1139,39 +1161,115 @@ class _FauMapScreenState extends State<FauMapScreen> {
     ),
   ];
 
-  @override
+@override
   void initState() {
     super.initState();
+    _cameraAnimController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 250),
+    );
+
+    // ⭐️ Drive camera from the controller smoothly
+    _cameraAnimController!.addListener(() {
+      if (_rotationAnimation != null && _currentUserLocation != null) {
+        _mapController.move(_currentUserLocation!, 18.2);
+        _mapController.rotate(_rotationAnimation!.value);
+      }
+    });
+
     _startLiveLocationTracking();
     _startCompassTracking();
     _listenToFirebaseParking();
   }
 
-  @override
+  
+@override
   void dispose() {
+    _simulationTimer?.cancel(); 
+    _cameraAnimController?.dispose();
     _positionStreamSub?.cancel();
     _compassSub?.cancel();
     _parkingSub?.cancel();
     super.dispose();
   }
 
-  void _startCompassTracking() {
+  // ⭐️ COMPASS TRACKING: headingForCameraMode + Auto-turn camera in Navigation Mode
+void _startCompassTracking() {
+    _compassSub?.cancel();
     _compassSub = FlutterCompass.events?.listen((CompassEvent event) {
       if (!mounted) return;
-      if (event.heading != null) {
+
+      // ⭐️ Do not fight the map camera during 20 mph route simulation
+      if (_isSimulatingRoute) return;
+
+      final double? h = event.headingForCameraMode ?? event.heading;
+      if (h != null) {
+        // Filter out microscopic sensor jitter (ignore changes < 2.0 degrees)
+        if ((h - _currentHeading).abs() < 2.0) return;
+
         setState(() {
-          _currentHeading = event.heading!;
+          _currentHeading = h;
         });
 
         final bool isCampus = _currentUserLocation != null &&
             _fauBounds.contains(_currentUserLocation!);
 
-        if (_isNavigationTracking && isCampus) {
-          _mapController.rotate(-event.heading!);
+        if (_isNavigationTracking && isCampus && _currentUserLocation != null) {
+          _smoothMoveAndRotate(_currentUserLocation!, h);
         }
       }
     });
   }
+
+
+
+
+void _trimRouteBehindUser(LatLng userPos) {
+    if (_fullCalculatedPoints.length < 2) return;
+
+    const Distance distCalc = Distance();
+    int closestIndex = 0;
+    double minDistance = double.infinity;
+
+    // Find the closest upcoming or current waypoint on the master route
+    for (int i = 0; i < _fullCalculatedPoints.length; i++) {
+      final d = distCalc.as(LengthUnit.Meter, userPos, _fullCalculatedPoints[i]);
+      if (d < minDistance) {
+        minDistance = d;
+        closestIndex = i;
+      }
+    }
+
+    // Keep only the points from the closest waypoint forward to the destination
+    final remainingPoints = _fullCalculatedPoints.sublist(closestIndex);
+
+    // Anchor the start of the line directly to the user's puck
+    final trimmedPath = [userPos, ...remainingPoints];
+
+    setState(() {
+      if (_currentRoute != null) {
+        _currentRoute = PathResult(
+          lotId: _currentRoute!.lotId,
+          pathPoints: trimmedPath,
+          totalDistanceMeters: RealRoadRouter.calculateDistance(trimmedPath),
+        );
+      }
+    });
+  }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
   void _listenToFirebaseParking() {
     _parkingSub = FirebaseDatabase.instance.ref('demo').onValue.listen((event) {
@@ -1272,8 +1370,6 @@ class _FauMapScreenState extends State<FauMapScreen> {
     }
 
     final LatLng lotPos = _liveLots[bestLotResult.lotId]!['position'] as LatLng;
-
-    // ⭐️ FIX: Prioritize live GPS coordinate immediately if available
     final LatLng startPos = _currentUserLocation ?? const LatLng(26.3685, -80.1020);
 
     final roadPoints = await RealRoadRouter.getRoadRoute(
@@ -1284,9 +1380,10 @@ class _FauMapScreenState extends State<FauMapScreen> {
     if (!mounted || currentReqId != _routeRequestId) return;
 
     setState(() {
+      _fullCalculatedPoints = List<LatLng>.from(roadPoints);
       _currentRoute = PathResult(
         lotId: bestLotResult.lotId,
-        pathPoints: roadPoints,
+        pathPoints: List<LatLng>.from(roadPoints),
         totalDistanceMeters: RealRoadRouter.calculateDistance(roadPoints),
       );
     });
@@ -1354,7 +1451,8 @@ class _FauMapScreenState extends State<FauMapScreen> {
             _isNavigationTracking = false;
           }
 
-          if (_selectedBuilding != null) {
+          // Initial route calculation on first load
+          if (_selectedBuilding != null && _fullCalculatedPoints.isEmpty) {
             _updateNavigationRoute(_selectedBuilding!);
           }
         });
@@ -1376,22 +1474,28 @@ class _FauMapScreenState extends State<FauMapScreen> {
           _gpsStatus =
               'Live GPS: ${position.latitude.toStringAsFixed(4)}, ${position.longitude.toStringAsFixed(4)}';
 
+          if (position.speed > 1.0 && position.heading > 0) {
+            _currentHeading = position.heading;
+          }
+
           if (_isNavigationTracking && isCampus) {
             _mapController.move(loc, 18.2);
+            _mapController.rotate(-_currentHeading);
           } else if (!isCampus && _isNavigationTracking) {
             _isNavigationTracking = false;
-            _mapController.rotate(0);
-          }
-
-          // ⭐️ Smooth route anchoring: connect start node directly to live position
-          if (_currentRoute != null && _currentRoute!.pathPoints.isNotEmpty) {
-            _currentRoute!.pathPoints[0] = loc;
-          }
-
-          if (_selectedBuilding != null) {
-            _updateNavigationRoute(_selectedBuilding!);
           }
         });
+
+        if (!_isSimulatingRoute && _currentRoute != null && _currentRoute!.pathPoints.length >= 2) {
+          const Distance distCalc = Distance();
+          final target = _currentRoute!.pathPoints[1];
+          if (distCalc.as(LengthUnit.Meter, loc, target) < 8.0) {
+            _currentRoute!.pathPoints.removeAt(0);
+          }
+          if (_currentRoute!.pathPoints.isNotEmpty) {
+            _currentRoute!.pathPoints[0] = loc;
+          }
+        }
       });
     } catch (e) {
       if (mounted) {
@@ -1402,7 +1506,157 @@ class _FauMapScreenState extends State<FauMapScreen> {
       }
     }
   }
+  // ==========================================
+  // JOYSTICK SIMULATION CONTROLLERS
+  // ==========================================
 
+  // 1. Instant travel to the start of the guideline inside campus
+  void _instantTravelToRouteStart() {
+    if (_currentRoute == null || _currentRoute!.pathPoints.isEmpty) return;
+    final startPt = _currentRoute!.pathPoints.first;
+
+    setState(() {
+      _currentUserLocation = startPt;
+      _currentSimIndex = 0;
+      _gpsStatus = 'Teleported to Route Start';
+    });
+
+    _mapController.move(startPt, 17.5);
+    if (_selectedBuilding != null) {
+      _updateNavigationRoute(_selectedBuilding!);
+    }
+  }
+
+
+
+void _smoothMoveAndRotate(LatLng targetPos, double targetBearing) {
+    if (!mounted || _cameraAnimController == null) return;
+
+    final double startRotation = _mapController.camera.rotation;
+    final LatLng startPos = _mapController.camera.center;
+    final double targetRotation = -targetBearing;
+
+    // Calculate shortest angular difference (prevent 360 spin)
+    double diff = (targetRotation - startRotation) % 360.0;
+    if (diff > 180.0) diff -= 360.0;
+    if (diff < -180.0) diff += 360.0;
+    final double endRotation = startRotation + diff;
+
+    // If change is negligible, update directly without fighting animations
+    const Distance distCalc = Distance();
+    if (distCalc.as(LengthUnit.Meter, startPos, targetPos) < 0.2 && diff.abs() < 1.0) {
+      _mapController.move(targetPos, 18.2);
+      _mapController.rotate(targetRotation);
+      return;
+    }
+
+    _cameraAnimController!.stop();
+
+    _rotationAnimation = Tween<double>(
+      begin: startRotation,
+      end: endRotation,
+    ).animate(CurvedAnimation(
+      parent: _cameraAnimController!,
+      curve: Curves.easeOutQuad,
+    ));
+
+    _cameraAnimController!.reset();
+    _cameraAnimController!.forward();
+  }
+
+
+
+
+  // 2. Animate along route points at 20 mph (~8.94 m/s)
+  void _toggleRouteSimulation() {
+    if (_isSimulatingRoute) {
+      _stopRouteSimulation();
+      return;
+    }
+
+    if (_currentRoute == null || _currentRoute!.pathPoints.length < 2) return;
+
+    setState(() => _isSimulatingRoute = true);
+
+    // 20 mph ≈ 8.94 m/s -> 0.447 meters per 50ms tick (smoother 20fps interpolation)
+    const double metersPerTick = 0.45;
+    const Distance distCalc = Distance();
+
+    _simulationTimer = Timer.periodic(const Duration(milliseconds: 50), (timer) {
+      if (!mounted || _currentRoute == null || _currentRoute!.pathPoints.length < 2) {
+        _stopRouteSimulation();
+        return;
+      }
+
+      final points = _currentRoute!.pathPoints;
+      LatLng currentPt = _currentUserLocation ?? points.first;
+      LatLng targetPt = points[1];
+
+      double distanceToTarget = distCalc.as(LengthUnit.Meter, currentPt, targetPt);
+
+      // Advance/pop when reaching the waypoint (or if already right next to it)
+      while (distanceToTarget <= metersPerTick) {
+        // Point reached! Pop it off so the line behind vanishes permanently
+        points.removeAt(0);
+        currentPt = targetPt;
+
+        if (points.length < 2) {
+          _stopRouteSimulation();
+          setState(() {
+            _currentUserLocation = currentPt;
+            _currentRoute!.pathPoints.clear();
+          });
+          return;
+        }
+
+        targetPt = points[1];
+        distanceToTarget = distCalc.as(LengthUnit.Meter, currentPt, targetPt);
+      }
+
+      // Interpolate along the current front segment
+      final double fraction = metersPerTick / distanceToTarget;
+      final double newLat = currentPt.latitude + (targetPt.latitude - currentPt.latitude) * fraction;
+      final double newLng = currentPt.longitude + (targetPt.longitude - currentPt.longitude) * fraction;
+      final LatLng interpolatedPt = LatLng(newLat, newLng);
+
+      // Strict forward bearing heading
+      final double bearing = _calculateBearing(interpolatedPt, targetPt);
+
+      // Anchor the start of the rendered guideline directly to the front of the vehicle
+      points[0] = interpolatedPt;
+
+      setState(() {
+        _currentUserLocation = interpolatedPt;
+        _currentHeading = bearing;
+        _gpsStatus = 'Simulating 20 mph (${bearing.round()}°)';
+
+        if (_isNavigationTracking) {
+          _smoothMoveAndRotate(interpolatedPt, bearing);
+        }
+      });
+    });
+  }
+
+  void _stopRouteSimulation() {
+    _simulationTimer?.cancel();
+    _simulationTimer = null;
+    if (mounted) {
+      setState(() => _isSimulatingRoute = false);
+    }
+  }
+
+  double _calculateBearing(LatLng start, LatLng end) {
+    final double lat1 = start.latitude * (math.pi / 180.0);
+    final double lat2 = end.latitude * (math.pi / 180.0);
+    final double dLon = (end.longitude - start.longitude) * (math.pi / 180.0);
+
+    final double y = math.sin(dLon) * math.cos(lat2);
+    final double x = math.cos(lat1) * math.sin(lat2) -
+        math.sin(lat1) * math.cos(lat2) * math.cos(dLon);
+
+    final double radians = math.atan2(y, x);
+    return (radians * (180.0 / math.pi) + 360.0) % 360.0;
+  }
   void _showBuildingSelector() {
     showModalBottomSheet(
       context: context,
@@ -1575,9 +1829,9 @@ class _FauMapScreenState extends State<FauMapScreen> {
             ),
             Text(
               _isNavigationTracking && isInsideCampus
-                  ? '🎯 Navigation Mode Active'
+                  ? '🎯 Navigation Mode Active (${_currentHeading.round()}°)'
                   : (_developerMode
-                      ? '🛠 Developer Mode Active'
+                      ? '🛠 Dev Mode Active • Joystick Ready'
                       : 'Boca Raton Main Campus'),
               style: TextStyle(
                 fontSize: 12,
@@ -1609,7 +1863,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
             ),
             tooltip: _developerMode
                 ? 'Disable Developer Mode'
-                : 'Enable Developer Mode',
+                : 'Enable Developer Mode & Joystick',
             onPressed: () {
               setState(() {
                 _developerMode = !_developerMode;
@@ -1619,7 +1873,6 @@ class _FauMapScreenState extends State<FauMapScreen> {
               });
             },
           ),
-
           if (isInsideCampus)
             IconButton(
               icon: _isLocating
@@ -1658,7 +1911,6 @@ class _FauMapScreenState extends State<FauMapScreen> {
                 }
               },
             ),
-
           IconButton(
             icon: const Icon(Icons.center_focus_strong),
             tooltip: 'Reset Campus View',
@@ -1743,57 +1995,73 @@ class _FauMapScreenState extends State<FauMapScreen> {
 
                 MarkerLayer(
                   markers: [
+                    // ⭐️ Heading Indicator Puck (Screen relative angle: heading - mapRotation)
+                    // ⭐️ Heading Indicator Puck (Locked to Guideline)
                     if (_currentUserLocation != null)
                       Marker(
                         point: _currentUserLocation!,
                         alignment: Alignment.center,
                         width: 52,
                         height: 52,
-                        child: Transform.rotate(
-                          angle: (_isNavigationTracking && isInsideCampus)
-                              ? 0
-                              : (_currentHeading * (math.pi / 180)),
-                          child: Stack(
-                            alignment: Alignment.center,
-                            children: [
-                              Container(
-                                width: 44,
-                                height: 44,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: const Color(0xFFC6F24A).withOpacity(0.25),
-                                ),
-                              ),
-                              Container(
-                                width: 34,
-                                height: 34,
-                                decoration: BoxDecoration(
-                                  color: Colors.black,
-                                  shape: BoxShape.circle,
-                                  border: Border.all(
-                                    color: const Color(0xFFC6F24A),
-                                    width: 2.5,
-                                  ),
-                                  boxShadow: const [
-                                    BoxShadow(
-                                      color: Colors.black54,
-                                      blurRadius: 6,
+                        rotate: true, // Prevents map drag/spin from turning the arrow
+                        child: Builder(
+                          builder: (context) {
+                            double angleDeg = _currentHeading;
+
+                            // Point strictly along the active front segment of the route
+                            if (_currentRoute != null && _currentRoute!.pathPoints.length >= 2) {
+                              angleDeg = _calculateBearing(
+                                _currentRoute!.pathPoints[0],
+                                _currentRoute!.pathPoints[1],
+                              );
+                            }
+
+                            return Transform.rotate(
+                              angle: angleDeg * (math.pi / 180.0),
+                              child: Stack(
+                                alignment: Alignment.center,
+                                children: [
+                                  Container(
+                                    width: 44,
+                                    height: 44,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: const Color(0xFFC6F24A).withOpacity(0.25),
                                     ),
-                                  ],
-                                ),
-                                child: const Center(
-                                  child: Icon(
-                                    Icons.navigation,
-                                    size: 18,
-                                    color: Color(0xFFC6F24A),
                                   ),
-                                ),
+                                  Container(
+                                    width: 34,
+                                    height: 34,
+                                    decoration: BoxDecoration(
+                                      color: Colors.black,
+                                      shape: BoxShape.circle,
+                                      border: Border.all(
+                                        color: const Color(0xFFC6F24A),
+                                        width: 2.5,
+                                      ),
+                                      boxShadow: const [
+                                        BoxShadow(
+                                          color: Colors.black54,
+                                          blurRadius: 6,
+                                        ),
+                                      ],
+                                    ),
+                                    child: const Center(
+                                      child: Icon(
+                                        Icons.navigation,
+                                        size: 18,
+                                        color: Colors.black54,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
-                            ],
-                          ),
+                            );
+                          },
                         ),
                       ),
 
+                    // ⭐️ Campus Building Markers (rotate: true keeps them upright)
                     ..._campusBuildings.map((bldg) {
                       final isSelected = _selectedBuilding?.id == bldg.id;
 
@@ -1802,6 +2070,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
                         alignment: Alignment.center,
                         width: isSelected ? 120 : 80,
                         height: isSelected ? 48 : 30,
+                        rotate: true,
                         child: GestureDetector(
                           onTap: () => _onBuildingSelected(bldg),
                           child: Container(
@@ -1861,6 +2130,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
                       );
                     }),
 
+                    // ⭐️ Dynamic Parking Lot Badges (rotate: true keeps them upright)
                     ..._liveLots.entries.map((entry) {
                       final isBest = _currentRoute != null &&
                           _currentRoute!.lotId == entry.key;
@@ -1881,6 +2151,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
             ),
           ),
 
+          // Destination Search Header
           Positioned(
             top: 16,
             left: 16,
@@ -1949,6 +2220,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
             ),
           ),
 
+          // Dev Mode: Cursor Coordinates Header
           if (_developerMode)
             Positioned(
               top: 80,
@@ -2004,6 +2276,50 @@ class _FauMapScreenState extends State<FauMapScreen> {
               ),
             ),
 
+    // ⭐️ Developer Route Controls: Instant Travel & 20 mph Run/Stop
+          if (_developerMode && _currentRoute != null)
+            Positioned(
+              right: 20,
+              bottom: 105,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  // Button 1: Instant Travel to FAU route start if not already there
+                  if (!isInsideCampus)
+                    ElevatedButton.icon(
+                      onPressed: _instantTravelToRouteStart,
+                      icon: const Icon(Icons.flight_takeoff, size: 18),
+                      label: const Text('Travel to FAU'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.cyanAccent,
+                        foregroundColor: Colors.black,
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                    ),
+
+                  const SizedBox(height: 8),
+
+                  // Button 2: Simulate 20 mph follow run/stop (when inside FAU)
+                  if (isInsideCampus)
+                    ElevatedButton.icon(
+                      onPressed: _toggleRouteSimulation,
+                      icon: Icon(_isSimulatingRoute ? Icons.pause : Icons.play_arrow, size: 20),
+                      label: Text(_isSimulatingRoute ? 'Stop (20 mph)' : 'Simulate Run'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _isSimulatingRoute ? Colors.redAccent : const Color(0xFFC6F24A),
+                        foregroundColor: Colors.black,
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        elevation: 6,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+
+          // Bottom Guidance Card
           Positioned(
             bottom: 24,
             left: 20,
@@ -2059,7 +2375,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
                               : (_currentUserLocation == null
                                   ? _gpsStatus
                                   : (isInsideCampus
-                                      ? '📍 On Campus • Live Tracking Active'
+                                      ? '📍 On Campus • Heading: ${_currentHeading.round()}°'
                                       : '🚗 Outside Campus Perimeter')),
                           style: TextStyle(
                             fontSize: 12,
@@ -2079,6 +2395,8 @@ class _FauMapScreenState extends State<FauMapScreen> {
     );
   }
 
+  
+
   Marker _buildLotMarker({
     required LatLng point,
     required String name,
@@ -2091,6 +2409,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
       alignment: Alignment.center,
       width: isHighlighted ? 120 : 105,
       height: isHighlighted ? 62 : 56,
+      rotate: true,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
         decoration: BoxDecoration(
