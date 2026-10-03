@@ -43,6 +43,9 @@ dependencies:
   # Real-time device GPS positioning
   geolocator: ^13.0.0
   http: ^1.2.0
+  flutter_compass: ^0.8.0
+
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
