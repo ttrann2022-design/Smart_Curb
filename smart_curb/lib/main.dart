@@ -1864,9 +1864,9 @@ void _smoothMoveAndRotate(LatLng targetPos, double targetBearing) {
             ),
             Text(
               _isNavigationTracking && isInsideCampus
-                  ? '🎯 Navigation Mode Active (${_currentHeading.round()}°)'
+                  ? ' Navigation Mode Active (${_currentHeading.round()}°)'
                   : (_developerMode
-                      ? '🛠 Dev Mode Active • Joystick Ready'
+                      ? 'Dev Mode Actived'
                       : 'Boca Raton Main Campus'),
               style: TextStyle(
                 fontSize: 12,
@@ -2410,8 +2410,8 @@ void _smoothMoveAndRotate(LatLng targetPos, double targetBearing) {
                               : (_currentUserLocation == null
                                   ? _gpsStatus
                                   : (isInsideCampus
-                                      ? '📍 On Campus • Heading: ${_currentHeading.round()}°'
-                                      : '🚗 Outside Campus Perimeter')),
+                                      ? 'On Campus • Heading: ${_currentHeading.round()}°'
+                                      : 'Outside Campus Area')),
                           style: TextStyle(
                             fontSize: 12,
                             color: theme.colorScheme.onSurfaceVariant,
