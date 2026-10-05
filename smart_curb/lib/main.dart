@@ -12,7 +12,6 @@ import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:flutter_compass/flutter_compass.dart';
 import 'firebase_options.dart';
-
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(
@@ -685,7 +684,7 @@ class _HomeTab extends StatelessWidget {
         if (rawData == null) {
           return AnimatedAddCard(
             title: 'No Locations Found',
-            subtitle: 'Tap to add a new parking space',
+            subtitle: 'Tap to add a new location',
             onTap: () => _showAddSpaceDialog(context),
           );
         }
@@ -778,7 +777,7 @@ class _HomeTab extends StatelessWidget {
                 ),
               ),
               child: Text(
-                'Add more place',
+                'Add more locations',
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
@@ -1063,7 +1062,8 @@ class RealRoadRouter {
     );
 
     try {
-      final response = await http.get(url).timeout(const Duration(seconds: 4));
+      // ⭐️ Increased timeout to 10 seconds for long off-campus trips
+      final response = await http.get(url).timeout(const Duration(seconds: 10));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final routes = data['routes'] as List<dynamic>?;
@@ -1073,8 +1073,12 @@ class RealRoadRouter {
               .map((pt) => LatLng((pt[1] as num).toDouble(), (pt[0] as num).toDouble()))
               .toList();
         }
+      } else {
+        debugPrint('OSRM Server returned status: ${response.statusCode}');
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('OSRM routing network error: $e');
+    }
 
     return [start, destination];
   }
@@ -1357,6 +1361,25 @@ void _trimRouteBehindUser(LatLng userPos) {
 
     final currentReqId = ++_routeRequestId;
 
+    // ⭐️ If _currentUserLocation is null, grab the live GPS fix immediately before falling back
+    LatLng startPos;
+    if (_currentUserLocation != null) {
+      startPos = _currentUserLocation!;
+    } else {
+      try {
+        final pos = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.medium,
+            timeLimit: Duration(seconds: 3),
+          ),
+        );
+        startPos = LatLng(pos.latitude, pos.longitude);
+        _currentUserLocation = startPos;
+      } catch (_) {
+        startPos = const LatLng(26.3685, -80.1020); // Emergency fallback only if GPS is disabled/timed out
+      }
+    }
+
     final bestLotResult = CampusPathfinder.findBestAvailableRoute(
       buildingPos: building.position,
       lots: _liveLots,
@@ -1370,7 +1393,6 @@ void _trimRouteBehindUser(LatLng userPos) {
     }
 
     final LatLng lotPos = _liveLots[bestLotResult.lotId]!['position'] as LatLng;
-    final LatLng startPos = _currentUserLocation ?? const LatLng(26.3685, -80.1020);
 
     final roadPoints = await RealRoadRouter.getRoadRoute(
       start: startPos,
@@ -1397,7 +1419,7 @@ void _trimRouteBehindUser(LatLng userPos) {
     _mapController.move(building.position, 16.5);
   }
 
-  Future<void> _startLiveLocationTracking() async {
+ Future<void> _startLiveLocationTracking() async {
     setState(() {
       _isLocating = true;
       _gpsStatus = 'Requesting GPS permissions...';
@@ -1452,7 +1474,8 @@ void _trimRouteBehindUser(LatLng userPos) {
           }
 
           // Initial route calculation on first load
-          if (_selectedBuilding != null && _fullCalculatedPoints.isEmpty) {
+          if (_selectedBuilding != null &&
+              (_currentRoute == null || _currentRoute!.pathPoints.isEmpty)) {
             _updateNavigationRoute(_selectedBuilding!);
           }
         });
@@ -1474,24 +1497,35 @@ void _trimRouteBehindUser(LatLng userPos) {
           _gpsStatus =
               'Live GPS: ${position.latitude.toStringAsFixed(4)}, ${position.longitude.toStringAsFixed(4)}';
 
+          // ⭐️ Transit speed gate: trust satellite heading when moving (> 2.2 mph)
           if (position.speed > 1.0 && position.heading > 0) {
             _currentHeading = position.heading;
           }
 
+          // ⭐️ Smooth turn animation instead of instant snapping
           if (_isNavigationTracking && isCampus) {
-            _mapController.move(loc, 18.2);
-            _mapController.rotate(-_currentHeading);
+            _smoothMoveAndRotate(loc, _currentHeading);
           } else if (!isCampus && _isNavigationTracking) {
             _isNavigationTracking = false;
           }
         });
 
+        // ⭐️ Route Trimming & Off-Route Recalculation
         if (!_isSimulatingRoute && _currentRoute != null && _currentRoute!.pathPoints.length >= 2) {
           const Distance distCalc = Distance();
           final target = _currentRoute!.pathPoints[1];
-          if (distCalc.as(LengthUnit.Meter, loc, target) < 8.0) {
+          final double distanceToTarget = distCalc.as(LengthUnit.Meter, loc, target);
+
+          if (distanceToTarget < 8.0) {
+            // Driver reached waypoint: pop node so it vanishes behind them
             _currentRoute!.pathPoints.removeAt(0);
+          } else if (distanceToTarget > 25.0 && _selectedBuilding != null) {
+            // Driver deviated (> 25m off route): recalculate fresh route from new street
+            _updateNavigationRoute(_selectedBuilding!);
+            return;
           }
+
+          // Anchor the front of the guideline to the indicator puck
           if (_currentRoute!.pathPoints.isNotEmpty) {
             _currentRoute!.pathPoints[0] = loc;
           }
@@ -1506,6 +1540,7 @@ void _trimRouteBehindUser(LatLng userPos) {
       }
     }
   }
+  
   // ==========================================
   // JOYSTICK SIMULATION CONTROLLERS
   // ==========================================
@@ -1674,7 +1709,7 @@ void _smoothMoveAndRotate(LatLng targetPos, double targetBearing) {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   const Text(
-                    'Select Destination Building',
+                    'Select Building',
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
@@ -1829,9 +1864,9 @@ void _smoothMoveAndRotate(LatLng targetPos, double targetBearing) {
             ),
             Text(
               _isNavigationTracking && isInsideCampus
-                  ? '🎯 Navigation Mode Active (${_currentHeading.round()}°)'
+                  ? ' Navigation Mode Active (${_currentHeading.round()}°)'
                   : (_developerMode
-                      ? '🛠 Dev Mode Active • Joystick Ready'
+                      ? 'Dev Mode Actived'
                       : 'Boca Raton Main Campus'),
               style: TextStyle(
                 fontSize: 12,
@@ -2191,7 +2226,7 @@ void _smoothMoveAndRotate(LatLng targetPos, double targetBearing) {
                       child: Text(
                         _selectedBuilding != null
                             ? 'Destination: ${_selectedBuilding!.name}'
-                            : 'Choose a building destination...',
+                            : 'Search for destination...',
                         style: TextStyle(
                           color: _selectedBuilding != null
                               ? Colors.white
@@ -2375,8 +2410,8 @@ void _smoothMoveAndRotate(LatLng targetPos, double targetBearing) {
                               : (_currentUserLocation == null
                                   ? _gpsStatus
                                   : (isInsideCampus
-                                      ? '📍 On Campus • Heading: ${_currentHeading.round()}°'
-                                      : '🚗 Outside Campus Perimeter')),
+                                      ? 'On Campus • Heading: ${_currentHeading.round()}°'
+                                      : 'Outside Campus Area')),
                           style: TextStyle(
                             fontSize: 12,
                             color: theme.colorScheme.onSurfaceVariant,
