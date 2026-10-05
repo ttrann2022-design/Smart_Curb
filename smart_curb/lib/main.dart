@@ -684,7 +684,7 @@ class _HomeTab extends StatelessWidget {
         if (rawData == null) {
           return AnimatedAddCard(
             title: 'No Locations Found',
-            subtitle: 'Tap to add a new parking space',
+            subtitle: 'Tap to add a new location',
             onTap: () => _showAddSpaceDialog(context),
           );
         }
@@ -777,7 +777,7 @@ class _HomeTab extends StatelessWidget {
                 ),
               ),
               child: Text(
-                'Add more place',
+                'Add more locations',
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
@@ -1709,7 +1709,7 @@ void _smoothMoveAndRotate(LatLng targetPos, double targetBearing) {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   const Text(
-                    'Select Destination Building',
+                    'Select Building',
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
@@ -2226,7 +2226,7 @@ void _smoothMoveAndRotate(LatLng targetPos, double targetBearing) {
                       child: Text(
                         _selectedBuilding != null
                             ? 'Destination: ${_selectedBuilding!.name}'
-                            : 'Choose a building destination...',
+                            : 'Search for destination...',
                         style: TextStyle(
                           color: _selectedBuilding != null
                               ? Colors.white
