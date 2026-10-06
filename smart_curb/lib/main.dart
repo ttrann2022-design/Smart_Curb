@@ -2100,13 +2100,6 @@ class _FauMapScreenState extends State<FauMapScreen>
           ),
           PolylineLayer(
             polylines: [
-              // Walking path from the lot to the building (A* result).
-              if (walk != null && _selectedBuilding != null)
-                Polyline(
-                  points: walk.pathPoints,
-                  strokeWidth: 3.0,
-                  color: kDev.withOpacity(0.85),
-                ),
               // Driving route.
               if (_displayRoute.length >= 2) ...[
                 Polyline(
