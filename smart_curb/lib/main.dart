@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -8,10 +10,9 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_compass/flutter_compass.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'package:geolocator/geolocator.dart';
+import 'package:geolocator/geolocator.dart' as geo;
 import 'package:http/http.dart' as http;
-import 'package:latlong2/latlong.dart';
+import 'package:maplibre_gl/maplibre_gl.dart';
 
 import 'firebase_options.dart';
 
@@ -49,7 +50,7 @@ final ThemeData appTheme = ThemeData(
   scaffoldBackgroundColor: kBg,
   cardColor: kCard,
   dividerColor: kDivider,
-  dialogBackgroundColor: kCard,
+  dialogTheme: const DialogThemeData(backgroundColor: kCard),
   appBarTheme: const AppBarTheme(
     backgroundColor: kBar,
     elevation: 0,
@@ -725,7 +726,7 @@ class _HomeTabState extends State<_HomeTab> {
               ),
               IconButton(
                 icon: const Icon(Icons.delete_outline, size: 20),
-                color: Colors.redAccent.withOpacity(0.7),
+                color: Colors.redAccent.withValues(alpha: 0.7),
                 tooltip: 'Remove Place',
                 onPressed: () => FirebaseDatabase.instance
                     .ref('drivers/$uid/locations/$locKey')
@@ -744,7 +745,7 @@ class _HomeTabState extends State<_HomeTab> {
 // ==========================================
 
 /// Equirectangular math: accurate to well under 0.1% at campus distances
-/// and much cheaper than Vincenty (latlong2 `Distance`), which matters
+/// and much cheaper than an ellipsoid (Vincenty) distance, which matters
 /// because these run on every GPS fix and every 50 ms simulation tick.
 class Geo {
   static const double _earthR = 6371008.8;
@@ -1112,7 +1113,7 @@ class RealRoadRouter {
 }
 
 // ==========================================
-// FAU CAMPUS MAP SCREEN
+// FAU CAMPUS MAP SCREEN (MapLibre GL, 3D)
 // ==========================================
 
 enum _Progress { none, onRoute, offRoute, arrived }
@@ -1124,6 +1125,111 @@ class _RouteProjection {
   const _RouteProjection(this.seg, this.point, this.dist);
 }
 
+// ---------- GeoJSON helpers ----------
+
+List<double> _coord(LatLng p) => [p.longitude, p.latitude];
+
+Map<String, dynamic> _fc(List<Map<String, dynamic>> features) =>
+    {'type': 'FeatureCollection', 'features': features};
+
+Map<String, dynamic> _pointFeature(LatLng p, Map<String, dynamic> props) => {
+      'type': 'Feature',
+      'properties': props,
+      'geometry': {'type': 'Point', 'coordinates': _coord(p)},
+    };
+
+/// Square polygon around [c] (used for the 3D lot pillars and destination beacon).
+Map<String, dynamic> _squareFeature(
+  LatLng c,
+  double halfMeters,
+  Map<String, dynamic> props,
+) {
+  final dLat = halfMeters / 111320.0;
+  final dLng = halfMeters / (111320.0 * math.cos(c.latitude * math.pi / 180.0));
+  final ring = [
+    [c.longitude - dLng, c.latitude - dLat],
+    [c.longitude + dLng, c.latitude - dLat],
+    [c.longitude + dLng, c.latitude + dLat],
+    [c.longitude - dLng, c.latitude + dLat],
+    [c.longitude - dLng, c.latitude - dLat],
+  ];
+  return {
+    'type': 'Feature',
+    'properties': props,
+    'geometry': {
+      'type': 'Polygon',
+      'coordinates': [ring],
+    },
+  };
+}
+
+String _hex(Color c) =>
+    '#${(c.toARGB32() & 0xFFFFFF).toRadixString(16).padLeft(6, '0')}';
+
+/// Draws the navigation arrow once and caches the PNG bytes.
+final Future<Uint8List> _puckIconBytes = _drawPuckIcon();
+
+Future<Uint8List> _drawPuckIcon() async {
+  const s = 96.0;
+  final recorder = ui.PictureRecorder();
+  final canvas = Canvas(recorder);
+  const center = Offset(s / 2, s / 2);
+
+  canvas.drawCircle(center, 30, Paint()..color = Colors.black);
+  canvas.drawCircle(
+    center,
+    30,
+    Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 6
+      ..color = kAccent,
+  );
+  final arrow = Path()
+    ..moveTo(s / 2, s / 2 - 19)
+    ..lineTo(s / 2 + 13, s / 2 + 15)
+    ..lineTo(s / 2, s / 2 + 7)
+    ..lineTo(s / 2 - 13, s / 2 + 15)
+    ..close();
+  canvas.drawPath(arrow, Paint()..color = kAccent);
+
+  final image = await recorder.endRecording().toImage(s.toInt(), s.toInt());
+  final data = await image.toByteData(format: ui.ImageByteFormat.png);
+  image.dispose();
+  return data!.buffer.asUint8List();
+}
+
+/// Coalesces GeoJSON updates per source: while one update is in flight,
+/// newer ones replace each other, so the platform channel never backs up
+/// (important for the 20 fps simulation).
+class _SourceSync {
+  final Future<void> Function(String id, Map<String, dynamic> data) _send;
+  final Map<String, Map<String, dynamic>> _pending = {};
+  final Set<String> _busy = {};
+
+  _SourceSync(this._send);
+
+  void push(String id, Map<String, dynamic> data) {
+    _pending[id] = data;
+    if (!_busy.contains(id)) _drain(id);
+  }
+
+  Future<void> _drain(String id) async {
+    _busy.add(id);
+    try {
+      while (_pending.containsKey(id)) {
+        final data = _pending.remove(id)!;
+        try {
+          await _send(id, data);
+        } catch (e) {
+          debugPrint('[map] update of "$id" failed: $e');
+        }
+      }
+    } finally {
+      _busy.remove(id);
+    }
+  }
+}
+
 class FauMapScreen extends StatefulWidget {
   const FauMapScreen({super.key});
 
@@ -1131,23 +1237,49 @@ class FauMapScreen extends StatefulWidget {
   State<FauMapScreen> createState() => _FauMapScreenState();
 }
 
-class _FauMapScreenState extends State<FauMapScreen>
-    with SingleTickerProviderStateMixin {
-  // ---- tuning ----
-  static const double _navZoom = 18.2;
+class _FauMapScreenState extends State<FauMapScreen> {
+  // ---- map style ----
+  /// Bright, detailed OpenStreetMap style (free, no API key).
+  static const String _styleUrl = 'https://tiles.openfreemap.org/styles/liberty';
+
+  // ---- camera tuning ----
+  static const double _overviewZoom = 16.0;
+  static const double _overviewTilt = 50.0;
+  static const double _navZoom = 18.0;
+  static const double _navTilt = 60.0;
+
+  // ---- routing tuning ----
   static const double _offRouteMeters = 35.0;
   static const double _arrivalMeters = 10.0;
   static const double _maxGpsAccuracyForReroute = 30.0;
   static const Duration _rerouteCooldown = Duration(seconds: 6);
   static const Duration _simTick = Duration(milliseconds: 50);
   static const double _simMetersPerTick = 0.447; // 20 mph at 50 ms ticks
-  static const LatLng _campusEntrance = LatLng(26.3685, -80.1020);
 
-  static final LatLngBounds _fauBounds = LatLngBounds(
-    const LatLng(26.3630, -80.1170),
-    const LatLng(26.3860, -80.0890),
-  );
+  // ---- campus geometry ----
+  static const LatLng _campusEntrance = LatLng(26.3685, -80.1020);
+  static const LatLng _sw = LatLng(26.3630, -80.1170);
+  static const LatLng _ne = LatLng(26.3860, -80.0890);
   static const LatLng _fauCenter = LatLng(26.3745, -80.1030);
+  static final CameraTargetBounds _cameraBounds =
+      CameraTargetBounds(LatLngBounds(southwest: _sw, northeast: _ne));
+
+  static bool _inCampus(LatLng p) =>
+      p.latitude >= _sw.latitude &&
+      p.latitude <= _ne.latitude &&
+      p.longitude >= _sw.longitude &&
+      p.longitude <= _ne.longitude;
+
+  // ---- map source / layer ids ----
+  static const String _srcRoute = 'sc-route';
+  static const String _srcPillars = 'sc-lot-pillars';
+  static const String _srcBeacon = 'sc-beacon';
+  static const String _srcLots = 'sc-lots';
+  static const String _srcBuildings = 'sc-buildings';
+  static const String _srcPuck = 'sc-puck';
+  static const String _layerBuildings3d = 'sc-buildings-3d';
+  static const String _puckImage = 'sc-puck-arrow';
+  static const List<String> _fonts = ['Noto Sans Regular'];
 
   static final Map<String, LatLng> _lotPositions = {
     'lot12': CampusPathfinder.nodes['lot12']!,
@@ -1177,22 +1309,25 @@ class _FauMapScreenState extends State<FauMapScreen>
     ),
   ];
 
-  // ---- map & camera ----
-  final MapController _mapController = MapController();
-  late final AnimationController _cameraAnim;
-  LatLng _camFrom = _fauCenter;
-  LatLng _camTo = _fauCenter;
-  double _rotFrom = 0;
-  double _rotTo = 0;
+  // ---- map ----
+  MapLibreMapController? _map;
+  bool _styleReady = false;
+  bool _introPlayed = false;
+  bool _is3D = true;
+  late final _SourceSync _sync = _SourceSync(_sendSource);
+  Offset? _pointerDownAt;
+  DateTime _lastCamAt = DateTime.fromMillisecondsSinceEpoch(0);
+  double _camBearing = 0;
 
   // ---- subscriptions ----
-  StreamSubscription<Position>? _positionSub;
+  StreamSubscription<geo.Position>? _positionSub;
   StreamSubscription<DatabaseEvent>? _parkingSub;
   StreamSubscription<CompassEvent>? _compassSub;
   Timer? _simTimer;
+  int _simTickCount = 0;
 
-  /// Cursor coords live in a notifier so hovering doesn't rebuild the whole map.
-  final ValueNotifier<LatLng?> _cursor = ValueNotifier(null);
+  /// Dev mode: last tapped coordinate (notifier = no full rebuild).
+  final ValueNotifier<LatLng?> _devTap = ValueNotifier(null);
 
   // ---- location ----
   LatLng? _userPos;
@@ -1204,16 +1339,15 @@ class _FauMapScreenState extends State<FauMapScreen>
   // ---- modes ----
   bool _navTracking = false;
   bool _devMode = false;
-  bool _devLocationOverride = false; // dev mode owns the puck (ignore real GPS)
+  bool _devLocationOverride = false;
   bool _isSimulating = false;
-  double _simCamRotation = 0;
 
   // ---- routing ----
   FauBuilding? _selectedBuilding;
-  PathResult? _walkResult; // lot → building (A*)
-  String? _routeLotId; // lot the driving route currently targets
+  PathResult? _walkResult;
+  String? _routeLotId;
   List<LatLng> _fullRoute = const [];
-  List<double> _routeSuffix = const []; // remaining length from each vertex
+  List<double> _routeSuffix = const [];
   List<LatLng> _displayRoute = const [];
   int _routeSeg = 0;
   double _routeRemaining = 0;
@@ -1225,7 +1359,7 @@ class _FauMapScreenState extends State<FauMapScreen>
 
   Map<String, Map<String, dynamic>> _liveLots = {};
 
-  bool get _isOnCampus => _userPos != null && _fauBounds.contains(_userPos!);
+  bool get _isOnCampus => _userPos != null && _inCampus(_userPos!);
 
   // ==========================================
   // LIFECYCLE
@@ -1234,11 +1368,6 @@ class _FauMapScreenState extends State<FauMapScreen>
   @override
   void initState() {
     super.initState();
-    _cameraAnim = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 450),
-    )..addListener(_onCameraTick);
-
     _startLiveLocationTracking();
     _startCompassTracking();
     _listenToFirebaseParking();
@@ -1250,40 +1379,506 @@ class _FauMapScreenState extends State<FauMapScreen>
     _positionSub?.cancel();
     _compassSub?.cancel();
     _parkingSub?.cancel();
-    _cameraAnim.dispose();
-    _cursor.dispose();
-    _mapController.dispose();
+    _devTap.dispose();
+    _styleReady = false;
+    _map = null; // the MapLibreMap widget disposes its own controller
     super.dispose();
+  }
+
+  // ==========================================
+  // MAP SETUP
+  // ==========================================
+
+  Future<void> _guard(Future<Object?> Function() f) async {
+    try {
+      await f();
+    } catch (e) {
+      debugPrint('[map] $e');
+    }
+  }
+
+  Future<void> _sendSource(String id, Map<String, dynamic> data) async {
+    final m = _map;
+    if (m == null || !_styleReady || !mounted) return;
+    await m.setGeoJsonSource(id, data);
+  }
+
+  /// Runs on first load AND again if Android recreates the map
+  /// (a new style discards every source and layer we added).
+  Future<void> _onStyleLoaded() async {
+    final m = _map;
+    if (m == null) return;
+    _styleReady = false;
+    await _setupStyle(m);
+    if (!mounted || _map != m) return;
+    _styleReady = true;
+    _pushAll();
+
+    if (!_introPlayed) {
+      _introPlayed = true;
+      _animateTo(
+        CameraPosition(
+          target: _fauCenter,
+          zoom: _overviewZoom,
+          bearing: 20,
+          tilt: _is3D ? _overviewTilt : 0,
+        ),
+        const Duration(milliseconds: 2500),
+      );
+    }
+  }
+
+  Future<void> _setupStyle(MapLibreMapController m) async {
+    Future<bool> safe(String what, Future<Object?> Function() f) async {
+      try {
+        await f();
+        return true;
+      } catch (e) {
+        debugPrint('[map] $what failed: $e');
+        return false;
+      }
+    }
+
+    final empty = _fc(const <Map<String, dynamic>>[]);
+
+    var layerIds = const <String>[];
+    var sourceIds = const <String>[];
+    await safe('read style', () async {
+      layerIds = (await m.getLayerIds()).map((e) => e.toString()).toList();
+      sourceIds = (await m.getSourceIds()).map((e) => e.toString()).toList();
+      return null;
+    });
+
+    // Keep street / place names above our 3D buildings.
+    String? firstLabel;
+    for (final id in layerIds) {
+      if (id.contains('label') || id.startsWith('place') || id.startsWith('poi')) {
+        firstLabel = id;
+        break;
+      }
+    }
+
+    // Hide the style's own 3D buildings (we draw our own) and its POI
+    // icons, so the only markers on the map are your campus nodes.
+    for (final id in layerIds) {
+      final isStyle3d = id.contains('building-3d') || id.contains('building_3d');
+      final isPoi = id.startsWith('poi');
+      if (isStyle3d || isPoi) {
+        await safe('hide $id', () => m.setLayerVisibility(id, false));
+      }
+    }
+
+    // ---- 3D buildings from OpenStreetMap (OpenMapTiles schema) ----
+    var buildings3d = false;
+    if (sourceIds.contains('openmaptiles')) {
+      const height = ['coalesce', ['get', 'render_height'], 8];
+      const base = ['coalesce', ['get', 'render_min_height'], 0];
+      buildings3d = await safe(
+        '3d buildings',
+        () => m.addFillExtrusionLayer(
+          'openmaptiles',
+          _layerBuildings3d,
+          const FillExtrusionLayerProperties(
+            fillExtrusionColor: [
+              'interpolate', ['linear'], height,
+              0, '#EDE8DD',
+              15, '#E0D9CB',
+              40, '#D1C8B6',
+              90, '#BFB5A1',
+            ],
+            // Buildings "grow" out of the ground as you zoom in.
+            fillExtrusionHeight: [
+              'interpolate', ['linear'], ['zoom'],
+              14.5, 0,
+              15.5, height,
+            ],
+            fillExtrusionBase: [
+              'interpolate', ['linear'], ['zoom'],
+              14.5, 0,
+              15.5, base,
+            ],
+            fillExtrusionOpacity: 0.9,
+          ),
+          sourceLayer: 'building',
+          minzoom: 14.5,
+          belowLayerId: firstLabel,
+          enableInteraction: false,
+        ),
+      );
+    }
+
+    // Soft sunlight so 3D buildings get shaded walls instead of flat color.
+    await safe(
+      'light',
+      () => m.setLight(
+        const LightProperties(
+          anchor: 'map',
+          position: [1.3, 210, 35], // radial, azimuth (from SSW), polar
+          intensity: 0.4,
+        ),
+      ),
+    );
+
+    // ---- our GeoJSON sources (start empty, filled by _pushAll) ----
+    for (final id in [
+      _srcRoute,
+      _srcPillars,
+      _srcBeacon,
+      _srcLots,
+      _srcBuildings,
+      _srcPuck,
+    ]) {
+      await safe('source $id', () => m.addGeoJsonSource(id, empty));
+    }
+
+    // ---- route line: under the 3D buildings so they occlude it correctly ----
+    final routeBelow = buildings3d ? _layerBuildings3d : firstLabel;
+    await safe(
+      'route casing',
+      () => m.addLineLayer(
+        _srcRoute,
+        'sc-route-casing',
+        const LineLayerProperties(
+          lineColor: '#000000',
+          lineWidth: 10.0,
+          lineOpacity: 0.75,
+          lineCap: 'round',
+          lineJoin: 'round',
+        ),
+        belowLayerId: routeBelow,
+        enableInteraction: false,
+      ),
+    );
+    await safe(
+      'route line',
+      () => m.addLineLayer(
+        _srcRoute,
+        'sc-route-line',
+        LineLayerProperties(
+          lineColor: _hex(kAccent),
+          lineWidth: 6.0,
+          lineCap: 'round',
+          lineJoin: 'round',
+        ),
+        belowLayerId: routeBelow,
+        enableInteraction: false,
+      ),
+    );
+
+    // ---- 3D lot pillars (height = free spots) & destination beacon ----
+    await safe(
+      'lot pillars',
+      () => m.addFillExtrusionLayer(
+        _srcPillars,
+        'sc-lot-pillars',
+        const FillExtrusionLayerProperties(
+          fillExtrusionColor: ['get', 'color'],
+          fillExtrusionHeight: ['get', 'height'],
+          fillExtrusionBase: 0,
+          fillExtrusionOpacity: 0.85,
+        ),
+        enableInteraction: false,
+      ),
+    );
+    await safe(
+      'beacon',
+      () => m.addFillExtrusionLayer(
+        _srcBeacon,
+        'sc-beacon',
+        FillExtrusionLayerProperties(
+          fillExtrusionColor: _hex(kDev),
+          fillExtrusionHeight: ['get', 'height'],
+          fillExtrusionBase: 0,
+          fillExtrusionOpacity: 0.8,
+        ),
+        enableInteraction: false,
+      ),
+    );
+
+    // ---- building markers ----
+    const isSelected = ['==', ['get', 'selected'], true];
+    await safe(
+      'building dots',
+      () => m.addCircleLayer(
+        _srcBuildings,
+        'sc-buildings-dot',
+        CircleLayerProperties(
+          circleRadius: ['case', isSelected, 8, 5],
+          circleColor: ['case', isSelected, _hex(kAccent), _hex(kDev)],
+          circleStrokeColor: '#000000',
+          circleStrokeWidth: 2,
+        ),
+        enableInteraction: false,
+      ),
+    );
+    await safe(
+      'building labels',
+      () => m.addSymbolLayer(
+        _srcBuildings,
+        'sc-buildings-label',
+        SymbolLayerProperties(
+          textField: ['get', 'code'],
+          textFont: _fonts,
+          textSize: ['case', isSelected, 14, 11],
+          textColor: ['case', isSelected, _hex(kAccent), '#FFFFFF'],
+          textHaloColor: '#000000',
+          textHaloWidth: 1.6,
+          textAnchor: 'top',
+          textOffset: [0, 0.9],
+          textAllowOverlap: true,
+          textIgnorePlacement: true,
+        ),
+        enableInteraction: false,
+      ),
+    );
+
+    // ---- lot labels ----
+    await safe(
+      'lot labels',
+      () => m.addSymbolLayer(
+        _srcLots,
+        'sc-lots-label',
+        const SymbolLayerProperties(
+          textField: ['get', 'label'],
+          textFont: _fonts,
+          textSize: ['case', ['==', ['get', 'best'], true], 13, 11],
+          textColor: ['get', 'color'],
+          textHaloColor: '#000000',
+          textHaloWidth: 1.8,
+          textJustify: 'center',
+          textAllowOverlap: true,
+          textIgnorePlacement: true,
+        ),
+        enableInteraction: false,
+      ),
+    );
+
+    // ---- user puck: flat glow + arrow that lies on the tilted map ----
+    await safe(
+      'puck glow',
+      () => m.addCircleLayer(
+        _srcPuck,
+        'sc-puck-glow',
+        CircleLayerProperties(
+          circleRadius: 22,
+          circleColor: _hex(kAccent),
+          circleOpacity: 0.22,
+          circlePitchAlignment: 'map',
+        ),
+        enableInteraction: false,
+      ),
+    );
+    await safe('puck icon', () async {
+      await m.addImage(_puckImage, await _puckIconBytes);
+      return null;
+    });
+    await safe(
+      'puck arrow',
+      () => m.addSymbolLayer(
+        _srcPuck,
+        'sc-puck-arrow',
+        const SymbolLayerProperties(
+          iconImage: _puckImage,
+          iconSize: 0.5,
+          iconRotate: ['get', 'bearing'],
+          iconRotationAlignment: 'map',
+          iconPitchAlignment: 'map',
+          iconAllowOverlap: true,
+          iconIgnorePlacement: true,
+        ),
+        enableInteraction: false,
+      ),
+    );
+  }
+
+  // ==========================================
+  // MAP DATA PUSHES
+  // ==========================================
+
+  void _pushAll() {
+    _pushOverlays();
+    _pushRoute();
+    _pushPuck();
+  }
+
+  void _pushOverlays() {
+    _pushLots();
+    _pushBuildings();
+  }
+
+  void _pushLots() {
+    final bestId = _walkResult?.lotId;
+    final labels = <Map<String, dynamic>>[];
+    final pillars = <Map<String, dynamic>>[];
+
+    _liveLots.forEach((id, lot) {
+      final pos = lot['position'] as LatLng;
+      final isBest = id == bestId;
+      final color = _hex(isBest ? kAccent : lot['color'] as Color);
+      final cap = lot['capacity'] as int;
+      final free = math.max(0, cap - (lot['occupied'] as int));
+      final height = cap == 0 ? 3.0 : (6.0 + free * 3.0).clamp(6.0, 60.0);
+
+      labels.add(_pointFeature(pos, {
+        'label': '${lot['name']}\n${lot['status']}',
+        'color': color,
+        'best': isBest,
+      }));
+      pillars.add(_squareFeature(pos, isBest ? 9 : 7, {
+        'color': color,
+        'height': height,
+      }));
+    });
+
+    _sync.push(_srcLots, _fc(labels));
+    _sync.push(_srcPillars, _fc(pillars));
+  }
+
+  void _pushBuildings() {
+    final selectedId = _selectedBuilding?.id;
+    _sync.push(
+      _srcBuildings,
+      _fc([
+        for (final b in _campusBuildings)
+          _pointFeature(b.position, {
+            'code': b.code,
+            'selected': b.id == selectedId,
+          }),
+      ]),
+    );
+    final sel = _selectedBuilding;
+    _sync.push(
+      _srcBeacon,
+      _fc(sel == null
+          ? const <Map<String, dynamic>>[]
+          : [
+              _squareFeature(sel.position, 4, {'height': 45.0}),
+            ]),
+    );
+  }
+
+  void _pushRoute() {
+    _sync.push(
+      _srcRoute,
+      _fc(_displayRoute.length < 2
+          ? const <Map<String, dynamic>>[]
+          : [
+              {
+                'type': 'Feature',
+                'properties': <String, dynamic>{},
+                'geometry': {
+                  'type': 'LineString',
+                  'coordinates': [for (final p in _displayRoute) _coord(p)],
+                },
+              },
+            ]),
+    );
+  }
+
+  void _pushPuck() {
+    final p = _userPos;
+    _sync.push(
+      _srcPuck,
+      _fc(p == null
+          ? const <Map<String, dynamic>>[]
+          : [
+              _pointFeature(p, {'bearing': _puckBearing()}),
+            ]),
+    );
   }
 
   // ==========================================
   // CAMERA
   // ==========================================
 
-  void _onCameraTick() {
-    final t = Curves.easeOutCubic.transform(_cameraAnim.value);
-    _mapController.moveAndRotate(
-      Geo.lerp(_camFrom, _camTo, t),
-      _navZoom,
-      _rotFrom + (_rotTo - _rotFrom) * t,
-    );
+  void _animateTo(CameraPosition p, Duration d) {
+    final m = _map;
+    if (m == null) return;
+    _guard(() => m.animateCamera(CameraUpdate.newCameraPosition(p), duration: d));
   }
 
-  /// Smoothly animates position AND rotation (old version only animated rotation).
-  void _animateCameraTo(LatLng pos, double bearing) {
-    if (!mounted) return;
-    final cam = _mapController.camera;
-    _camFrom = cam.center;
-    _camTo = pos;
-    _rotFrom = cam.rotation;
-    _rotTo = cam.rotation + Geo.shortestAngle(cam.rotation, -bearing);
-
-    if (Geo.meters(_camFrom, _camTo) < 0.3 && (_rotTo - _rotFrom).abs() < 1.0) {
-      _cameraAnim.stop();
-      _mapController.moveAndRotate(pos, _navZoom, _rotTo);
+  /// Follow-camera for navigation. Linear easing chains smoothly between
+  /// successive calls; calls are throttled so the channel never floods.
+  void _follow(LatLng pos, double bearing, Duration d, {bool force = false}) {
+    final m = _map;
+    if (m == null || !_navTracking) return;
+    final now = DateTime.now();
+    if (!force &&
+        now.difference(_lastCamAt) < const Duration(milliseconds: 150)) {
       return;
     }
-    _cameraAnim.forward(from: 0);
+    _lastCamAt = now;
+    _guard(() => m.easeCamera(
+          CameraUpdate.newCameraPosition(CameraPosition(
+            target: pos,
+            zoom: _navZoom,
+            bearing: bearing,
+            tilt: _is3D ? _navTilt : 0,
+          )),
+          duration: d,
+          interpolation: CameraAnimationInterpolation.linear,
+        ));
+  }
+
+  void _setNavTracking(bool on, {bool recenter = true}) {
+    final pos = _userPos;
+    final m = _map;
+    setState(() => _navTracking = on);
+    if (m == null) return;
+
+    if (on && pos != null) {
+      _camBearing = _heading;
+      // Push the focal point down so you see more road ahead.
+      final h = MediaQuery.of(context).size.height;
+      _guard(() => m.setPadding(top: h * 0.35, animated: true));
+      _animateTo(
+        CameraPosition(
+          target: pos,
+          zoom: _navZoom,
+          bearing: _heading,
+          tilt: _is3D ? _navTilt : 0,
+        ),
+        const Duration(milliseconds: 800),
+      );
+    } else {
+      _guard(() => m.setPadding(animated: true));
+      if (recenter && pos != null) {
+        _animateTo(
+          CameraPosition(
+            target: pos,
+            zoom: 16.5,
+            bearing: 0,
+            tilt: _is3D ? _overviewTilt : 0,
+          ),
+          const Duration(milliseconds: 800),
+        );
+      }
+    }
+  }
+
+  void _toggle3D() {
+    final m = _map;
+    setState(() => _is3D = !_is3D);
+    if (m == null) return;
+    final tilt = !_is3D ? 0.0 : (_navTracking ? _navTilt : _overviewTilt);
+    _guard(() => m.animateCamera(
+          CameraUpdate.tiltTo(tilt),
+          duration: const Duration(milliseconds: 700),
+        ));
+  }
+
+  void _resetView() {
+    _clearDestination();
+    if (_navTracking) _setNavTracking(false, recenter: false);
+    _animateTo(
+      CameraPosition(
+        target: _fauCenter,
+        zoom: _overviewZoom,
+        bearing: 0,
+        tilt: _is3D ? _overviewTilt : 0,
+      ),
+      const Duration(milliseconds: 1000),
+    );
   }
 
   // ==========================================
@@ -1293,19 +1888,20 @@ class _FauMapScreenState extends State<FauMapScreen>
   void _startCompassTracking() {
     _compassSub = FlutterCompass.events?.listen((event) {
       if (!mounted || _isSimulating) return;
-      // While driving, the GPS course is far more reliable than the compass.
       if (DateTime.now().difference(_lastGpsHeadingAt) <
           const Duration(seconds: 3)) {
-        return;
+        return; // GPS course wins while driving
       }
       final raw = event.headingForCameraMode ?? event.heading;
       if (raw == null) return;
       final h = raw % 360.0;
-      // Wrap-aware jitter filter (359° → 1° is a 2° change, not 358°).
       if (Geo.shortestAngle(_heading, h).abs() < 2.0) return;
 
       setState(() => _heading = h);
-      if (_navTracking && _isOnCampus) _animateCameraTo(_userPos!, h);
+      _pushPuck();
+      if (_navTracking && _isOnCampus) {
+        _follow(_userPos!, h, const Duration(milliseconds: 300));
+      }
     });
   }
 
@@ -1324,34 +1920,32 @@ class _FauMapScreenState extends State<FauMapScreen>
     }
 
     try {
-      if (!await Geolocator.isLocationServiceEnabled()) {
+      if (!await geo.Geolocator.isLocationServiceEnabled()) {
         return fail('Location services disabled.');
       }
-
-      var permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-        if (permission == LocationPermission.denied) {
+      var permission = await geo.Geolocator.checkPermission();
+      if (permission == geo.LocationPermission.denied) {
+        permission = await geo.Geolocator.requestPermission();
+        if (permission == geo.LocationPermission.denied) {
           return fail('GPS permission denied.');
         }
       }
-      if (permission == LocationPermission.deniedForever) {
+      if (permission == geo.LocationPermission.deniedForever) {
         return fail('GPS permanently denied.');
       }
 
-      final initial = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+      final initial = await geo.Geolocator.getCurrentPosition(
+        locationSettings: const geo.LocationSettings(accuracy: geo.LocationAccuracy.high),
       );
       if (!mounted) return;
       _handlePosition(initial);
-
       if (_selectedBuilding != null && _fullRoute.isEmpty) {
         _updateNavigationRoute();
       }
 
-      _positionSub = Geolocator.getPositionStream(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.bestForNavigation,
+      _positionSub = geo.Geolocator.getPositionStream(
+        locationSettings: const geo.LocationSettings(
+          accuracy: geo.LocationAccuracy.bestForNavigation,
           distanceFilter: 2,
         ),
       ).listen(
@@ -1363,15 +1957,15 @@ class _FauMapScreenState extends State<FauMapScreen>
     }
   }
 
-  void _handlePosition(Position p) {
+  void _handlePosition(geo.Position p) {
     if (!mounted) return;
-    // Dev teleport / simulation owns the puck: real GPS must not yank it back.
     if (_isSimulating || _devLocationOverride) return;
 
     final loc = LatLng(p.latitude, p.longitude);
-    final onCampus = _fauBounds.contains(loc);
+    final onCampus = _inCampus(loc);
     final hasCourse = p.speed > 1.0 && p.heading >= 0;
     var progress = _Progress.none;
+    final wasTracking = _navTracking;
 
     setState(() {
       _userPos = loc;
@@ -1382,23 +1976,30 @@ class _FauMapScreenState extends State<FauMapScreen>
         _heading = p.heading;
         _lastGpsHeadingAt = DateTime.now();
       }
-      if (!onCampus) _navTracking = false;
       progress = _updateRouteProgress(loc);
     });
 
-    // Side effects run outside setState.
-    if (_navTracking && onCampus) _animateCameraTo(loc, _heading);
+    _pushPuck();
+    _pushRoute();
+
+    if (wasTracking && !onCampus) {
+      _setNavTracking(false, recenter: false);
+    } else if (_navTracking) {
+      _follow(loc, _heading, const Duration(milliseconds: 1000));
+    }
+
     if (progress == _Progress.arrived) _onArrived();
-    if (progress == _Progress.offRoute && p.accuracy <= _maxGpsAccuracyForReroute) {
+    if (progress == _Progress.offRoute &&
+        p.accuracy <= _maxGpsAccuracyForReroute) {
       _maybeReroute();
     }
   }
 
   Future<void> _resyncRealGps() async {
     try {
-      final p = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
+      final p = await geo.Geolocator.getCurrentPosition(
+        locationSettings: const geo.LocationSettings(
+          accuracy: geo.LocationAccuracy.high,
           timeLimit: Duration(seconds: 5),
         ),
       );
@@ -1409,9 +2010,9 @@ class _FauMapScreenState extends State<FauMapScreen>
 
   Future<LatLng?> _quickFix() async {
     try {
-      final p = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.medium,
+      final p = await geo.Geolocator.getCurrentPosition(
+        locationSettings: const geo.LocationSettings(
+          accuracy: geo.LocationAccuracy.medium,
           timeLimit: Duration(seconds: 3),
         ),
       );
@@ -1460,7 +2061,7 @@ class _FauMapScreenState extends State<FauMapScreen>
       final lotData =
           val is Map ? Map<String, dynamic>.from(val) : <String, dynamic>{};
       final pos = _lotPositions[lotId] ?? _readLatLng(lotData);
-      if (pos == null) return; // unknown location: can't show or route to it
+      if (pos == null) return;
 
       final total = capacity[lotId] ?? 0;
       final occ = occupied[lotId] ?? 0;
@@ -1495,15 +2096,17 @@ class _FauMapScreenState extends State<FauMapScreen>
       setState(() => _liveLots = lots);
 
       final building = _selectedBuilding;
-      if (building == null) return;
+      if (building == null) {
+        _pushOverlays();
+        return;
+      }
 
       final best = CampusPathfinder.findBestAvailableRoute(
         buildingPos: building.position,
         lots: lots,
       );
 
-      // Only hit OSRM when the recommended lot actually changes,
-      // not on every single sensor flip.
+      // Only hit OSRM when the recommended lot actually changes.
       if (best?.lotId != _routeLotId) {
         _updateNavigationRoute();
       } else if (_fullRoute.isEmpty && !_isRouting && !_arrived) {
@@ -1511,6 +2114,7 @@ class _FauMapScreenState extends State<FauMapScreen>
       } else if (best != null) {
         setState(() => _walkResult = best);
       }
+      _pushOverlays();
     });
   }
 
@@ -1543,6 +2147,8 @@ class _FauMapScreenState extends State<FauMapScreen>
         _isRouting = false;
         _clearDrivingRoute();
       });
+      _pushOverlays();
+      _pushRoute();
       return;
     }
 
@@ -1551,6 +2157,7 @@ class _FauMapScreenState extends State<FauMapScreen>
       _walkResult = best;
       _isRouting = true;
     });
+    _pushOverlays();
     _lastRouteAt = DateTime.now();
 
     final start = _userPos ?? await _quickFix() ?? _campusEntrance;
@@ -1571,6 +2178,8 @@ class _FauMapScreenState extends State<FauMapScreen>
       _displayRoute = List<LatLng>.of(road);
       _routeRemaining = _routeSuffix.first;
     });
+    _pushRoute();
+    _pushPuck();
   }
 
   void _maybeReroute() {
@@ -1602,8 +2211,6 @@ class _FauMapScreenState extends State<FauMapScreen>
     return best;
   }
 
-  /// Projects the user onto the route (searching a small window ahead of the
-  /// last known segment) and trims everything behind them.
   /// Mutates state only — call inside setState.
   _Progress _updateRouteProgress(LatLng pos) {
     final route = _fullRoute;
@@ -1626,8 +2233,6 @@ class _FauMapScreenState extends State<FauMapScreen>
       _displayRoute = const [];
       return _Progress.arrived;
     }
-
-    // Anchor the front of the guideline to the puck.
     _displayRoute = [pos, ...route.sublist(proj.seg + 1)];
     return _Progress.onRoute;
   }
@@ -1659,8 +2264,17 @@ class _FauMapScreenState extends State<FauMapScreen>
         lots: _liveLots,
       );
     });
+    _pushOverlays();
+    _pushRoute();
     _updateNavigationRoute();
-    if (!_navTracking) _mapController.move(building.position, 16.5);
+
+    final m = _map;
+    if (m != null && !_navTracking) {
+      _guard(() => m.animateCamera(
+            CameraUpdate.newLatLngZoom(building.position, 17.0),
+            duration: const Duration(milliseconds: 900),
+          ));
+    }
   }
 
   void _clearDestination() {
@@ -1673,20 +2287,55 @@ class _FauMapScreenState extends State<FauMapScreen>
       _isRouting = false;
       _clearDrivingRoute();
     });
+    _pushOverlays();
+    _pushRoute();
+    _pushPuck();
+  }
+
+  // ==========================================
+  // MAP TAPS
+  // ==========================================
+
+  void _onMapClick(math.Point<double> point, LatLng latLng) {
+    if (_devMode) _devTap.value = latLng;
+
+    FauBuilding? nearest;
+    var nearestDist = 45.0; // meters
+    for (final b in _campusBuildings) {
+      final d = Geo.meters(latLng, b.position);
+      if (d < nearestDist) {
+        nearestDist = d;
+        nearest = b;
+      }
+    }
+    if (nearest != null) {
+      _onBuildingSelected(nearest);
+      return;
+    }
+
+    for (final lot in _liveLots.values) {
+      if (Geo.meters(latLng, lot['position'] as LatLng) < 40) {
+        final free = (lot['capacity'] as int) - (lot['occupied'] as int);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${lot['name']}: $free free of ${lot['capacity']}'),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+        return;
+      }
+    }
   }
 
   // ==========================================
   // DEVELOPER TOOLS
   // ==========================================
 
-  /// Jumps to the first route point inside campus (or the main entrance).
-  /// The old version jumped to the route start, which is the user's own
-  /// off-campus location, so it never actually moved.
   void _teleportToCampus() {
     _stopSimulation();
     var target = _campusEntrance;
     for (final p in _fullRoute) {
-      if (_fauBounds.contains(p)) {
+      if (_inCampus(p)) {
         target = p;
         break;
       }
@@ -1696,7 +2345,14 @@ class _FauMapScreenState extends State<FauMapScreen>
       _userPos = target;
       _gpsStatus = 'Teleported to campus (dev)';
     });
-    _mapController.move(target, 17.5);
+    _pushPuck();
+    final m = _map;
+    if (m != null) {
+      _guard(() => m.animateCamera(
+            CameraUpdate.newLatLngZoom(target, 17.5),
+            duration: const Duration(milliseconds: 1200),
+          ));
+    }
     _updateNavigationRoute();
   }
 
@@ -1707,11 +2363,12 @@ class _FauMapScreenState extends State<FauMapScreen>
     }
     if (_fullRoute.length < 2 || _arrived) return;
 
-    // Start from the puck's projected spot on the route.
-    final proj = _project(_userPos ?? _fullRoute.first, 0, _fullRoute.length - 2);
+    final proj =
+        _project(_userPos ?? _fullRoute.first, 0, _fullRoute.length - 2);
     final onRoute = proj.dist <= _offRouteMeters;
 
-    _simCamRotation = _mapController.camera.rotation;
+    _camBearing = _heading;
+    _simTickCount = 0;
     setState(() {
       _isSimulating = true;
       _devLocationOverride = true;
@@ -1733,7 +2390,6 @@ class _FauMapScreenState extends State<FauMapScreen>
     var seg = _routeSeg;
     var budget = _simMetersPerTick;
 
-    // Walk the budget along the route, crossing vertices as needed.
     while (seg < route.length - 1) {
       final next = route[seg + 1];
       final d = Geo.meters(cur, next);
@@ -1755,27 +2411,34 @@ class _FauMapScreenState extends State<FauMapScreen>
         _routeRemaining = 0;
         _gpsStatus = 'Simulation finished';
       });
+      _pushPuck();
+      _pushRoute();
       _onArrived();
       return;
     }
 
     final bearing = Geo.bearing(cur, route[seg + 1]);
-    setState(() {
-      _userPos = cur;
-      _routeSeg = seg;
-      _heading = bearing;
-      _distToRoute = 0;
-      _displayRoute = [cur, ...route.sublist(seg + 1)];
-      _routeRemaining = Geo.meters(cur, route[seg + 1]) + _routeSuffix[seg + 1];
-      _gpsStatus = 'Simulating 20 mph (${bearing.round()}°)';
-    });
+    _simTickCount++;
 
-    if (_navTracking) {
-      // Ticks already arrive at 20 fps, so ease the rotation directly
-      // instead of restarting a camera animation every 50 ms.
-      _simCamRotation +=
-          Geo.shortestAngle(_simCamRotation, -bearing) * 0.2;
-      _mapController.moveAndRotate(cur, _navZoom, _simCamRotation);
+    // Per-tick state is updated WITHOUT setState: the puck moves on the GPU
+    // via its GeoJSON source; Flutter widgets only refresh a few times a second.
+    _userPos = cur;
+    _routeSeg = seg;
+    _heading = bearing;
+    _distToRoute = 0;
+    _displayRoute = [cur, ...route.sublist(seg + 1)];
+    _routeRemaining = Geo.meters(cur, route[seg + 1]) + _routeSuffix[seg + 1];
+    _pushPuck();
+
+    if (_simTickCount % 5 == 0) {
+      _pushRoute(); // 4 Hz is plenty for the trimmed line
+      setState(() => _gpsStatus = 'Simulating 20 mph (${bearing.round()}°)');
+    }
+
+    if (_navTracking && _simTickCount % 4 == 0) {
+      _camBearing =
+          (_camBearing + Geo.shortestAngle(_camBearing, bearing) * 0.35) % 360;
+      _follow(cur, _camBearing, const Duration(milliseconds: 220), force: true);
     }
   }
 
@@ -1784,6 +2447,7 @@ class _FauMapScreenState extends State<FauMapScreen>
     _simTimer = null;
     if (mounted && _isSimulating) {
       setState(() => _isSimulating = false);
+      _pushRoute();
     }
   }
 
@@ -1792,10 +2456,10 @@ class _FauMapScreenState extends State<FauMapScreen>
     setState(() => _devMode = !_devMode);
     if (turningOff) {
       _stopSimulation();
-      _cursor.value = null;
+      _devTap.value = null;
       if (_devLocationOverride) {
         _devLocationOverride = false;
-        _resyncRealGps(); // hand the puck back to real GPS
+        _resyncRealGps();
       }
     }
   }
@@ -1804,7 +2468,6 @@ class _FauMapScreenState extends State<FauMapScreen>
   // UI
   // ==========================================
 
-  /// Puck follows the road segment when on-route, otherwise the device heading.
   double _puckBearing() {
     if (_displayRoute.length >= 2 &&
         _distToRoute < 15 &&
@@ -1822,135 +2485,137 @@ class _FauMapScreenState extends State<FauMapScreen>
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (ctx) {
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    'Select Building',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: kText,
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close, color: kTextMuted),
-                    onPressed: () => Navigator.pop(ctx),
-                  ),
-                ],
-              ),
-              const Divider(color: kDivider),
-              Expanded(
-                child: ListView.separated(
-                  itemCount: _campusBuildings.length,
-                  separatorBuilder: (_, __) =>
-                      const Divider(color: kDivider, height: 1),
-                  itemBuilder: (context, index) {
-                    final bldg = _campusBuildings[index];
-                    // Cheap now: walking routes are cached.
-                    final best = CampusPathfinder.findBestAvailableRoute(
-                      buildingPos: bldg.position,
-                      lots: _liveLots,
-                    );
-                    final lot = best != null ? _liveLots[best.lotId] : null;
-                    final free = lot == null
-                        ? 0
-                        : (lot['capacity'] as int) - (lot['occupied'] as int);
-
-                    return Padding(
-                      padding:
-                          const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-                      child: Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.white10,
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Text(
-                              bldg.code,
-                              style: const TextStyle(
-                                color: kAccent,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  bldg.name,
-                                  style: const TextStyle(
-                                    color: kText,
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 14,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  lot != null
-                                      ? 'Best lot: ${lot['name']} ($free free, ${formatDistance(best!.totalDistanceMeters)} walk)'
-                                      : (_liveLots.isEmpty
-                                          ? 'Loading parking data...'
-                                          : 'All nearby lots full'),
-                                  style: const TextStyle(
-                                    color: kTextMuted,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          ElevatedButton.icon(
-                            onPressed: () {
-                              Navigator.pop(ctx);
-                              _onBuildingSelected(bldg);
-                            },
-                            icon: const Icon(Icons.navigation,
-                                size: 14, color: Colors.black),
-                            label: const Text(
-                              'Go to',
-                              style: TextStyle(
-                                color: Colors.black,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 12,
-                              ),
-                            ),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: kAccent,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 6,
-                              ),
-                              minimumSize: Size.zero,
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                            ),
-                          ),
-                        ],
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Select Building',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: kText,
                       ),
-                    );
-                  },
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close, color: kTextMuted),
+                      onPressed: () => Navigator.pop(ctx),
+                    ),
+                  ],
                 ),
-              ),
-            ],
+                const Divider(color: kDivider),
+                Expanded(
+                  child: ListView.separated(
+                    itemCount: _campusBuildings.length,
+                    separatorBuilder: (_, __) =>
+                        const Divider(color: kDivider, height: 1),
+                    itemBuilder: (context, index) {
+                      final bldg = _campusBuildings[index];
+                      final best = CampusPathfinder.findBestAvailableRoute(
+                        buildingPos: bldg.position,
+                        lots: _liveLots,
+                      );
+                      final lot = best != null ? _liveLots[best.lotId] : null;
+                      final free = lot == null
+                          ? 0
+                          : (lot['capacity'] as int) - (lot['occupied'] as int);
+
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(
+                            vertical: 8, horizontal: 4),
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.white10,
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                bldg.code,
+                                style: const TextStyle(
+                                  color: kAccent,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    bldg.name,
+                                    style: const TextStyle(
+                                      color: kText,
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 14,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    lot != null
+                                        ? 'Best lot: ${lot['name']} ($free free, ${formatDistance(best!.totalDistanceMeters)} walk)'
+                                        : (_liveLots.isEmpty
+                                            ? 'Loading parking data...'
+                                            : 'All nearby lots full'),
+                                    style: const TextStyle(
+                                      color: kTextMuted,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            ElevatedButton.icon(
+                              onPressed: () {
+                                Navigator.pop(ctx);
+                                _onBuildingSelected(bldg);
+                              },
+                              icon: const Icon(Icons.navigation,
+                                  size: 14, color: Colors.black),
+                              label: const Text(
+                                'Go to',
+                                style: TextStyle(
+                                  color: Colors.black,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: kAccent,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 6,
+                                ),
+                                minimumSize: Size.zero,
+                                tapTargetSize:
+                                    MaterialTapTargetSize.shrinkWrap,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
           ),
         );
       },
@@ -1961,6 +2626,7 @@ class _FauMapScreenState extends State<FauMapScreen>
   Widget build(BuildContext context) {
     final onCampus = _isOnCampus;
     final navActive = _navTracking && onCampus;
+    final bottomInset = MediaQuery.of(context).padding.bottom;
 
     return Scaffold(
       appBar: AppBar(
@@ -1995,10 +2661,16 @@ class _FauMapScreenState extends State<FauMapScreen>
               _devMode ? Icons.developer_mode : Icons.developer_mode_outlined,
               color: _devMode ? kDev : kTextMuted,
             ),
-            tooltip: _devMode
-                ? 'Disable Developer Mode'
-                : 'Enable Developer Mode & Joystick',
+            tooltip: _devMode ? 'Disable Developer Mode' : 'Enable Developer Mode',
             onPressed: _toggleDevMode,
+          ),
+          IconButton(
+            icon: Icon(
+              _is3D ? Icons.view_in_ar : Icons.map_outlined,
+              color: _is3D ? kAccent : kTextMuted,
+            ),
+            tooltip: _is3D ? 'Switch to 2D view' : 'Switch to 3D view',
+            onPressed: _toggle3D,
           ),
           if (onCampus)
             IconButton(
@@ -2018,244 +2690,63 @@ class _FauMapScreenState extends State<FauMapScreen>
               tooltip: _navTracking
                   ? 'Disable Navigation Focus'
                   : 'Follow GPS Live (Turn-by-Turn Mode)',
-              onPressed: () {
-                final pos = _userPos;
-                if (pos == null) return;
-                setState(() => _navTracking = !_navTracking);
-                if (_navTracking) {
-                  _simCamRotation = -_heading;
-                  _mapController.moveAndRotate(pos, _navZoom, -_heading);
-                } else {
-                  _cameraAnim.stop();
-                  _mapController.moveAndRotate(pos, 16.5, 0);
-                }
-              },
+              onPressed: _userPos == null
+                  ? null
+                  : () => _setNavTracking(!_navTracking),
             ),
           IconButton(
             icon: const Icon(Icons.center_focus_strong),
             tooltip: 'Reset Campus View',
-            onPressed: () {
-              _clearDestination();
-              setState(() => _navTracking = false);
-              _cameraAnim.stop();
-              _mapController.moveAndRotate(_fauCenter, 15.3, 0);
-            },
+            onPressed: _resetView,
           ),
         ],
       ),
       body: Stack(
         children: [
-          _buildMap(),
+          Positioned.fill(child: _buildMap()),
           _buildSearchHeader(),
-          if (_devMode) _buildDevCursorBadge(),
-          if (_devMode && _selectedBuilding != null) _buildDevControls(onCampus),
-          _buildGuidanceCard(onCampus),
+          if (_devMode) _buildDevTapBadge(),
+          if (_devMode && _selectedBuilding != null)
+            _buildDevControls(onCampus, bottomInset),
+          _buildAttribution(bottomInset),
+          _buildGuidanceCard(onCampus, bottomInset),
         ],
       ),
     );
   }
 
   Widget _buildMap() {
-    final walk = _walkResult;
-    final bestLotId = walk?.lotId;
-
-    return MouseRegion(
-      onHover: (event) {
-        if (!_devMode) return;
-        try {
-          _cursor.value = _mapController.camera.offsetToCrs(event.localPosition);
-        } catch (_) {}
+    // Listener sees raw touches before the native map does, so a drag
+    // cancels follow-mode just like Google Maps.
+    return Listener(
+      onPointerDown: (e) => _pointerDownAt = e.position,
+      onPointerMove: (e) {
+        final start = _pointerDownAt;
+        if (_navTracking &&
+            start != null &&
+            (e.position - start).distance > 12) {
+          _pointerDownAt = null;
+          _setNavTracking(false, recenter: false);
+        }
       },
-      onExit: (_) {
-        if (_devMode) _cursor.value = null;
-      },
-      child: FlutterMap(
-        mapController: _mapController,
-        options: MapOptions(
-          initialCenter: _fauCenter,
-          initialZoom: 15.3,
-          minZoom: 15.0,
-          maxZoom: 19.5,
-          cameraConstraint: CameraConstraint.containCenter(bounds: _fauBounds),
-          onPositionChanged: (pos, hasGesture) {
-            if (hasGesture && _navTracking) {
-              _cameraAnim.stop();
-              setState(() => _navTracking = false);
-            }
-          },
-          interactionOptions: const InteractionOptions(
-            flags: InteractiveFlag.pinchZoom |
-                InteractiveFlag.drag |
-                InteractiveFlag.doubleTapZoom |
-                InteractiveFlag.scrollWheelZoom |
-                InteractiveFlag.rotate,
-          ),
+      onPointerUp: (_) => _pointerDownAt = null,
+      onPointerCancel: (_) => _pointerDownAt = null,
+      child: MapLibreMap(
+        styleString: _styleUrl,
+        initialCameraPosition: const CameraPosition(
+          target: _fauCenter,
+          zoom: 15.0,
         ),
-        children: [
-          TileLayer(
-            urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-            userAgentPackageName: 'com.smartcurb.app',
-            maxNativeZoom: 19,
-            maxZoom: 20,
-          ),
-          PolylineLayer(
-            polylines: [
-              // Driving route.
-              if (_displayRoute.length >= 2) ...[
-                Polyline(
-                  points: _displayRoute,
-                  strokeWidth: 6.5,
-                  color: Colors.black87,
-                ),
-                Polyline(
-                  points: _displayRoute,
-                  strokeWidth: 4.0,
-                  color: kAccent,
-                ),
-              ],
-            ],
-          ),
-          MarkerLayer(
-            markers: [
-              for (final b in _campusBuildings) _buildBuildingMarker(b),
-              for (final e in _liveLots.entries)
-                _buildLotMarker(
-                  point: e.value['position'] as LatLng,
-                  name: e.value['name'] as String,
-                  status: e.value['status'] as String,
-                  badgeColor:
-                      e.key == bestLotId ? kAccent : e.value['color'] as Color,
-                  isHighlighted: e.key == bestLotId,
-                ),
-              // Puck last so it draws on top.
-              if (_userPos != null)
-                Marker(
-                  point: _userPos!,
-                  alignment: Alignment.center,
-                  width: 52,
-                  height: 52,
-                  // rotate: false → the puck turns with the map, so a
-                  // map-relative bearing is correct at any map rotation.
-                  rotate: false,
-                  child: Transform.rotate(
-                    angle: _puckBearing() * math.pi / 180.0,
-                    child: const _UserPuck(),
-                  ),
-                ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Marker _buildBuildingMarker(FauBuilding bldg) {
-    final isSelected = _selectedBuilding?.id == bldg.id;
-    return Marker(
-      point: bldg.position,
-      alignment: Alignment.center,
-      width: isSelected ? 120 : 80,
-      height: isSelected ? 48 : 30,
-      rotate: true,
-      child: GestureDetector(
-        onTap: () => _onBuildingSelected(bldg),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-          decoration: BoxDecoration(
-            color: isSelected ? kDev : const Color(0xDD1F242A),
-            borderRadius: BorderRadius.circular(6),
-            border: Border.all(
-              color: isSelected ? Colors.white : kDev.withOpacity(0.7),
-              width: isSelected ? 2 : 1,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: (isSelected ? kDev : Colors.black).withOpacity(0.4),
-                blurRadius: 4,
-              ),
-            ],
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                Icons.business,
-                size: isSelected ? 14 : 11,
-                color: isSelected ? Colors.black : kDev,
-              ),
-              const SizedBox(width: 4),
-              Flexible(
-                child: Text(
-                  bldg.code,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: isSelected ? Colors.black : Colors.white,
-                    fontSize: isSelected ? 11 : 9,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Marker _buildLotMarker({
-    required LatLng point,
-    required String name,
-    required String status,
-    required Color badgeColor,
-    bool isHighlighted = false,
-  }) {
-    return Marker(
-      point: point,
-      alignment: Alignment.center,
-      width: isHighlighted ? 120 : 105,
-      height: isHighlighted ? 62 : 56,
-      rotate: true,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-        decoration: BoxDecoration(
-          color: kBg,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: badgeColor, width: isHighlighted ? 3 : 2),
-          boxShadow: [
-            BoxShadow(
-              color: badgeColor.withOpacity(isHighlighted ? 0.6 : 0.25),
-              blurRadius: isHighlighted ? 12 : 6,
-              spreadRadius: isHighlighted ? 2 : 0,
-            ),
-          ],
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: isHighlighted ? FontWeight.w900 : FontWeight.bold,
-                fontSize: 10.5,
-              ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              status,
-              maxLines: 1,
-              style: TextStyle(
-                color: badgeColor,
-                fontWeight: FontWeight.w800,
-                fontSize: 11,
-              ),
-            ),
-          ],
-        ),
+        onMapCreated: (controller) => _map = controller,
+        onStyleLoadedCallback: _onStyleLoaded,
+        onMapClick: _onMapClick,
+        cameraTargetBounds: _cameraBounds,
+        minMaxZoomPreference: const MinMaxZoomPreference(14.5, 20.0),
+        compassEnabled: false,
+        rotateGesturesEnabled: true,
+        tiltGesturesEnabled: true,
+        myLocationEnabled: false,
+        trackCameraPosition: false,
       ),
     );
   }
@@ -2308,7 +2799,8 @@ class _FauMapScreenState extends State<FauMapScreen>
               if (selected != null)
                 GestureDetector(
                   onTap: _clearDestination,
-                  child: const Icon(Icons.cancel, color: Colors.white54, size: 20),
+                  child:
+                      const Icon(Icons.cancel, color: Colors.white54, size: 20),
                 ),
             ],
           ),
@@ -2317,20 +2809,20 @@ class _FauMapScreenState extends State<FauMapScreen>
     );
   }
 
-  Widget _buildDevCursorBadge() {
+  Widget _buildDevTapBadge() {
     return Positioned(
       top: 80,
       left: 20,
       right: 20,
       child: Center(
         child: ValueListenableBuilder<LatLng?>(
-          valueListenable: _cursor,
-          builder: (context, cursor, _) {
+          valueListenable: _devTap,
+          builder: (context, tap, _) {
             return GestureDetector(
               onTap: () {
-                if (cursor == null) return;
+                if (tap == null) return;
                 final str =
-                    'LatLng(${cursor.latitude.toStringAsFixed(6)}, ${cursor.longitude.toStringAsFixed(6)})';
+                    'LatLng(${tap.latitude.toStringAsFixed(6)}, ${tap.longitude.toStringAsFixed(6)})';
                 Clipboard.setData(ClipboardData(text: str));
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
@@ -2340,7 +2832,8 @@ class _FauMapScreenState extends State<FauMapScreen>
                 );
               },
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                 decoration: BoxDecoration(
                   color: const Color(0xEE0B1A24),
                   borderRadius: BorderRadius.circular(20),
@@ -2356,9 +2849,9 @@ class _FauMapScreenState extends State<FauMapScreen>
                     const SizedBox(width: 8),
                     Flexible(
                       child: Text(
-                        cursor != null
-                            ? 'Cursor GPS: Lat ${cursor.latitude.toStringAsFixed(6)}, Lng ${cursor.longitude.toStringAsFixed(6)} (Tap to copy)'
-                            : 'Move cursor over map to read coordinates',
+                        tap != null
+                            ? 'Tapped: ${tap.latitude.toStringAsFixed(6)}, ${tap.longitude.toStringAsFixed(6)} (tap to copy)'
+                            : 'Tap the map to read coordinates',
                         style: const TextStyle(
                           color: kDev,
                           fontSize: 12,
@@ -2377,11 +2870,11 @@ class _FauMapScreenState extends State<FauMapScreen>
     );
   }
 
-  Widget _buildDevControls(bool onCampus) {
+  Widget _buildDevControls(bool onCampus, double bottomInset) {
     final canSimulate = onCampus && _fullRoute.length >= 2 && !_arrived;
     return Positioned(
       right: 20,
-      bottom: 105,
+      bottom: 105 + bottomInset,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.end,
@@ -2394,7 +2887,8 @@ class _FauMapScreenState extends State<FauMapScreen>
               style: ElevatedButton.styleFrom(
                 backgroundColor: kDev,
                 foregroundColor: Colors.black,
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10),
                 ),
@@ -2403,12 +2897,14 @@ class _FauMapScreenState extends State<FauMapScreen>
           if (canSimulate || _isSimulating)
             ElevatedButton.icon(
               onPressed: _toggleSimulation,
-              icon: Icon(_isSimulating ? Icons.pause : Icons.play_arrow, size: 20),
+              icon: Icon(_isSimulating ? Icons.pause : Icons.play_arrow,
+                  size: 20),
               label: Text(_isSimulating ? 'Stop (20 mph)' : 'Simulate Run'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: _isSimulating ? Colors.redAccent : kAccent,
                 foregroundColor: Colors.black,
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10),
                 ),
@@ -2420,7 +2916,25 @@ class _FauMapScreenState extends State<FauMapScreen>
     );
   }
 
-  Widget _buildGuidanceCard(bool onCampus) {
+  /// OpenStreetMap data requires visible attribution.
+  Widget _buildAttribution(double bottomInset) {
+    return Positioned(
+      left: 22,
+      bottom: 100 + bottomInset,
+      child: const IgnorePointer(
+        child: Text(
+          '© OpenStreetMap contributors · OpenFreeMap',
+          style: TextStyle(
+            fontSize: 9,
+            color: Color(0xFF3A3A33),
+            shadows: [Shadow(color: Colors.white, blurRadius: 3)],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGuidanceCard(bool onCampus, double bottomInset) {
     final building = _selectedBuilding;
     final walk = _walkResult;
     final String title;
@@ -2434,7 +2948,8 @@ class _FauMapScreenState extends State<FauMapScreen>
               ? 'On Campus • Heading: ${_heading.round()}°'
               : 'Outside Campus Area');
     } else if (walk == null) {
-      title = _liveLots.isEmpty ? 'Loading live parking data...' : 'No open lot';
+      title =
+          _liveLots.isEmpty ? 'Loading live parking data...' : 'No open lot';
       subtitle = _liveLots.isEmpty
           ? 'Waiting for sensor data'
           : 'All nearby lots are currently full';
@@ -2456,7 +2971,7 @@ class _FauMapScreenState extends State<FauMapScreen>
     }
 
     return Positioned(
-      bottom: 24,
+      bottom: 24 + bottomInset,
       left: 20,
       right: 20,
       child: Container(
@@ -2507,44 +3022,6 @@ class _FauMapScreenState extends State<FauMapScreen>
           ],
         ),
       ),
-    );
-  }
-}
-
-/// Const widget so the puck's visuals are never rebuilt; only its rotation changes.
-class _UserPuck extends StatelessWidget {
-  const _UserPuck();
-
-  @override
-  Widget build(BuildContext context) {
-    return Stack(
-      alignment: Alignment.center,
-      children: [
-        Container(
-          width: 44,
-          height: 44,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: kAccent.withOpacity(0.25),
-          ),
-        ),
-        Container(
-          width: 34,
-          height: 34,
-          decoration: BoxDecoration(
-            color: Colors.black,
-            shape: BoxShape.circle,
-            border: Border.all(color: kAccent, width: 2.5),
-            boxShadow: const [
-              BoxShadow(color: Colors.black54, blurRadius: 6),
-            ],
-          ),
-          // Was black-on-black (invisible); now the arrow actually shows.
-          child: const Center(
-            child: Icon(Icons.navigation, size: 18, color: kAccent),
-          ),
-        ),
-      ],
     );
   }
 }
@@ -3497,13 +3974,13 @@ class _AnimatedAddCardState extends State<AnimatedAddCard> {
                 color: kCard,
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(
-                  color: _isPressed ? kAccent.withOpacity(0.6) : kDivider,
+                  color: _isPressed ? kAccent.withValues(alpha: 0.6) : kDivider,
                   width: 2,
                 ),
                 boxShadow: _isPressed
                     ? [
                         BoxShadow(
-                          color: kAccent.withOpacity(0.15),
+                          color: kAccent.withValues(alpha: 0.15),
                           blurRadius: 20,
                           spreadRadius: 2,
                         ),
@@ -3521,7 +3998,7 @@ class _AnimatedAddCardState extends State<AnimatedAddCard> {
                       shape: BoxShape.circle,
                       boxShadow: [
                         BoxShadow(
-                          color: kAccent.withOpacity(_isPressed ? 0.4 : 0.1),
+                          color: kAccent.withValues(alpha: _isPressed ? 0.4 : 0.1),
                           blurRadius: _isPressed ? 25 : 15,
                           spreadRadius: _isPressed ? 8 : 5,
                         ),
