@@ -1,17 +1,20 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
-import 'package:http/http.dart' as http;
+
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_database/firebase_database.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:flutter_compass/flutter_compass.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:http/http.dart' as http;
+import 'package:latlong2/latlong.dart';
+
 import 'firebase_options.dart';
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(
@@ -21,81 +24,65 @@ void main() async {
 }
 
 // ==========================================
-// THEME CONFIGURATION
+// THEME (dark only)
 // ==========================================
 
-final ValueNotifier<ThemeMode> themeNotifier = ValueNotifier(ThemeMode.dark);
+const Color kAccent = Color(0xFFC6F24A);
+const Color kBg = Color(0xFF0F0F0D);
+const Color kBar = Color(0xFF090908);
+const Color kCard = Color(0xFF171714);
+const Color kDivider = Color(0xFF2B2B25);
+const Color kText = Color(0xFFF2F1EA);
+const Color kTextMuted = Color(0xFF8E8C82);
+const Color kOnAccent = Color(0xFF12110F);
+const Color kAmber = Color(0xFFF5A623);
+const Color kRed = Color(0xFFF2694C);
+const Color kDev = Colors.cyanAccent;
 
-const Color accentVoltGreenDark = Color(0xFFC6F24A);
-const Color accentVoltGreenLight = Color(0xFF6B8A08);
+/// TODO: replace with your real support address.
+const String kSupportEmail = 'support@example.com';
 
-final ThemeData darkTheme = ThemeData(
+final ThemeData appTheme = ThemeData(
+  useMaterial3: true,
   brightness: Brightness.dark,
-  primaryColor: accentVoltGreenDark,
-  scaffoldBackgroundColor: const Color(0xFF0F0F0D),
-  cardColor: const Color(0xFF171714),
-  dividerColor: const Color(0xFF2B2B25),
-  dialogBackgroundColor: const Color(0xFF171714),
+  primaryColor: kAccent,
+  scaffoldBackgroundColor: kBg,
+  cardColor: kCard,
+  dividerColor: kDivider,
+  dialogBackgroundColor: kCard,
   appBarTheme: const AppBarTheme(
-    backgroundColor: Color(0xFF090908),
+    backgroundColor: kBar,
     elevation: 0,
-    iconTheme: IconThemeData(color: Color(0xFFF2F1EA)),
+    scrolledUnderElevation: 0,
+    iconTheme: IconThemeData(color: kText),
     titleTextStyle: TextStyle(
-      color: Color(0xFFF2F1EA),
+      color: kText,
       fontSize: 18,
       fontWeight: FontWeight.w700,
       letterSpacing: 0.5,
     ),
   ),
   colorScheme: const ColorScheme.dark(
-    primary: accentVoltGreenDark,
-    surface: Color(0xFF171714),
-    onSurface: Color(0xFFF2F1EA),
-    onSurfaceVariant: Color(0xFF8E8C82),
-    outline: Color(0xFF2B2B25),
+    primary: kAccent,
+    onPrimary: kOnAccent,
+    surface: kCard,
+    onSurface: kText,
+    onSurfaceVariant: kTextMuted,
+    outline: kDivider,
   ),
   bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-    backgroundColor: Color(0xFF090908),
-    selectedItemColor: accentVoltGreenDark,
+    backgroundColor: kBar,
+    selectedItemColor: kAccent,
     unselectedItemColor: Color(0xFF6E7C8F),
     type: BottomNavigationBarType.fixed,
   ),
-  useMaterial3: true,
 );
 
-final ThemeData lightTheme = ThemeData(
-  brightness: Brightness.light,
-  primaryColor: accentVoltGreenLight,
-  scaffoldBackgroundColor: const Color(0xFFF7F6F2),
-  cardColor: const Color(0xFFFFFFFF),
-  dividerColor: const Color(0xFFE5E3DC),
-  dialogBackgroundColor: const Color(0xFFFFFFFF),
-  appBarTheme: const AppBarTheme(
-    backgroundColor: Color(0xFFFFFFFF),
-    elevation: 0,
-    iconTheme: IconThemeData(color: Color(0xFF171714)),
-    titleTextStyle: TextStyle(
-      color: Color(0xFF171714),
-      fontSize: 18,
-      fontWeight: FontWeight.w700,
-      letterSpacing: 0.5,
-    ),
-  ),
-  colorScheme: const ColorScheme.light(
-    primary: accentVoltGreenLight,
-    surface: Color(0xFFFFFFFF),
-    onSurface: Color(0xFF171714),
-    onSurfaceVariant: Color(0xFF706E66),
-    outline: Color(0xFFE5E3DC),
-  ),
-  bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-    backgroundColor: Color(0xFFFFFFFF),
-    selectedItemColor: accentVoltGreenLight,
-    unselectedItemColor: Color(0xFF9E9C94),
-    type: BottomNavigationBarType.fixed,
-  ),
-  useMaterial3: true,
-);
+/// "850 m" / "1.4 km"
+String formatDistance(double meters) {
+  if (meters < 1000) return '${meters.round()} m';
+  return '${(meters / 1000).toStringAsFixed(1)} km';
+}
 
 // ==========================================
 // ROOT APP & AUTH LISTENER
@@ -106,28 +93,21 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<ThemeMode>(
-      valueListenable: themeNotifier,
-      builder: (context, currentMode, _) {
-        return MaterialApp(
-          title: 'Smart Curb App',
-          debugShowCheckedModeBanner: false,
-          theme: lightTheme,
-          darkTheme: darkTheme,
-          themeMode: currentMode,
-          home: StreamBuilder<User?>(
-            stream: FirebaseAuth.instance.authStateChanges(),
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Scaffold(
-                  body: Center(child: CircularProgressIndicator()),
-                );
-              }
-              return snapshot.hasData ? const UserSpace() : const LoginPage();
-            },
-          ),
-        );
-      },
+    return MaterialApp(
+      title: 'Smart Curb App',
+      debugShowCheckedModeBanner: false,
+      theme: appTheme,
+      home: StreamBuilder<User?>(
+        stream: FirebaseAuth.instance.authStateChanges(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Scaffold(
+              body: Center(child: CircularProgressIndicator()),
+            );
+          }
+          return snapshot.hasData ? const UserSpace() : const LoginPage();
+        },
+      ),
     );
   }
 }
@@ -177,7 +157,6 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Scaffold(
       body: SafeArea(
         child: Center(
@@ -190,33 +169,15 @@ class _LoginPageState extends State<LoginPage> {
                   height: 140,
                   fit: BoxFit.contain,
                   errorBuilder: (_, __, ___) =>
-                      Icon(Icons.radar, size: 100, color: theme.primaryColor),
+                      const Icon(Icons.radar, size: 100, color: kAccent),
                 ),
                 const SizedBox(height: 20),
-                RichText(
-                  text: TextSpan(
-                    style: const TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1.5,
-                    ),
-                    children: [
-                      TextSpan(
-                        text: 'SMART ',
-                        style: TextStyle(color: theme.colorScheme.onSurface),
-                      ),
-                      TextSpan(
-                        text: 'CURB',
-                        style: TextStyle(color: theme.primaryColor),
-                      ),
-                    ],
-                  ),
-                ),
+                const _BrandTitle(fontSize: 28),
                 const SizedBox(height: 8),
-                Text(
+                const Text(
                   'SMART PARKING',
                   style: TextStyle(
-                    color: theme.colorScheme.onSurfaceVariant,
+                    color: kTextMuted,
                     fontSize: 12,
                     letterSpacing: 2,
                     fontWeight: FontWeight.w600,
@@ -248,10 +209,10 @@ class _LoginPageState extends State<LoginPage> {
                     context,
                     MaterialPageRoute(builder: (_) => const RegisterPage()),
                   ),
-                  child: Text(
+                  child: const Text(
                     "Don't have an account? Register",
                     style: TextStyle(
-                      color: theme.primaryColor,
+                      color: kAccent,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -260,6 +221,28 @@ class _LoginPageState extends State<LoginPage> {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _BrandTitle extends StatelessWidget {
+  final double fontSize;
+  const _BrandTitle({required this.fontSize});
+
+  @override
+  Widget build(BuildContext context) {
+    return RichText(
+      text: TextSpan(
+        style: TextStyle(
+          fontSize: fontSize,
+          fontWeight: FontWeight.bold,
+          letterSpacing: 1.5,
+        ),
+        children: const [
+          TextSpan(text: 'SMART ', style: TextStyle(color: kText)),
+          TextSpan(text: 'CURB', style: TextStyle(color: kAccent)),
+        ],
       ),
     );
   }
@@ -305,7 +288,9 @@ class _RegisterPageState extends State<RegisterPage> {
       );
       if (mounted) Navigator.pop(context);
     } on FirebaseAuthException catch (e) {
-      if (mounted) showErrorSnackBar(context, e.message ?? 'Registration failed.');
+      if (mounted) {
+        showErrorSnackBar(context, e.message ?? 'Registration failed.');
+      }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -313,7 +298,6 @@ class _RegisterPageState extends State<RegisterPage> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(title: const Text('Create Account')),
       body: SafeArea(
@@ -322,14 +306,14 @@ class _RegisterPageState extends State<RegisterPage> {
             padding: const EdgeInsets.symmetric(horizontal: 32.0),
             child: Column(
               children: [
-                Icon(Icons.person_add_alt_1, size: 70, color: theme.primaryColor),
+                const Icon(Icons.person_add_alt_1, size: 70, color: kAccent),
                 const SizedBox(height: 16),
-                Text(
+                const Text(
                   'Join Smart Curb',
                   style: TextStyle(
                     fontSize: 24,
                     fontWeight: FontWeight.bold,
-                    color: theme.colorScheme.onSurface,
+                    color: kText,
                   ),
                 ),
                 const SizedBox(height: 32),
@@ -362,10 +346,10 @@ class _RegisterPageState extends State<RegisterPage> {
                 const SizedBox(height: 16),
                 TextButton(
                   onPressed: () => Navigator.pop(context),
-                  child: Text(
+                  child: const Text(
                     'Already have an account? Back to Login',
                     style: TextStyle(
-                      color: theme.primaryColor,
+                      color: kAccent,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -395,7 +379,6 @@ class _UserSpaceState extends State<UserSpace> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(
@@ -403,34 +386,16 @@ class _UserSpaceState extends State<UserSpace> {
           tooltip: 'Logout',
           onPressed: () => FirebaseAuth.instance.signOut(),
         ),
-        title: Container(
-          height: 40,
-          decoration: BoxDecoration(
-            color: theme.brightness == Brightness.dark
-                ? Colors.white10
-                : Colors.grey[200],
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: TextField(
-            style: TextStyle(color: theme.colorScheme.onSurface),
-            decoration: InputDecoration(
-              hintText: 'Search...',
-              hintStyle: TextStyle(color: theme.colorScheme.onSurfaceVariant),
-              prefixIcon: Icon(
-                Icons.search,
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-              border: InputBorder.none,
-              contentPadding: const EdgeInsets.symmetric(vertical: 10),
-            ),
-          ),
-        ),
+        // The old search field did nothing, so it is replaced by the brand title.
+        title: const _BrandTitle(fontSize: 18),
         centerTitle: true,
         actions: [
           PopupMenuButton<String>(
-            icon: Icon(Icons.more_vert, color: theme.primaryColor),
-            color: theme.cardColor,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            icon: const Icon(Icons.more_vert, color: kAccent),
+            color: kCard,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
             offset: const Offset(0, 50),
             onSelected: (val) {
               final page = (val == 'settings')
@@ -438,23 +403,9 @@ class _UserSpaceState extends State<UserSpace> {
                   : const UserAboutPage();
               Navigator.push(context, MaterialPageRoute(builder: (_) => page));
             },
-
-
-          
-
-
-
-
-
-
-
-
-
-
-
             itemBuilder: (_) => [
-              _buildMenuItem('settings', Icons.settings, 'Settings', theme),
-              _buildMenuItem('about', Icons.info_outline, 'About App', theme),
+              _buildMenuItem('settings', Icons.settings, 'Settings'),
+              _buildMenuItem('about', Icons.info_outline, 'About App'),
             ],
           ),
         ],
@@ -470,7 +421,6 @@ class _UserSpaceState extends State<UserSpace> {
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
         onTap: (index) => setState(() => _currentIndex = index),
-        type: BottomNavigationBarType.fixed,
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
           BottomNavigationBarItem(
@@ -483,19 +433,14 @@ class _UserSpaceState extends State<UserSpace> {
     );
   }
 
-  PopupMenuItem<String> _buildMenuItem(
-    String val,
-    IconData icon,
-    String label,
-    ThemeData theme,
-  ) {
+  PopupMenuItem<String> _buildMenuItem(String val, IconData icon, String label) {
     return PopupMenuItem(
       value: val,
       child: Row(
         children: [
-          Icon(icon, color: theme.colorScheme.onSurfaceVariant, size: 20),
+          Icon(icon, color: kTextMuted, size: 20),
           const SizedBox(width: 12),
-          Text(label, style: TextStyle(color: theme.colorScheme.onSurface)),
+          Text(label, style: const TextStyle(color: kText)),
         ],
       ),
     );
@@ -506,9 +451,36 @@ class _UserSpaceState extends State<UserSpace> {
 // TAB 1: HOME (Places & Campus Management)
 // ==========================================
 
-class _HomeTab extends StatelessWidget {
+Widget buildCampusLogo(String shortName) {
+  return Container(
+    width: 52,
+    height: 52,
+    decoration: BoxDecoration(
+      color: const Color(0xFF003366),
+      borderRadius: BorderRadius.circular(10),
+      border: Border.all(color: const Color(0xFFCC0000), width: 1.5),
+    ),
+    alignment: Alignment.center,
+    child: Text(
+      shortName,
+      style: const TextStyle(
+        color: Colors.white,
+        fontSize: 16,
+        fontWeight: FontWeight.w900,
+        letterSpacing: 1,
+      ),
+    ),
+  );
+}
+
+class _HomeTab extends StatefulWidget {
   const _HomeTab();
 
+  @override
+  State<_HomeTab> createState() => _HomeTabState();
+}
+
+class _HomeTabState extends State<_HomeTab> {
   static const List<Map<String, String>> _availableCampuses = [
     {
       'id': 'fau_boca',
@@ -518,15 +490,29 @@ class _HomeTab extends StatelessWidget {
     },
   ];
 
-  void _showAddSpaceDialog(BuildContext context) {
-    final theme = Theme.of(context);
-    final uid = FirebaseAuth.instance.currentUser?.uid;
+  // Stream is created once instead of on every build (avoids re-subscribing).
+  late final String? _uid = FirebaseAuth.instance.currentUser?.uid;
+  late final Stream<DatabaseEvent>? _stream = _uid == null
+      ? null
+      : FirebaseDatabase.instance.ref('drivers/$_uid/locations').onValue;
 
+  void _addCampus(Map<String, String> campus) {
+    final uid = _uid;
+    if (uid == null) return;
+    FirebaseDatabase.instance.ref('drivers/$uid/locations/${campus['id']}').set({
+      'shortName': campus['shortName'],
+      'fullName': campus['fullName'],
+      'address': campus['address'],
+      'addedAt': ServerValue.timestamp,
+    });
+  }
+
+  void _showAddSpaceDialog() {
     showDialog(
       context: context,
       barrierDismissible: true,
       builder: (dialogCtx) => Dialog(
-        backgroundColor: theme.cardColor,
+        backgroundColor: kCard,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
         child: Container(
@@ -541,16 +527,16 @@ class _HomeTab extends StatelessWidget {
                 children: [
                   IconButton(
                     icon: const Icon(Icons.close),
-                    color: theme.colorScheme.onSurface,
+                    color: kText,
                     tooltip: 'Close',
                     onPressed: () => Navigator.of(dialogCtx).pop(),
                   ),
-                  Text(
+                  const Text(
                     'Select Location',
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
-                      color: theme.colorScheme.onSurface,
+                      color: kText,
                     ),
                   ),
                   const SizedBox(width: 48),
@@ -566,13 +552,13 @@ class _HomeTab extends StatelessWidget {
                       margin: const EdgeInsets.only(bottom: 12.0),
                       padding: const EdgeInsets.all(16.0),
                       decoration: BoxDecoration(
-                        color: theme.scaffoldBackgroundColor,
+                        color: kBg,
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: theme.dividerColor),
+                        border: Border.all(color: kDivider),
                       ),
                       child: Row(
                         children: [
-                          _buildCampusLogo(campus['shortName']!, theme),
+                          buildCampusLogo(campus['shortName']!),
                           const SizedBox(width: 14),
                           Expanded(
                             child: Column(
@@ -580,18 +566,18 @@ class _HomeTab extends StatelessWidget {
                               children: [
                                 Text(
                                   campus['fullName']!,
-                                  style: TextStyle(
+                                  style: const TextStyle(
                                     fontSize: 15,
                                     fontWeight: FontWeight.bold,
-                                    color: theme.colorScheme.onSurface,
+                                    color: kText,
                                   ),
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
                                   campus['address']!,
-                                  style: TextStyle(
+                                  style: const TextStyle(
                                     fontSize: 12,
-                                    color: theme.colorScheme.onSurfaceVariant,
+                                    color: kTextMuted,
                                   ),
                                 ),
                               ],
@@ -601,20 +587,11 @@ class _HomeTab extends StatelessWidget {
                           ElevatedButton(
                             onPressed: () {
                               Navigator.of(dialogCtx).pop();
-                              if (uid != null) {
-                                FirebaseDatabase.instance
-                                    .ref('drivers/$uid/locations/${campus['id']}')
-                                    .set({
-                                  'shortName': campus['shortName'],
-                                  'fullName': campus['fullName'],
-                                  'address': campus['address'],
-                                  'addedAt': ServerValue.timestamp,
-                                });
-                              }
+                              _addCampus(campus);
                             },
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: theme.primaryColor,
-                              foregroundColor: const Color(0xFF12110F),
+                              backgroundColor: kAccent,
+                              foregroundColor: kOnAccent,
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(8),
                               ),
@@ -641,147 +618,57 @@ class _HomeTab extends StatelessWidget {
     );
   }
 
-  static Widget _buildCampusLogo(String shortName, ThemeData theme) {
-    return Container(
-      width: 52,
-      height: 52,
-      decoration: BoxDecoration(
-        color: const Color(0xFF003366),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFFCC0000), width: 1.5),
-      ),
-      alignment: Alignment.center,
-      child: Text(
-        shortName,
-        style: const TextStyle(
-          color: Colors.white,
-          fontSize: 16,
-          fontWeight: FontWeight.w900,
-          letterSpacing: 1,
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-
+    final uid = _uid;
     if (uid == null) {
       return const Center(child: Text('User not signed in.'));
     }
 
     return StreamBuilder<DatabaseEvent>(
-      stream: FirebaseDatabase.instance.ref('drivers/$uid/locations').onValue,
+      stream: _stream,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
         }
 
         final rawData = snapshot.data?.snapshot.value;
-
-        if (rawData == null) {
+        if (rawData is! Map) {
           return AnimatedAddCard(
             title: 'No Locations Found',
             subtitle: 'Tap to add a new location',
-            onTap: () => _showAddSpaceDialog(context),
+            onTap: _showAddSpaceDialog,
           );
         }
 
-        final locationsMap = Map<dynamic, dynamic>.from(rawData as Map);
-        final locationEntries = locationsMap.entries.toList();
+        final locationEntries = rawData.entries.toList();
 
         return ListView(
           padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0),
           children: [
-            ...locationEntries.map((entry) {
-              final locKey = entry.key.toString();
-              final data = Map<String, dynamic>.from(entry.value as Map);
-              final shortName = data['shortName']?.toString() ?? 'FAU';
-              final fullName =
-                  data['fullName']?.toString() ?? 'Florida Atlantic University';
-              final address = data['address']?.toString() ??
-                  '777 Glades Rd, Boca Raton, FL 33431';
-
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 12.0),
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(16),
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const FauMapScreen(),
-                      ),
-                    );
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.all(20.0),
-                    decoration: BoxDecoration(
-                      color: theme.cardColor,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: theme.dividerColor, width: 1.5),
-                    ),
-                    child: Row(
-                      children: [
-                        _buildCampusLogo(shortName, theme),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                fullName,
-                                style: TextStyle(
-                                  fontSize: 17,
-                                  fontWeight: FontWeight.bold,
-                                  color: theme.colorScheme.onSurface,
-                                ),
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
-                                address,
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  color: theme.colorScheme.onSurfaceVariant,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.delete_outline, size: 20),
-                          color: Colors.redAccent.withOpacity(0.7),
-                          tooltip: 'Remove Place',
-                          onPressed: () {
-                            FirebaseDatabase.instance
-                                .ref('drivers/$uid/locations/$locKey')
-                                .remove();
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
+            for (final entry in locationEntries)
+              if (entry.value is Map)
+                _buildLocationCard(
+                  uid,
+                  entry.key.toString(),
+                  Map<String, dynamic>.from(entry.value as Map),
                 ),
-              );
-            }),
             const SizedBox(height: 8),
             OutlinedButton(
-              onPressed: () => _showAddSpaceDialog(context),
+              onPressed: _showAddSpaceDialog,
               style: OutlinedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 16),
-                side: BorderSide(color: theme.primaryColor, width: 1.5),
+                side: const BorderSide(color: kAccent, width: 1.5),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
               ),
-              child: Text(
+              child: const Text(
                 'Add more locations',
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
-                  color: theme.primaryColor,
+                  color: kAccent,
                 ),
               ),
             ),
@@ -790,10 +677,133 @@ class _HomeTab extends StatelessWidget {
       },
     );
   }
+
+  Widget _buildLocationCard(String uid, String locKey, Map<String, dynamic> data) {
+    final shortName = data['shortName']?.toString() ?? 'FAU';
+    final fullName = data['fullName']?.toString() ?? 'Florida Atlantic University';
+    final address =
+        data['address']?.toString() ?? '777 Glades Rd, Boca Raton, FL 33431';
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12.0),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const FauMapScreen()),
+        ),
+        child: Container(
+          padding: const EdgeInsets.all(20.0),
+          decoration: BoxDecoration(
+            color: kCard,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: kDivider, width: 1.5),
+          ),
+          child: Row(
+            children: [
+              buildCampusLogo(shortName),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      fullName,
+                      style: const TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.bold,
+                        color: kText,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      address,
+                      style: const TextStyle(fontSize: 13, color: kTextMuted),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.delete_outline, size: 20),
+                color: Colors.redAccent.withOpacity(0.7),
+                tooltip: 'Remove Place',
+                onPressed: () => FirebaseDatabase.instance
+                    .ref('drivers/$uid/locations/$locKey')
+                    .remove(),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 // ==========================================
-// FAU CAMPUS MAP SCREEN & PATHFINDING
+// GEOMETRY HELPERS (fast, campus-scale)
+// ==========================================
+
+/// Equirectangular math: accurate to well under 0.1% at campus distances
+/// and much cheaper than Vincenty (latlong2 `Distance`), which matters
+/// because these run on every GPS fix and every 50 ms simulation tick.
+class Geo {
+  static const double _earthR = 6371008.8;
+  static const double _deg = math.pi / 180.0;
+
+  static double meters(LatLng a, LatLng b) {
+    final x = (b.longitude - a.longitude) *
+        _deg *
+        math.cos((a.latitude + b.latitude) * 0.5 * _deg);
+    final y = (b.latitude - a.latitude) * _deg;
+    return math.sqrt(x * x + y * y) * _earthR;
+  }
+
+  static double pathLength(List<LatLng> pts) {
+    var total = 0.0;
+    for (var i = 0; i < pts.length - 1; i++) {
+      total += meters(pts[i], pts[i + 1]);
+    }
+    return total;
+  }
+
+  static LatLng lerp(LatLng a, LatLng b, double t) => LatLng(
+        a.latitude + (b.latitude - a.latitude) * t,
+        a.longitude + (b.longitude - a.longitude) * t,
+      );
+
+  /// Fraction (0..1) along segment a→b of the point closest to p.
+  static double projectT(LatLng p, LatLng a, LatLng b) {
+    final cosLat = math.cos(a.latitude * _deg);
+    final abx = (b.longitude - a.longitude) * cosLat;
+    final aby = b.latitude - a.latitude;
+    final apx = (p.longitude - a.longitude) * cosLat;
+    final apy = p.latitude - a.latitude;
+    final len2 = abx * abx + aby * aby;
+    if (len2 == 0) return 0;
+    return ((apx * abx + apy * aby) / len2).clamp(0.0, 1.0).toDouble();
+  }
+
+  /// Compass bearing 0..360 from a to b.
+  static double bearing(LatLng a, LatLng b) {
+    final lat1 = a.latitude * _deg;
+    final lat2 = b.latitude * _deg;
+    final dLon = (b.longitude - a.longitude) * _deg;
+    final y = math.sin(dLon) * math.cos(lat2);
+    final x = math.cos(lat1) * math.sin(lat2) -
+        math.sin(lat1) * math.cos(lat2) * math.cos(dLon);
+    return (math.atan2(y, x) / _deg + 360.0) % 360.0;
+  }
+
+  /// Signed shortest rotation (-180..180] from one angle to another.
+  static double shortestAngle(double from, double to) {
+    var d = (to - from) % 360.0; // Dart % is always >= 0 here
+    if (d > 180.0) d -= 360.0;
+    return d;
+  }
+}
+
+// ==========================================
+// FAU CAMPUS MODELS & A* PATHFINDING
 // ==========================================
 
 class FauBuilding {
@@ -801,26 +811,12 @@ class FauBuilding {
   final String code;
   final String name;
   final LatLng position;
-  final String recommendedLotId;
 
   const FauBuilding({
     required this.id,
     required this.code,
     required this.name,
     required this.position,
-    this.recommendedLotId = 'N/A',
-  });
-}
-
-class CampusWaypoint {
-  final String id;
-  final LatLng position;
-  final List<String> neighbors;
-
-  const CampusWaypoint({
-    required this.id,
-    required this.position,
-    required this.neighbors,
   });
 }
 
@@ -836,219 +832,247 @@ class PathResult {
   });
 }
 
-class CampusPathfinder {
-  static const Distance _dist = Distance();
+class _GraphSnap {
+  final String a;
+  final String b;
+  final LatLng point;
+  final double dist;
+  const _GraphSnap(this.a, this.b, this.point, this.dist);
+}
 
-  static final Map<String, CampusWaypoint> walkwayGraph = {
-    'node_lot12': const CampusWaypoint(
-      id: 'node_lot12',
-      position: LatLng(26.373262, -80.106806),
-      neighbors: ['node_ed47_west'],
-    ),
-    'node_lot14': const CampusWaypoint(
-      id: 'node_lot14',
-      position: LatLng(26.373005, -80.099683),
-      neighbors: ['node_bc71_east'],
-    ),
-    'node_lot07': const CampusWaypoint(
-      id: 'node_lot07',
-      position: LatLng(26.373999, -80.105842),
-      neighbors: ['node_ed47_west', 'node_lot06'],
-    ),
-    'node_lot06': const CampusWaypoint(
-      id: 'node_lot06',
-      position: LatLng(26.374013, -80.104280),
-      neighbors: ['node_lot07', 'node_breezeway_west'],
-    ),
-    'node_ed47': const CampusWaypoint(
-      id: 'node_ed47',
-      position: LatLng(26.373358, -80.105828),
-      neighbors: ['node_ed47_west', 'node_breezeway_west'],
-    ),
-    'node_bc71': const CampusWaypoint(
-      id: 'node_bc71',
-      position: LatLng(26.373263, -80.100446),
-      neighbors: ['node_bc71_east', 'node_breezeway_east'],
-    ),
-    'node_cm22': const CampusWaypoint(
-      id: 'node_cm22',
-      position: LatLng(26.372528, -80.104044),
-      neighbors: ['node_breezeway_west', 'node_breezeway_center'],
-    ),
-    'node_ed47_west': const CampusWaypoint(
-      id: 'node_ed47_west',
-      position: LatLng(26.373300, -80.106300),
-      neighbors: ['node_lot12', 'node_ed47', 'node_lot07'],
-    ),
-    'node_breezeway_west': const CampusWaypoint(
-      id: 'node_breezeway_west',
-      position: LatLng(26.373300, -80.103500),
-      neighbors: ['node_ed47', 'node_breezeway_center', 'node_lot06', 'node_cm22'],
-    ),
-    'node_breezeway_center': const CampusWaypoint(
-      id: 'node_breezeway_center',
-      position: LatLng(26.373280, -80.101700),
-      neighbors: ['node_breezeway_west', 'node_breezeway_center'],
-    ),
-    'node_breezeway_east': const CampusWaypoint(
-      id: 'node_breezeway_east',
-      position: LatLng(26.373270, -80.101000),
-      neighbors: ['node_breezeway_center', 'node_bc71'],
-    ),
-    'node_bc71_east': const CampusWaypoint(
-      id: 'node_bc71',
-      position: LatLng(26.373150, -80.099950),
-      neighbors: ['node_bc71', 'node_lot14'],
-    ),
+/// Tiny binary min-heap for the A* open set (O(log n) instead of sorting).
+class _MinHeap {
+  final List<double> _keys = [];
+  final List<String> _vals = [];
+
+  bool get isNotEmpty => _keys.isNotEmpty;
+
+  void push(double key, String val) {
+    _keys.add(key);
+    _vals.add(val);
+    var i = _keys.length - 1;
+    while (i > 0) {
+      final p = (i - 1) >> 1;
+      if (_keys[p] <= _keys[i]) break;
+      _swap(i, p);
+      i = p;
+    }
+  }
+
+  String pop() {
+    final top = _vals[0];
+    final lastK = _keys.removeLast();
+    final lastV = _vals.removeLast();
+    if (_keys.isNotEmpty) {
+      _keys[0] = lastK;
+      _vals[0] = lastV;
+      var i = 0;
+      final n = _keys.length;
+      while (true) {
+        final l = 2 * i + 1;
+        final r = l + 1;
+        var m = i;
+        if (l < n && _keys[l] < _keys[m]) m = l;
+        if (r < n && _keys[r] < _keys[m]) m = r;
+        if (m == i) break;
+        _swap(i, m);
+        i = m;
+      }
+    }
+    return top;
+  }
+
+  void _swap(int a, int b) {
+    final k = _keys[a];
+    _keys[a] = _keys[b];
+    _keys[b] = k;
+    final v = _vals[a];
+    _vals[a] = _vals[b];
+    _vals[b] = v;
+  }
+}
+
+class CampusPathfinder {
+  /// Walkway nodes. The map key IS the id, so ids can never mismatch.
+  static final Map<String, LatLng> nodes = {
+    'lot12': const LatLng(26.373262, -80.106806),
+    'lot14': const LatLng(26.373005, -80.099683),
+    'lot07': const LatLng(26.373999, -80.105842),
+    'lot06': const LatLng(26.374013, -80.104280),
+    'ed47': const LatLng(26.373358, -80.105828),
+    'bc71': const LatLng(26.373263, -80.100446),
+    'cm22': const LatLng(26.372528, -80.104044),
+    'ed47_west': const LatLng(26.373300, -80.106300),
+    'breezeway_west': const LatLng(26.373300, -80.103500),
+    'breezeway_center': const LatLng(26.373280, -80.101700),
+    'breezeway_east': const LatLng(26.373270, -80.101000),
+    'bc71_east': const LatLng(26.373150, -80.099950),
   };
 
+  /// Walkways, listed once each. They are always two-way, so a one-sided
+  /// neighbor list can no longer break the graph.
+  static const List<List<String>> edges = [
+    ['lot12', 'ed47_west'],
+    ['lot07', 'ed47_west'],
+    ['ed47', 'ed47_west'],
+    ['lot07', 'lot06'],
+    ['lot06', 'breezeway_west'],
+    ['ed47', 'breezeway_west'],
+    ['cm22', 'breezeway_west'],
+    ['cm22', 'breezeway_center'],
+    ['breezeway_west', 'breezeway_center'],
+    ['breezeway_center', 'breezeway_east'],
+    ['breezeway_east', 'bc71'],
+    ['bc71', 'bc71_east'],
+    ['bc71_east', 'lot14'],
+  ];
+
+  static final Map<String, Map<String, double>> _adj = _buildAdjacency();
+
+  static Map<String, Map<String, double>> _buildAdjacency() {
+    final adj = <String, Map<String, double>>{};
+    for (final e in edges) {
+      final a = nodes[e[0]];
+      final b = nodes[e[1]];
+      assert(a != null, 'Walkway edge references unknown node "${e[0]}"');
+      assert(b != null, 'Walkway edge references unknown node "${e[1]}"');
+      if (a == null || b == null || e[0] == e[1]) continue;
+      final w = Geo.meters(a, b);
+      adj.putIfAbsent(e[0], () => {})[e[1]] = w;
+      adj.putIfAbsent(e[1], () => {})[e[0]] = w;
+    }
+    return adj;
+  }
+
+  /// Lots and buildings never move, so each lot→building walk is computed once.
+  static final Map<String, PathResult> _cache = {};
+
+  static PathResult walkingRoute(String lotId, LatLng lotPos, LatLng buildingPos) {
+    final key = '$lotId|${buildingPos.latitude},${buildingPos.longitude}';
+    return _cache.putIfAbsent(key, () {
+      final path = findPath(lotPos, buildingPos);
+      return PathResult(
+        lotId: lotId,
+        pathPoints: path,
+        totalDistanceMeters: Geo.pathLength(path),
+      );
+    });
+  }
+
+  /// Closest non-full lot by real walking distance. Lots with no sensors
+  /// (capacity 0) are treated as unknown and skipped.
   static PathResult? findBestAvailableRoute({
     required LatLng buildingPos,
     required Map<String, Map<String, dynamic>> lots,
   }) {
-    PathResult? bestResult;
-    double shortestDistance = double.infinity;
-
+    PathResult? best;
     for (final entry in lots.entries) {
-      final lotId = entry.key;
-      final lotData = entry.value;
+      final occupied = (entry.value['occupied'] as num?)?.toInt() ?? 0;
+      final capacity = (entry.value['capacity'] as num?)?.toInt() ?? 0;
+      if (capacity <= 0 || occupied >= capacity) continue;
 
-      final occupied = lotData['occupied'] as int? ?? 0;
-      final capacity = lotData['capacity'] as int? ?? 1;
+      final lotPos = entry.value['position'] as LatLng?;
+      if (lotPos == null) continue;
 
-      if (capacity > 0 && occupied >= capacity) {
-        continue;
-      }
-
-      final String nodeKey = 'node_$lotId';
-      final LatLng lotPos = walkwayGraph.containsKey(nodeKey)
-          ? walkwayGraph[nodeKey]!.position
-          : (lotData['position'] as LatLng);
-
-      final path = runAStar(start: lotPos, goal: buildingPos);
-      final dist = _calculatePathDistance(path);
-
-      if (dist < shortestDistance) {
-        shortestDistance = dist;
-        bestResult = PathResult(
-          lotId: lotId,
-          pathPoints: path,
-          totalDistanceMeters: dist,
-        );
+      final r = walkingRoute(entry.key, lotPos, buildingPos);
+      if (best == null || r.totalDistanceMeters < best.totalDistanceMeters) {
+        best = r;
       }
     }
-
-    return bestResult;
+    return best;
   }
 
-  static List<LatLng> runAStar({
-    required LatLng start,
-    required LatLng goal,
-  }) {
-    final startNodeId = _findClosestWaypoint(start);
-    final goalNodeId = _findClosestWaypoint(goal);
+  /// Projects p onto the nearest walkway segment (not just nearest node),
+  /// so start/goal points between nodes route correctly.
+  static _GraphSnap _snapToGraph(LatLng p) {
+    _GraphSnap? best;
+    for (final e in edges) {
+      final pa = nodes[e[0]];
+      final pb = nodes[e[1]];
+      if (pa == null || pb == null) continue;
+      final q = Geo.lerp(pa, pb, Geo.projectT(p, pa, pb));
+      final d = Geo.meters(p, q);
+      if (best == null || d < best.dist) best = _GraphSnap(e[0], e[1], q, d);
+    }
+    return best!;
+  }
 
-    if (startNodeId == goalNodeId) {
-      return [start, goal];
+  static List<LatLng> findPath(LatLng start, LatLng goal) {
+    final s = _snapToGraph(start);
+    final g = _snapToGraph(goal);
+    const sId = '__start';
+    const gId = '__goal';
+
+    // Temporary edges connecting the snapped start/goal into the graph.
+    final extra = <String, Map<String, double>>{};
+    void link(String u, String v, double w) {
+      extra.putIfAbsent(u, () => {})[v] = w;
+      extra.putIfAbsent(v, () => {})[u] = w;
     }
 
-    final List<String> openSet = [startNodeId];
-    final Map<String, String> cameFrom = {};
+    link(sId, s.a, Geo.meters(s.point, nodes[s.a]!));
+    link(sId, s.b, Geo.meters(s.point, nodes[s.b]!));
+    link(gId, g.a, Geo.meters(g.point, nodes[g.a]!));
+    link(gId, g.b, Geo.meters(g.point, nodes[g.b]!));
+    if (s.a == g.a && s.b == g.b) {
+      link(sId, gId, Geo.meters(s.point, g.point)); // same walkway
+    }
 
-    final Map<String, double> gScore = {
-      for (final k in walkwayGraph.keys) k: double.infinity,
-    };
-    gScore[startNodeId] = 0.0;
+    LatLng posOf(String id) =>
+        id == sId ? s.point : (id == gId ? g.point : nodes[id]!);
 
-    final Map<String, double> fScore = {
-      for (final k in walkwayGraph.keys) k: double.infinity,
-    };
-    fScore[startNodeId] = _dist.as(
-      LengthUnit.Meter,
-      walkwayGraph[startNodeId]!.position,
-      goal,
-    );
+    final gScore = <String, double>{sId: 0.0};
+    final cameFrom = <String, String>{};
+    final closed = <String>{};
+    final open = _MinHeap()..push(Geo.meters(s.point, g.point), sId);
 
-    while (openSet.isNotEmpty) {
-      openSet.sort((a, b) => fScore[a]!.compareTo(fScore[b]!));
-      final current = openSet.removeAt(0);
+    while (open.isNotEmpty) {
+      final current = open.pop();
+      if (!closed.add(current)) continue; // stale heap entry
 
-      if (current == goalNodeId) {
-        final List<LatLng> path = [goal];
-        String curr = current;
-        while (cameFrom.containsKey(curr)) {
-          path.insert(0, walkwayGraph[curr]!.position);
-          curr = cameFrom[curr]!;
+      if (current == gId) {
+        final ids = <String>[gId];
+        var c = gId;
+        while (cameFrom.containsKey(c)) {
+          c = cameFrom[c]!;
+          ids.add(c);
         }
-        path.insert(0, walkwayGraph[startNodeId]!.position);
-        path.insert(0, start);
-        return path;
+        final raw = <LatLng>[start, ...ids.reversed.map(posOf), goal];
+        // Drop near-duplicate consecutive points.
+        final out = <LatLng>[raw.first];
+        for (final p in raw.skip(1)) {
+          if (Geo.meters(out.last, p) > 0.5) out.add(p);
+        }
+        if (out.length == 1) out.add(goal);
+        return out;
       }
 
-      final currentNode = walkwayGraph[current];
-      if (currentNode == null) continue;
-
-      for (final neighborId in currentNode.neighbors) {
-        final neighborNode = walkwayGraph[neighborId];
-        if (neighborNode == null) continue;
-
-        final tentativeG = gScore[current]! +
-            _dist.as(
-              LengthUnit.Meter,
-              currentNode.position,
-              neighborNode.position,
-            );
-
-        if (tentativeG < (gScore[neighborId] ?? double.infinity)) {
-          cameFrom[neighborId] = current;
-          gScore[neighborId] = tentativeG;
-          fScore[neighborId] = tentativeG +
-              _dist.as(
-                LengthUnit.Meter,
-                neighborNode.position,
-                goal,
-              );
-
-          if (!openSet.contains(neighborId)) {
-            openSet.add(neighborId);
+      final gc = gScore[current]!;
+      final neighborMaps = [_adj[current], extra[current]];
+      for (final m in neighborMaps) {
+        if (m == null) continue;
+        m.forEach((nId, w) {
+          if (closed.contains(nId)) return;
+          final tentative = gc + w;
+          if (tentative < (gScore[nId] ?? double.infinity)) {
+            gScore[nId] = tentative;
+            cameFrom[nId] = current;
+            open.push(tentative + Geo.meters(posOf(nId), g.point), nId);
           }
-        }
+        });
       }
     }
 
-    return [start, goal];
-  }
-
-  static String _findClosestWaypoint(LatLng target) {
-    String closestId = walkwayGraph.keys.first;
-    double minMeters = double.infinity;
-
-    walkwayGraph.forEach((id, wp) {
-      final d = _dist.as(LengthUnit.Meter, target, wp.position);
-      if (d < minMeters) {
-        minMeters = d;
-        closestId = id;
-      }
-    });
-
-    return closestId;
-  }
-
-  static double _calculatePathDistance(List<LatLng> points) {
-    double total = 0.0;
-    for (int i = 0; i < points.length - 1; i++) {
-      total += _dist.as(LengthUnit.Meter, points[i], points[i + 1]);
-    }
-    return total;
+    return [start, goal]; // unreachable (graph disconnected)
   }
 }
 
 // ---------------------------------------------------------
-// REAL STREET & DRIVEWAY ROUTING ENGINE (OSRM)
+// REAL STREET ROUTING (OSRM)
 // ---------------------------------------------------------
 
 class RealRoadRouter {
-  static const Distance _dist = Distance();
+  static final http.Client _client = http.Client(); // reuse connections
 
   static Future<List<LatLng>> getRoadRoute({
     required LatLng start,
@@ -1062,34 +1086,42 @@ class RealRoadRouter {
     );
 
     try {
-      // ⭐️ Increased timeout to 10 seconds for long off-campus trips
-      final response = await http.get(url).timeout(const Duration(seconds: 10));
+      final response =
+          await _client.get(url).timeout(const Duration(seconds: 10));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final routes = data['routes'] as List<dynamic>?;
         if (routes != null && routes.isNotEmpty) {
-          final coordinates = routes[0]['geometry']['coordinates'] as List<dynamic>;
-          return coordinates
-              .map((pt) => LatLng((pt[1] as num).toDouble(), (pt[0] as num).toDouble()))
+          final coords = routes[0]['geometry']['coordinates'] as List<dynamic>;
+          final pts = coords
+              .map((pt) => LatLng(
+                    (pt[1] as num).toDouble(),
+                    (pt[0] as num).toDouble(),
+                  ))
               .toList();
+          if (pts.length >= 2) return pts;
         }
       } else {
-        debugPrint('OSRM Server returned status: ${response.statusCode}');
+        debugPrint('OSRM returned status ${response.statusCode}');
       }
     } catch (e) {
-      debugPrint('OSRM routing network error: $e');
+      debugPrint('OSRM routing error: $e');
     }
-
     return [start, destination];
   }
+}
 
-  static double calculateDistance(List<LatLng> points) {
-    double total = 0.0;
-    for (int i = 0; i < points.length - 1; i++) {
-      total += _dist.as(LengthUnit.Meter, points[i], points[i + 1]);
-    }
-    return total;
-  }
+// ==========================================
+// FAU CAMPUS MAP SCREEN
+// ==========================================
+
+enum _Progress { none, onRoute, offRoute, arrived }
+
+class _RouteProjection {
+  final int seg;
+  final LatLng point;
+  final double dist;
+  const _RouteProjection(this.seg, this.point, this.dist);
 }
 
 class FauMapScreen extends StatefulWidget {
@@ -1099,50 +1131,30 @@ class FauMapScreen extends StatefulWidget {
   State<FauMapScreen> createState() => _FauMapScreenState();
 }
 
-class _FauMapScreenState extends State<FauMapScreen> with SingleTickerProviderStateMixin {
-  final MapController _mapController = MapController();
-  List<LatLng> _fullCalculatedPoints = [];
-  StreamSubscription<Position>? _positionStreamSub;
-  StreamSubscription<DatabaseEvent>? _parkingSub;
-  StreamSubscription<CompassEvent>? _compassSub;
-
-  // ⭐️ Smooth Camera Turn Animation Controllers
-  AnimationController? _cameraAnimController;
-  Animation<double>? _rotationAnimation;
-  Animation<LatLng>? _positionAnimation;
-
-  Timer? _simulationTimer;
-  bool _isSimulatingRoute = false;
-  int _currentSimIndex = 0;
-
-  LatLng? _currentUserLocation;
-  double _currentHeading = 0.0;
-  bool _isLocating = false;
-  String _gpsStatus = 'Searching for GPS...';
-
-  bool _isNavigationTracking = false;
-  bool _developerMode = false;
-  LatLng? _cursorLocation;
-
-  FauBuilding? _selectedBuilding;
-  PathResult? _currentRoute;
-  int _routeRequestId = 0;
+class _FauMapScreenState extends State<FauMapScreen>
+    with SingleTickerProviderStateMixin {
+  // ---- tuning ----
+  static const double _navZoom = 18.2;
+  static const double _offRouteMeters = 35.0;
+  static const double _arrivalMeters = 10.0;
+  static const double _maxGpsAccuracyForReroute = 30.0;
+  static const Duration _rerouteCooldown = Duration(seconds: 6);
+  static const Duration _simTick = Duration(milliseconds: 50);
+  static const double _simMetersPerTick = 0.447; // 20 mph at 50 ms ticks
+  static const LatLng _campusEntrance = LatLng(26.3685, -80.1020);
 
   static final LatLngBounds _fauBounds = LatLngBounds(
     const LatLng(26.3630, -80.1170),
     const LatLng(26.3860, -80.0890),
   );
-
   static const LatLng _fauCenter = LatLng(26.3745, -80.1030);
 
   static final Map<String, LatLng> _lotPositions = {
-    'lot12': const LatLng(26.373262, -80.106806),
-    'lot14': const LatLng(26.373005, -80.099683),
-    'lot07': const LatLng(26.373999, -80.105842),
-    'lot06': const LatLng(26.374013, -80.104280),
+    'lot12': CampusPathfinder.nodes['lot12']!,
+    'lot14': CampusPathfinder.nodes['lot14']!,
+    'lot07': CampusPathfinder.nodes['lot07']!,
+    'lot06': CampusPathfinder.nodes['lot06']!,
   };
-
-  Map<String, Map<String, dynamic>> _liveLots = {};
 
   static const List<FauBuilding> _campusBuildings = [
     FauBuilding(
@@ -1165,542 +1177,652 @@ class _FauMapScreenState extends State<FauMapScreen> with SingleTickerProviderSt
     ),
   ];
 
-@override
+  // ---- map & camera ----
+  final MapController _mapController = MapController();
+  late final AnimationController _cameraAnim;
+  LatLng _camFrom = _fauCenter;
+  LatLng _camTo = _fauCenter;
+  double _rotFrom = 0;
+  double _rotTo = 0;
+
+  // ---- subscriptions ----
+  StreamSubscription<Position>? _positionSub;
+  StreamSubscription<DatabaseEvent>? _parkingSub;
+  StreamSubscription<CompassEvent>? _compassSub;
+  Timer? _simTimer;
+
+  /// Cursor coords live in a notifier so hovering doesn't rebuild the whole map.
+  final ValueNotifier<LatLng?> _cursor = ValueNotifier(null);
+
+  // ---- location ----
+  LatLng? _userPos;
+  double _heading = 0;
+  DateTime _lastGpsHeadingAt = DateTime.fromMillisecondsSinceEpoch(0);
+  bool _isLocating = false;
+  String _gpsStatus = 'Searching for GPS...';
+
+  // ---- modes ----
+  bool _navTracking = false;
+  bool _devMode = false;
+  bool _devLocationOverride = false; // dev mode owns the puck (ignore real GPS)
+  bool _isSimulating = false;
+  double _simCamRotation = 0;
+
+  // ---- routing ----
+  FauBuilding? _selectedBuilding;
+  PathResult? _walkResult; // lot → building (A*)
+  String? _routeLotId; // lot the driving route currently targets
+  List<LatLng> _fullRoute = const [];
+  List<double> _routeSuffix = const []; // remaining length from each vertex
+  List<LatLng> _displayRoute = const [];
+  int _routeSeg = 0;
+  double _routeRemaining = 0;
+  double _distToRoute = 0;
+  bool _arrived = false;
+  int _routeRequestId = 0;
+  bool _isRouting = false;
+  DateTime _lastRouteAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  Map<String, Map<String, dynamic>> _liveLots = {};
+
+  bool get _isOnCampus => _userPos != null && _fauBounds.contains(_userPos!);
+
+  // ==========================================
+  // LIFECYCLE
+  // ==========================================
+
+  @override
   void initState() {
     super.initState();
-    _cameraAnimController = AnimationController(
+    _cameraAnim = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 250),
-    );
-
-    // ⭐️ Drive camera from the controller smoothly
-    _cameraAnimController!.addListener(() {
-      if (_rotationAnimation != null && _currentUserLocation != null) {
-        _mapController.move(_currentUserLocation!, 18.2);
-        _mapController.rotate(_rotationAnimation!.value);
-      }
-    });
+      duration: const Duration(milliseconds: 450),
+    )..addListener(_onCameraTick);
 
     _startLiveLocationTracking();
     _startCompassTracking();
     _listenToFirebaseParking();
   }
 
-  
-@override
+  @override
   void dispose() {
-    _simulationTimer?.cancel(); 
-    _cameraAnimController?.dispose();
-    _positionStreamSub?.cancel();
+    _simTimer?.cancel();
+    _positionSub?.cancel();
     _compassSub?.cancel();
     _parkingSub?.cancel();
+    _cameraAnim.dispose();
+    _cursor.dispose();
+    _mapController.dispose();
     super.dispose();
   }
 
-  // ⭐️ COMPASS TRACKING: headingForCameraMode + Auto-turn camera in Navigation Mode
-void _startCompassTracking() {
-    _compassSub?.cancel();
-    _compassSub = FlutterCompass.events?.listen((CompassEvent event) {
-      if (!mounted) return;
+  // ==========================================
+  // CAMERA
+  // ==========================================
 
-      // ⭐️ Do not fight the map camera during 20 mph route simulation
-      if (_isSimulatingRoute) return;
-
-      final double? h = event.headingForCameraMode ?? event.heading;
-      if (h != null) {
-        // Filter out microscopic sensor jitter (ignore changes < 2.0 degrees)
-        if ((h - _currentHeading).abs() < 2.0) return;
-
-        setState(() {
-          _currentHeading = h;
-        });
-
-        final bool isCampus = _currentUserLocation != null &&
-            _fauBounds.contains(_currentUserLocation!);
-
-        if (_isNavigationTracking && isCampus && _currentUserLocation != null) {
-          _smoothMoveAndRotate(_currentUserLocation!, h);
-        }
-      }
-    });
-  }
-
-
-
-
-void _trimRouteBehindUser(LatLng userPos) {
-    if (_fullCalculatedPoints.length < 2) return;
-
-    const Distance distCalc = Distance();
-    int closestIndex = 0;
-    double minDistance = double.infinity;
-
-    // Find the closest upcoming or current waypoint on the master route
-    for (int i = 0; i < _fullCalculatedPoints.length; i++) {
-      final d = distCalc.as(LengthUnit.Meter, userPos, _fullCalculatedPoints[i]);
-      if (d < minDistance) {
-        minDistance = d;
-        closestIndex = i;
-      }
-    }
-
-    // Keep only the points from the closest waypoint forward to the destination
-    final remainingPoints = _fullCalculatedPoints.sublist(closestIndex);
-
-    // Anchor the start of the line directly to the user's puck
-    final trimmedPath = [userPos, ...remainingPoints];
-
-    setState(() {
-      if (_currentRoute != null) {
-        _currentRoute = PathResult(
-          lotId: _currentRoute!.lotId,
-          pathPoints: trimmedPath,
-          totalDistanceMeters: RealRoadRouter.calculateDistance(trimmedPath),
-        );
-      }
-    });
-  }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-  void _listenToFirebaseParking() {
-    _parkingSub = FirebaseDatabase.instance.ref('demo').onValue.listen((event) {
-      final rawData = event.snapshot.value;
-      if (rawData == null) return;
-
-      final rootData = Map<dynamic, dynamic>.from(rawData as Map);
-      final rawLots = rootData['lots'] != null
-          ? Map<dynamic, dynamic>.from(rootData['lots'] as Map)
-          : <dynamic, dynamic>{};
-      final rawUnits = rootData['units'] != null
-          ? Map<dynamic, dynamic>.from(rootData['units'] as Map)
-          : <dynamic, dynamic>{};
-
-      final Map<String, int> capacityMap = {};
-      final Map<String, int> occupiedMap = {};
-
-      rawUnits.forEach((unitKey, unitVal) {
-        if (unitVal is Map) {
-          final unitData = Map<String, dynamic>.from(unitVal);
-          final String? targetLot = unitData['lot']?.toString();
-          final bool isOccupied = unitData['occupied'] == true;
-
-          if (targetLot != null && targetLot.isNotEmpty) {
-            capacityMap[targetLot] = (capacityMap[targetLot] ?? 0) + 1;
-            if (isOccupied) {
-              occupiedMap[targetLot] = (occupiedMap[targetLot] ?? 0) + 1;
-            }
-          }
-        }
-      });
-
-      final Map<String, Map<String, dynamic>> updatedLots = {};
-
-      rawLots.forEach((lotKey, lotVal) {
-        final String lotId = lotKey.toString();
-        final lotData = lotVal is Map ? Map<String, dynamic>.from(lotVal) : <String, dynamic>{};
-
-        final String lotName = lotData['name']?.toString() ??
-            (lotId == 'lot06'
-                ? 'Lot 6'
-                : lotId == 'lot07'
-                    ? 'Lot 7'
-                    : lotId.toUpperCase());
-
-        final int totalUnits = capacityMap[lotId] ?? 0;
-        final int occupiedUnits = occupiedMap[lotId] ?? 0;
-
-        final double ratio = totalUnits > 0 ? (occupiedUnits / totalUnits) : 0.0;
-        Color badgeColor;
-        if (totalUnits == 0) {
-          badgeColor = Colors.grey;
-        } else if (ratio < 0.60) {
-          badgeColor = const Color(0xFFC6F24A);
-        } else if (ratio < 0.90) {
-          badgeColor = const Color(0xFFF5A623);
-        } else {
-          badgeColor = const Color(0xFFF2694C);
-        }
-
-        updatedLots[lotId] = {
-          'name': lotName,
-          'status': '$occupiedUnits/$totalUnits',
-          'occupied': occupiedUnits,
-          'capacity': totalUnits,
-          'position': _lotPositions[lotId] ?? const LatLng(26.373000, -80.103000),
-          'color': badgeColor,
-        };
-      });
-
-      if (mounted) {
-        setState(() {
-          _liveLots = updatedLots;
-        });
-
-        if (_selectedBuilding != null) {
-          _updateNavigationRoute(_selectedBuilding!);
-        }
-      }
-    });
-  }
-
-  Future<void> _updateNavigationRoute(FauBuilding building) async {
-    if (_liveLots.isEmpty) return;
-
-    final currentReqId = ++_routeRequestId;
-
-    // ⭐️ If _currentUserLocation is null, grab the live GPS fix immediately before falling back
-    LatLng startPos;
-    if (_currentUserLocation != null) {
-      startPos = _currentUserLocation!;
-    } else {
-      try {
-        final pos = await Geolocator.getCurrentPosition(
-          locationSettings: const LocationSettings(
-            accuracy: LocationAccuracy.medium,
-            timeLimit: Duration(seconds: 3),
-          ),
-        );
-        startPos = LatLng(pos.latitude, pos.longitude);
-        _currentUserLocation = startPos;
-      } catch (_) {
-        startPos = const LatLng(26.3685, -80.1020); // Emergency fallback only if GPS is disabled/timed out
-      }
-    }
-
-    final bestLotResult = CampusPathfinder.findBestAvailableRoute(
-      buildingPos: building.position,
-      lots: _liveLots,
+  void _onCameraTick() {
+    final t = Curves.easeOutCubic.transform(_cameraAnim.value);
+    _mapController.moveAndRotate(
+      Geo.lerp(_camFrom, _camTo, t),
+      _navZoom,
+      _rotFrom + (_rotTo - _rotFrom) * t,
     );
+  }
 
-    if (bestLotResult == null) {
-      if (mounted) {
-        setState(() => _currentRoute = null);
-      }
+  /// Smoothly animates position AND rotation (old version only animated rotation).
+  void _animateCameraTo(LatLng pos, double bearing) {
+    if (!mounted) return;
+    final cam = _mapController.camera;
+    _camFrom = cam.center;
+    _camTo = pos;
+    _rotFrom = cam.rotation;
+    _rotTo = cam.rotation + Geo.shortestAngle(cam.rotation, -bearing);
+
+    if (Geo.meters(_camFrom, _camTo) < 0.3 && (_rotTo - _rotFrom).abs() < 1.0) {
+      _cameraAnim.stop();
+      _mapController.moveAndRotate(pos, _navZoom, _rotTo);
       return;
     }
+    _cameraAnim.forward(from: 0);
+  }
 
-    final LatLng lotPos = _liveLots[bestLotResult.lotId]!['position'] as LatLng;
+  // ==========================================
+  // SENSORS
+  // ==========================================
 
-    final roadPoints = await RealRoadRouter.getRoadRoute(
-      start: startPos,
-      destination: lotPos,
-    );
+  void _startCompassTracking() {
+    _compassSub = FlutterCompass.events?.listen((event) {
+      if (!mounted || _isSimulating) return;
+      // While driving, the GPS course is far more reliable than the compass.
+      if (DateTime.now().difference(_lastGpsHeadingAt) <
+          const Duration(seconds: 3)) {
+        return;
+      }
+      final raw = event.headingForCameraMode ?? event.heading;
+      if (raw == null) return;
+      final h = raw % 360.0;
+      // Wrap-aware jitter filter (359° → 1° is a 2° change, not 358°).
+      if (Geo.shortestAngle(_heading, h).abs() < 2.0) return;
 
-    if (!mounted || currentReqId != _routeRequestId) return;
-
-    setState(() {
-      _fullCalculatedPoints = List<LatLng>.from(roadPoints);
-      _currentRoute = PathResult(
-        lotId: bestLotResult.lotId,
-        pathPoints: List<LatLng>.from(roadPoints),
-        totalDistanceMeters: RealRoadRouter.calculateDistance(roadPoints),
-      );
+      setState(() => _heading = h);
+      if (_navTracking && _isOnCampus) _animateCameraTo(_userPos!, h);
     });
   }
 
-  void _onBuildingSelected(FauBuilding building) {
-    setState(() {
-      _selectedBuilding = building;
-    });
-    _updateNavigationRoute(building);
-    _mapController.move(building.position, 16.5);
-  }
-
- Future<void> _startLiveLocationTracking() async {
+  Future<void> _startLiveLocationTracking() async {
     setState(() {
       _isLocating = true;
       _gpsStatus = 'Requesting GPS permissions...';
     });
 
+    void fail(String msg) {
+      if (!mounted) return;
+      setState(() {
+        _isLocating = false;
+        _gpsStatus = msg;
+      });
+    }
+
     try {
-      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) {
-        setState(() {
-          _isLocating = false;
-          _gpsStatus = 'Location services disabled.';
-        });
-        return;
+      if (!await Geolocator.isLocationServiceEnabled()) {
+        return fail('Location services disabled.');
       }
 
-      LocationPermission permission = await Geolocator.checkPermission();
+      var permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
         if (permission == LocationPermission.denied) {
-          setState(() {
-            _isLocating = false;
-            _gpsStatus = 'GPS permission denied.';
-          });
-          return;
+          return fail('GPS permission denied.');
         }
       }
-
       if (permission == LocationPermission.deniedForever) {
-        setState(() {
-          _isLocating = false;
-          _gpsStatus = 'GPS permanently denied.';
-        });
-        return;
+        return fail('GPS permanently denied.');
       }
 
-      final initialPos = await Geolocator.getCurrentPosition(
+      final initial = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
       );
+      if (!mounted) return;
+      _handlePosition(initial);
 
-      if (mounted) {
-        final loc = LatLng(initialPos.latitude, initialPos.longitude);
-        final bool isCampus = _fauBounds.contains(loc);
-
-        setState(() {
-          _currentUserLocation = loc;
-          _isLocating = false;
-          _gpsStatus =
-              'Live GPS: ${initialPos.latitude.toStringAsFixed(4)}, ${initialPos.longitude.toStringAsFixed(4)}';
-
-          if (!isCampus && _isNavigationTracking) {
-            _isNavigationTracking = false;
-          }
-
-          // Initial route calculation on first load
-          if (_selectedBuilding != null &&
-              (_currentRoute == null || _currentRoute!.pathPoints.isEmpty)) {
-            _updateNavigationRoute(_selectedBuilding!);
-          }
-        });
+      if (_selectedBuilding != null && _fullRoute.isEmpty) {
+        _updateNavigationRoute();
       }
 
-      _positionStreamSub = Geolocator.getPositionStream(
+      _positionSub = Geolocator.getPositionStream(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.bestForNavigation,
           distanceFilter: 2,
         ),
-      ).listen((Position position) {
-        if (!mounted) return;
-        final loc = LatLng(position.latitude, position.longitude);
-        final bool isCampus = _fauBounds.contains(loc);
-
-        setState(() {
-          _currentUserLocation = loc;
-          _isLocating = false;
-          _gpsStatus =
-              'Live GPS: ${position.latitude.toStringAsFixed(4)}, ${position.longitude.toStringAsFixed(4)}';
-
-          // ⭐️ Transit speed gate: trust satellite heading when moving (> 2.2 mph)
-          if (position.speed > 1.0 && position.heading > 0) {
-            _currentHeading = position.heading;
-          }
-
-          // ⭐️ Smooth turn animation instead of instant snapping
-          if (_isNavigationTracking && isCampus) {
-            _smoothMoveAndRotate(loc, _currentHeading);
-          } else if (!isCampus && _isNavigationTracking) {
-            _isNavigationTracking = false;
-          }
-        });
-
-        // ⭐️ Route Trimming & Off-Route Recalculation
-        if (!_isSimulatingRoute && _currentRoute != null && _currentRoute!.pathPoints.length >= 2) {
-          const Distance distCalc = Distance();
-          final target = _currentRoute!.pathPoints[1];
-          final double distanceToTarget = distCalc.as(LengthUnit.Meter, loc, target);
-
-          if (distanceToTarget < 8.0) {
-            // Driver reached waypoint: pop node so it vanishes behind them
-            _currentRoute!.pathPoints.removeAt(0);
-          } else if (distanceToTarget > 25.0 && _selectedBuilding != null) {
-            // Driver deviated (> 25m off route): recalculate fresh route from new street
-            _updateNavigationRoute(_selectedBuilding!);
-            return;
-          }
-
-          // Anchor the front of the guideline to the indicator puck
-          if (_currentRoute!.pathPoints.isNotEmpty) {
-            _currentRoute!.pathPoints[0] = loc;
-          }
-        }
-      });
+      ).listen(
+        _handlePosition,
+        onError: (Object e) => fail('GPS stream error: $e'),
+      );
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _isLocating = false;
-          _gpsStatus = 'Error reading GPS: $e';
-        });
-      }
+      fail('Error reading GPS: $e');
     }
   }
-  
-  // ==========================================
-  // JOYSTICK SIMULATION CONTROLLERS
-  // ==========================================
 
-  // 1. Instant travel to the start of the guideline inside campus
-  void _instantTravelToRouteStart() {
-    if (_currentRoute == null || _currentRoute!.pathPoints.isEmpty) return;
-    final startPt = _currentRoute!.pathPoints.first;
+  void _handlePosition(Position p) {
+    if (!mounted) return;
+    // Dev teleport / simulation owns the puck: real GPS must not yank it back.
+    if (_isSimulating || _devLocationOverride) return;
+
+    final loc = LatLng(p.latitude, p.longitude);
+    final onCampus = _fauBounds.contains(loc);
+    final hasCourse = p.speed > 1.0 && p.heading >= 0;
+    var progress = _Progress.none;
 
     setState(() {
-      _currentUserLocation = startPt;
-      _currentSimIndex = 0;
-      _gpsStatus = 'Teleported to Route Start';
+      _userPos = loc;
+      _isLocating = false;
+      _gpsStatus =
+          'Live GPS: ${p.latitude.toStringAsFixed(4)}, ${p.longitude.toStringAsFixed(4)}';
+      if (hasCourse) {
+        _heading = p.heading;
+        _lastGpsHeadingAt = DateTime.now();
+      }
+      if (!onCampus) _navTracking = false;
+      progress = _updateRouteProgress(loc);
     });
 
-    _mapController.move(startPt, 17.5);
-    if (_selectedBuilding != null) {
-      _updateNavigationRoute(_selectedBuilding!);
+    // Side effects run outside setState.
+    if (_navTracking && onCampus) _animateCameraTo(loc, _heading);
+    if (progress == _Progress.arrived) _onArrived();
+    if (progress == _Progress.offRoute && p.accuracy <= _maxGpsAccuracyForReroute) {
+      _maybeReroute();
     }
   }
 
-
-
-void _smoothMoveAndRotate(LatLng targetPos, double targetBearing) {
-    if (!mounted || _cameraAnimController == null) return;
-
-    final double startRotation = _mapController.camera.rotation;
-    final LatLng startPos = _mapController.camera.center;
-    final double targetRotation = -targetBearing;
-
-    // Calculate shortest angular difference (prevent 360 spin)
-    double diff = (targetRotation - startRotation) % 360.0;
-    if (diff > 180.0) diff -= 360.0;
-    if (diff < -180.0) diff += 360.0;
-    final double endRotation = startRotation + diff;
-
-    // If change is negligible, update directly without fighting animations
-    const Distance distCalc = Distance();
-    if (distCalc.as(LengthUnit.Meter, startPos, targetPos) < 0.2 && diff.abs() < 1.0) {
-      _mapController.move(targetPos, 18.2);
-      _mapController.rotate(targetRotation);
-      return;
-    }
-
-    _cameraAnimController!.stop();
-
-    _rotationAnimation = Tween<double>(
-      begin: startRotation,
-      end: endRotation,
-    ).animate(CurvedAnimation(
-      parent: _cameraAnimController!,
-      curve: Curves.easeOutQuad,
-    ));
-
-    _cameraAnimController!.reset();
-    _cameraAnimController!.forward();
+  Future<void> _resyncRealGps() async {
+    try {
+      final p = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 5),
+        ),
+      );
+      _handlePosition(p);
+      if (_selectedBuilding != null) _updateNavigationRoute();
+    } catch (_) {}
   }
 
+  Future<LatLng?> _quickFix() async {
+    try {
+      final p = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.medium,
+          timeLimit: Duration(seconds: 3),
+        ),
+      );
+      return LatLng(p.latitude, p.longitude);
+    } catch (_) {
+      return null;
+    }
+  }
 
+  // ==========================================
+  // LIVE PARKING DATA
+  // ==========================================
 
+  static String _prettyLotName(String id) {
+    final m = RegExp(r'^lot0*(\d+)$', caseSensitive: false).firstMatch(id);
+    return m != null ? 'Lot ${m.group(1)}' : id.toUpperCase();
+  }
 
-  // 2. Animate along route points at 20 mph (~8.94 m/s)
-  void _toggleRouteSimulation() {
-    if (_isSimulatingRoute) {
-      _stopRouteSimulation();
-      return;
+  static LatLng? _readLatLng(Map<String, dynamic> data) {
+    final lat = data['lat'] ?? data['latitude'];
+    final lng = data['lng'] ?? data['longitude'];
+    if (lat is num && lng is num) return LatLng(lat.toDouble(), lng.toDouble());
+    return null;
+  }
+
+  Map<String, Map<String, dynamic>> _parseLots(Object? raw) {
+    if (raw is! Map) return {};
+    final rawLots = raw['lots'] is Map ? raw['lots'] as Map : const {};
+    final rawUnits = raw['units'] is Map ? raw['units'] as Map : const {};
+
+    final capacity = <String, int>{};
+    final occupied = <String, int>{};
+    for (final unit in rawUnits.values) {
+      if (unit is! Map) continue;
+      final lot = unit['lot']?.toString();
+      if (lot == null || lot.isEmpty) continue;
+      final occ = unit['occupied'];
+      final isOcc = occ == true || occ == 1 || occ == 'true';
+      capacity[lot] = (capacity[lot] ?? 0) + 1;
+      if (isOcc) occupied[lot] = (occupied[lot] ?? 0) + 1;
     }
 
-    if (_currentRoute == null || _currentRoute!.pathPoints.length < 2) return;
+    final result = <String, Map<String, dynamic>>{};
+    rawLots.forEach((key, val) {
+      final lotId = key.toString();
+      final lotData =
+          val is Map ? Map<String, dynamic>.from(val) : <String, dynamic>{};
+      final pos = _lotPositions[lotId] ?? _readLatLng(lotData);
+      if (pos == null) return; // unknown location: can't show or route to it
 
-    setState(() => _isSimulatingRoute = true);
-
-    // 20 mph ≈ 8.94 m/s -> 0.447 meters per 50ms tick (smoother 20fps interpolation)
-    const double metersPerTick = 0.45;
-    const Distance distCalc = Distance();
-
-    _simulationTimer = Timer.periodic(const Duration(milliseconds: 50), (timer) {
-      if (!mounted || _currentRoute == null || _currentRoute!.pathPoints.length < 2) {
-        _stopRouteSimulation();
-        return;
+      final total = capacity[lotId] ?? 0;
+      final occ = occupied[lotId] ?? 0;
+      final ratio = total > 0 ? occ / total : 0.0;
+      final Color color;
+      if (total == 0) {
+        color = Colors.grey;
+      } else if (ratio < 0.60) {
+        color = kAccent;
+      } else if (ratio < 0.90) {
+        color = kAmber;
+      } else {
+        color = kRed;
       }
 
-      final points = _currentRoute!.pathPoints;
-      LatLng currentPt = _currentUserLocation ?? points.first;
-      LatLng targetPt = points[1];
+      result[lotId] = {
+        'name': lotData['name']?.toString() ?? _prettyLotName(lotId),
+        'status': '$occ/$total',
+        'occupied': occ,
+        'capacity': total,
+        'position': pos,
+        'color': color,
+      };
+    });
+    return result;
+  }
 
-      double distanceToTarget = distCalc.as(LengthUnit.Meter, currentPt, targetPt);
+  void _listenToFirebaseParking() {
+    _parkingSub = FirebaseDatabase.instance.ref('demo').onValue.listen((event) {
+      if (!mounted) return;
+      final lots = _parseLots(event.snapshot.value);
+      setState(() => _liveLots = lots);
 
-      // Advance/pop when reaching the waypoint (or if already right next to it)
-      while (distanceToTarget <= metersPerTick) {
-        // Point reached! Pop it off so the line behind vanishes permanently
-        points.removeAt(0);
-        currentPt = targetPt;
+      final building = _selectedBuilding;
+      if (building == null) return;
 
-        if (points.length < 2) {
-          _stopRouteSimulation();
-          setState(() {
-            _currentUserLocation = currentPt;
-            _currentRoute!.pathPoints.clear();
-          });
-          return;
-        }
+      final best = CampusPathfinder.findBestAvailableRoute(
+        buildingPos: building.position,
+        lots: lots,
+      );
 
-        targetPt = points[1];
-        distanceToTarget = distCalc.as(LengthUnit.Meter, currentPt, targetPt);
+      // Only hit OSRM when the recommended lot actually changes,
+      // not on every single sensor flip.
+      if (best?.lotId != _routeLotId) {
+        _updateNavigationRoute();
+      } else if (_fullRoute.isEmpty && !_isRouting && !_arrived) {
+        _updateNavigationRoute();
+      } else if (best != null) {
+        setState(() => _walkResult = best);
       }
+    });
+  }
 
-      // Interpolate along the current front segment
-      final double fraction = metersPerTick / distanceToTarget;
-      final double newLat = currentPt.latitude + (targetPt.latitude - currentPt.latitude) * fraction;
-      final double newLng = currentPt.longitude + (targetPt.longitude - currentPt.longitude) * fraction;
-      final LatLng interpolatedPt = LatLng(newLat, newLng);
+  // ==========================================
+  // ROUTING
+  // ==========================================
 
-      // Strict forward bearing heading
-      final double bearing = _calculateBearing(interpolatedPt, targetPt);
+  static List<double> _suffixLengths(List<LatLng> r) {
+    final s = List<double>.filled(r.length, 0.0);
+    for (var i = r.length - 2; i >= 0; i--) {
+      s[i] = s[i + 1] + Geo.meters(r[i], r[i + 1]);
+    }
+    return s;
+  }
 
-      // Anchor the start of the rendered guideline directly to the front of the vehicle
-      points[0] = interpolatedPt;
+  Future<void> _updateNavigationRoute() async {
+    final building = _selectedBuilding;
+    if (building == null || _liveLots.isEmpty) return;
 
+    final reqId = ++_routeRequestId;
+    final best = CampusPathfinder.findBestAvailableRoute(
+      buildingPos: building.position,
+      lots: _liveLots,
+    );
+
+    if (best == null) {
       setState(() {
-        _currentUserLocation = interpolatedPt;
-        _currentHeading = bearing;
-        _gpsStatus = 'Simulating 20 mph (${bearing.round()}°)';
-
-        if (_isNavigationTracking) {
-          _smoothMoveAndRotate(interpolatedPt, bearing);
-        }
+        _walkResult = null;
+        _routeLotId = null;
+        _isRouting = false;
+        _clearDrivingRoute();
       });
+      return;
+    }
+
+    final lotPos = _liveLots[best.lotId]!['position'] as LatLng;
+    setState(() {
+      _walkResult = best;
+      _isRouting = true;
+    });
+    _lastRouteAt = DateTime.now();
+
+    final start = _userPos ?? await _quickFix() ?? _campusEntrance;
+    if (!mounted || reqId != _routeRequestId) return;
+
+    final road =
+        await RealRoadRouter.getRoadRoute(start: start, destination: lotPos);
+    if (!mounted || reqId != _routeRequestId) return;
+
+    setState(() {
+      _isRouting = false;
+      _routeLotId = best.lotId;
+      _fullRoute = road;
+      _routeSuffix = _suffixLengths(road);
+      _routeSeg = 0;
+      _distToRoute = 0;
+      _arrived = false;
+      _displayRoute = List<LatLng>.of(road);
+      _routeRemaining = _routeSuffix.first;
     });
   }
 
-  void _stopRouteSimulation() {
-    _simulationTimer?.cancel();
-    _simulationTimer = null;
-    if (mounted) {
-      setState(() => _isSimulatingRoute = false);
+  void _maybeReroute() {
+    if (_isRouting || _selectedBuilding == null) return;
+    if (DateTime.now().difference(_lastRouteAt) < _rerouteCooldown) return;
+    _updateNavigationRoute();
+  }
+
+  /// Must be called inside setState.
+  void _clearDrivingRoute() {
+    _fullRoute = const [];
+    _routeSuffix = const [];
+    _displayRoute = const [];
+    _routeSeg = 0;
+    _routeRemaining = 0;
+    _distToRoute = 0;
+    _arrived = false;
+  }
+
+  _RouteProjection _project(LatLng p, int from, int to) {
+    var best = _RouteProjection(from, _fullRoute[from], double.infinity);
+    for (var i = from; i <= to; i++) {
+      final a = _fullRoute[i];
+      final b = _fullRoute[i + 1];
+      final q = Geo.lerp(a, b, Geo.projectT(p, a, b));
+      final d = Geo.meters(p, q);
+      if (d < best.dist) best = _RouteProjection(i, q, d);
+    }
+    return best;
+  }
+
+  /// Projects the user onto the route (searching a small window ahead of the
+  /// last known segment) and trims everything behind them.
+  /// Mutates state only — call inside setState.
+  _Progress _updateRouteProgress(LatLng pos) {
+    final route = _fullRoute;
+    if (route.length < 2 || _arrived) return _Progress.none;
+
+    final proj = _project(
+      pos,
+      math.max(0, _routeSeg - 2),
+      math.min(route.length - 2, _routeSeg + 25),
+    );
+    _distToRoute = proj.dist;
+    if (proj.dist > _offRouteMeters) return _Progress.offRoute;
+
+    _routeSeg = proj.seg;
+    _routeRemaining =
+        Geo.meters(proj.point, route[proj.seg + 1]) + _routeSuffix[proj.seg + 1];
+
+    if (_routeRemaining <= _arrivalMeters) {
+      _arrived = true;
+      _displayRoute = const [];
+      return _Progress.arrived;
+    }
+
+    // Anchor the front of the guideline to the puck.
+    _displayRoute = [pos, ...route.sublist(proj.seg + 1)];
+    return _Progress.onRoute;
+  }
+
+  void _onArrived() {
+    if (!mounted) return;
+    final lotName = _liveLots[_routeLotId]?['name'] ?? 'the lot';
+    final walk = _walkResult;
+    final building = _selectedBuilding;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          walk != null && building != null
+              ? 'Arrived at $lotName. About ${formatDistance(walk.totalDistanceMeters)} walk to ${building.code}.'
+              : 'Arrived at $lotName.',
+        ),
+      ),
+    );
+  }
+
+  void _onBuildingSelected(FauBuilding building) {
+    _stopSimulation();
+    setState(() {
+      _selectedBuilding = building;
+      _routeLotId = null;
+      _clearDrivingRoute();
+      _walkResult = CampusPathfinder.findBestAvailableRoute(
+        buildingPos: building.position,
+        lots: _liveLots,
+      );
+    });
+    _updateNavigationRoute();
+    if (!_navTracking) _mapController.move(building.position, 16.5);
+  }
+
+  void _clearDestination() {
+    _stopSimulation();
+    _routeRequestId++; // cancel any in-flight route request
+    setState(() {
+      _selectedBuilding = null;
+      _walkResult = null;
+      _routeLotId = null;
+      _isRouting = false;
+      _clearDrivingRoute();
+    });
+  }
+
+  // ==========================================
+  // DEVELOPER TOOLS
+  // ==========================================
+
+  /// Jumps to the first route point inside campus (or the main entrance).
+  /// The old version jumped to the route start, which is the user's own
+  /// off-campus location, so it never actually moved.
+  void _teleportToCampus() {
+    _stopSimulation();
+    var target = _campusEntrance;
+    for (final p in _fullRoute) {
+      if (_fauBounds.contains(p)) {
+        target = p;
+        break;
+      }
+    }
+    setState(() {
+      _devLocationOverride = true;
+      _userPos = target;
+      _gpsStatus = 'Teleported to campus (dev)';
+    });
+    _mapController.move(target, 17.5);
+    _updateNavigationRoute();
+  }
+
+  void _toggleSimulation() {
+    if (_isSimulating) {
+      _stopSimulation();
+      return;
+    }
+    if (_fullRoute.length < 2 || _arrived) return;
+
+    // Start from the puck's projected spot on the route.
+    final proj = _project(_userPos ?? _fullRoute.first, 0, _fullRoute.length - 2);
+    final onRoute = proj.dist <= _offRouteMeters;
+
+    _simCamRotation = _mapController.camera.rotation;
+    setState(() {
+      _isSimulating = true;
+      _devLocationOverride = true;
+      _userPos = onRoute ? proj.point : _fullRoute.first;
+      _routeSeg = onRoute ? proj.seg : 0;
+    });
+    _simTimer = Timer.periodic(_simTick, (_) => _simStep());
+  }
+
+  void _simStep() {
+    if (!mounted) return;
+    final route = _fullRoute;
+    if (route.length < 2) {
+      _stopSimulation();
+      return;
+    }
+
+    var cur = _userPos ?? route.first;
+    var seg = _routeSeg;
+    var budget = _simMetersPerTick;
+
+    // Walk the budget along the route, crossing vertices as needed.
+    while (seg < route.length - 1) {
+      final next = route[seg + 1];
+      final d = Geo.meters(cur, next);
+      if (d > budget) {
+        cur = Geo.lerp(cur, next, budget / d);
+        break;
+      }
+      budget -= d;
+      cur = next;
+      seg++;
+    }
+
+    if (seg >= route.length - 1) {
+      _stopSimulation();
+      setState(() {
+        _userPos = route.last;
+        _arrived = true;
+        _displayRoute = const [];
+        _routeRemaining = 0;
+        _gpsStatus = 'Simulation finished';
+      });
+      _onArrived();
+      return;
+    }
+
+    final bearing = Geo.bearing(cur, route[seg + 1]);
+    setState(() {
+      _userPos = cur;
+      _routeSeg = seg;
+      _heading = bearing;
+      _distToRoute = 0;
+      _displayRoute = [cur, ...route.sublist(seg + 1)];
+      _routeRemaining = Geo.meters(cur, route[seg + 1]) + _routeSuffix[seg + 1];
+      _gpsStatus = 'Simulating 20 mph (${bearing.round()}°)';
+    });
+
+    if (_navTracking) {
+      // Ticks already arrive at 20 fps, so ease the rotation directly
+      // instead of restarting a camera animation every 50 ms.
+      _simCamRotation +=
+          Geo.shortestAngle(_simCamRotation, -bearing) * 0.2;
+      _mapController.moveAndRotate(cur, _navZoom, _simCamRotation);
     }
   }
 
-  double _calculateBearing(LatLng start, LatLng end) {
-    final double lat1 = start.latitude * (math.pi / 180.0);
-    final double lat2 = end.latitude * (math.pi / 180.0);
-    final double dLon = (end.longitude - start.longitude) * (math.pi / 180.0);
-
-    final double y = math.sin(dLon) * math.cos(lat2);
-    final double x = math.cos(lat1) * math.sin(lat2) -
-        math.sin(lat1) * math.cos(lat2) * math.cos(dLon);
-
-    final double radians = math.atan2(y, x);
-    return (radians * (180.0 / math.pi) + 360.0) % 360.0;
+  void _stopSimulation() {
+    _simTimer?.cancel();
+    _simTimer = null;
+    if (mounted && _isSimulating) {
+      setState(() => _isSimulating = false);
+    }
   }
+
+  void _toggleDevMode() {
+    final turningOff = _devMode;
+    setState(() => _devMode = !_devMode);
+    if (turningOff) {
+      _stopSimulation();
+      _cursor.value = null;
+      if (_devLocationOverride) {
+        _devLocationOverride = false;
+        _resyncRealGps(); // hand the puck back to real GPS
+      }
+    }
+  }
+
+  // ==========================================
+  // UI
+  // ==========================================
+
+  /// Puck follows the road segment when on-route, otherwise the device heading.
+  double _puckBearing() {
+    if (_displayRoute.length >= 2 &&
+        _distToRoute < 15 &&
+        _routeSeg < _fullRoute.length - 1) {
+      return Geo.bearing(_fullRoute[_routeSeg], _fullRoute[_routeSeg + 1]);
+    }
+    return _heading;
+  }
+
   void _showBuildingSelector() {
     showModalBottomSheet(
       context: context,
-      backgroundColor: const Color(0xFF171714),
+      backgroundColor: kCard,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (ctx) {
-        return Container(
+        return Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1713,33 +1835,36 @@ void _smoothMoveAndRotate(LatLng targetPos, double targetBearing) {
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
-                      color: Colors.white,
+                      color: kText,
                     ),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.close, color: Colors.white70),
+                    icon: const Icon(Icons.close, color: kTextMuted),
                     onPressed: () => Navigator.pop(ctx),
                   ),
                 ],
               ),
-              const Divider(color: Colors.white24),
+              const Divider(color: kDivider),
               Expanded(
                 child: ListView.separated(
                   itemCount: _campusBuildings.length,
-                  separatorBuilder: (context, index) =>
-                      const Divider(color: Colors.white12, height: 1),
+                  separatorBuilder: (_, __) =>
+                      const Divider(color: kDivider, height: 1),
                   itemBuilder: (context, index) {
                     final bldg = _campusBuildings[index];
-
-                    final bestRoute = CampusPathfinder.findBestAvailableRoute(
+                    // Cheap now: walking routes are cached.
+                    final best = CampusPathfinder.findBestAvailableRoute(
                       buildingPos: bldg.position,
                       lots: _liveLots,
                     );
-
-                    final lot = bestRoute != null ? _liveLots[bestRoute.lotId] : null;
+                    final lot = best != null ? _liveLots[best.lotId] : null;
+                    final free = lot == null
+                        ? 0
+                        : (lot['capacity'] as int) - (lot['occupied'] as int);
 
                     return Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+                      padding:
+                          const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
                       child: Row(
                         children: [
                           Container(
@@ -1754,7 +1879,7 @@ void _smoothMoveAndRotate(LatLng targetPos, double targetBearing) {
                             child: Text(
                               bldg.code,
                               style: const TextStyle(
-                                color: Color(0xFFC6F24A),
+                                color: kAccent,
                                 fontWeight: FontWeight.bold,
                                 fontSize: 12,
                               ),
@@ -1768,7 +1893,7 @@ void _smoothMoveAndRotate(LatLng targetPos, double targetBearing) {
                                 Text(
                                   bldg.name,
                                   style: const TextStyle(
-                                    color: Colors.white,
+                                    color: kText,
                                     fontWeight: FontWeight.w600,
                                     fontSize: 14,
                                   ),
@@ -1778,10 +1903,12 @@ void _smoothMoveAndRotate(LatLng targetPos, double targetBearing) {
                                 const SizedBox(height: 2),
                                 Text(
                                   lot != null
-                                      ? 'Best Lot: ${lot['name']} (${lot['status']} open • ${bestRoute!.totalDistanceMeters.round()}m)'
-                                      : 'All nearby lots full',
+                                      ? 'Best lot: ${lot['name']} ($free free, ${formatDistance(best!.totalDistanceMeters)} walk)'
+                                      : (_liveLots.isEmpty
+                                          ? 'Loading parking data...'
+                                          : 'All nearby lots full'),
                                   style: const TextStyle(
-                                    color: Colors.white60,
+                                    color: kTextMuted,
                                     fontSize: 12,
                                   ),
                                 ),
@@ -1794,11 +1921,8 @@ void _smoothMoveAndRotate(LatLng targetPos, double targetBearing) {
                               Navigator.pop(ctx);
                               _onBuildingSelected(bldg);
                             },
-                            icon: const Icon(
-                              Icons.navigation,
-                              size: 14,
-                              color: Colors.black,
-                            ),
+                            icon: const Icon(Icons.navigation,
+                                size: 14, color: Colors.black),
                             label: const Text(
                               'Go to',
                               style: TextStyle(
@@ -1808,7 +1932,7 @@ void _smoothMoveAndRotate(LatLng targetPos, double targetBearing) {
                               ),
                             ),
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFFC6F24A),
+                              backgroundColor: kAccent,
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 10,
                                 vertical: 6,
@@ -1835,23 +1959,8 @@ void _smoothMoveAndRotate(LatLng targetPos, double targetBearing) {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    Map<String, dynamic>? recommendedLot;
-    if (_currentRoute != null && _liveLots.containsKey(_currentRoute!.lotId)) {
-      recommendedLot = _liveLots[_currentRoute!.lotId];
-    } else if (_selectedBuilding != null) {
-      final instantBest = CampusPathfinder.findBestAvailableRoute(
-        buildingPos: _selectedBuilding!.position,
-        lots: _liveLots,
-      );
-      if (instantBest != null) {
-        recommendedLot = _liveLots[instantBest.lotId];
-      }
-    }
-
-    final bool isInsideCampus = _currentUserLocation != null &&
-        _fauBounds.contains(_currentUserLocation!);
+    final onCampus = _isOnCampus;
+    final navActive = _navTracking && onCampus;
 
     return Scaffold(
       appBar: AppBar(
@@ -1863,19 +1972,13 @@ void _smoothMoveAndRotate(LatLng targetPos, double targetBearing) {
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             Text(
-              _isNavigationTracking && isInsideCampus
-                  ? ' Navigation Mode Active (${_currentHeading.round()}°)'
-                  : (_developerMode
-                      ? 'Dev Mode Actived'
-                      : 'Boca Raton Main Campus'),
+              navActive
+                  ? 'Navigation Mode Active (${_heading.round()}°)'
+                  : (_devMode ? 'Dev Mode Active' : 'Boca Raton Main Campus'),
               style: TextStyle(
                 fontSize: 12,
-                color: (_isNavigationTracking && isInsideCampus)
-                    ? const Color(0xFFC6F24A)
-                    : (_developerMode
-                        ? Colors.cyanAccent
-                        : theme.colorScheme.onSurfaceVariant),
-                fontWeight: ((_isNavigationTracking && isInsideCampus) || _developerMode)
+                color: navActive ? kAccent : (_devMode ? kDev : kTextMuted),
+                fontWeight: (navActive || _devMode)
                     ? FontWeight.bold
                     : FontWeight.normal,
               ),
@@ -1889,26 +1992,15 @@ void _smoothMoveAndRotate(LatLng targetPos, double targetBearing) {
         actions: [
           IconButton(
             icon: Icon(
-              _developerMode
-                  ? Icons.developer_mode
-                  : Icons.developer_mode_outlined,
-              color: _developerMode
-                  ? Colors.cyanAccent
-                  : theme.colorScheme.onSurfaceVariant,
+              _devMode ? Icons.developer_mode : Icons.developer_mode_outlined,
+              color: _devMode ? kDev : kTextMuted,
             ),
-            tooltip: _developerMode
+            tooltip: _devMode
                 ? 'Disable Developer Mode'
                 : 'Enable Developer Mode & Joystick',
-            onPressed: () {
-              setState(() {
-                _developerMode = !_developerMode;
-                if (!_developerMode) {
-                  _cursorLocation = null;
-                }
-              });
-            },
+            onPressed: _toggleDevMode,
           ),
-          if (isInsideCampus)
+          if (onCampus)
             IconButton(
               icon: _isLocating
                   ? const SizedBox(
@@ -1920,29 +2012,22 @@ void _smoothMoveAndRotate(LatLng targetPos, double targetBearing) {
                       ),
                     )
                   : Icon(
-                      _isNavigationTracking
-                          ? Icons.navigation
-                          : Icons.my_location,
-                      color: _isNavigationTracking
-                          ? const Color(0xFFC6F24A)
-                          : Colors.white,
+                      _navTracking ? Icons.navigation : Icons.my_location,
+                      color: _navTracking ? kAccent : Colors.white,
                     ),
-              tooltip: _isNavigationTracking
+              tooltip: _navTracking
                   ? 'Disable Navigation Focus'
                   : 'Follow GPS Live (Turn-by-Turn Mode)',
               onPressed: () {
-                if (_currentUserLocation != null) {
-                  setState(() {
-                    _isNavigationTracking = !_isNavigationTracking;
-                  });
-
-                  if (_isNavigationTracking) {
-                    _mapController.move(_currentUserLocation!, 18.2);
-                    _mapController.rotate(-_currentHeading);
-                  } else {
-                    _mapController.rotate(0);
-                    _mapController.move(_currentUserLocation!, 16.5);
-                  }
+                final pos = _userPos;
+                if (pos == null) return;
+                setState(() => _navTracking = !_navTracking);
+                if (_navTracking) {
+                  _simCamRotation = -_heading;
+                  _mapController.moveAndRotate(pos, _navZoom, -_heading);
+                } else {
+                  _cameraAnim.stop();
+                  _mapController.moveAndRotate(pos, 16.5, 0);
                 }
               },
             ),
@@ -1950,487 +2035,179 @@ void _smoothMoveAndRotate(LatLng targetPos, double targetBearing) {
             icon: const Icon(Icons.center_focus_strong),
             tooltip: 'Reset Campus View',
             onPressed: () {
-              setState(() {
-                _selectedBuilding = null;
-                _currentRoute = null;
-                _isNavigationTracking = false;
-              });
-              _mapController.rotate(0);
-              _mapController.move(_fauCenter, 15.3);
+              _clearDestination();
+              setState(() => _navTracking = false);
+              _cameraAnim.stop();
+              _mapController.moveAndRotate(_fauCenter, 15.3, 0);
             },
           ),
         ],
       ),
       body: Stack(
         children: [
-          MouseRegion(
-            onHover: (PointerEvent event) {
-              if (_developerMode) {
-                try {
-                  final latLng =
-                      _mapController.camera.offsetToCrs(event.localPosition);
-                  setState(() {
-                    _cursorLocation = latLng;
-                  });
-                } catch (_) {}
-              }
-            },
-            onExit: (_) {
-              if (_developerMode) {
-                setState(() => _cursorLocation = null);
-              }
-            },
-            child: FlutterMap(
-              mapController: _mapController,
-              options: MapOptions(
-                initialCenter: _fauCenter,
-                initialZoom: 15.3,
-                minZoom: 15.0,
-                maxZoom: 19.5,
-                cameraConstraint:
-                    CameraConstraint.containCenter(bounds: _fauBounds),
-                onPositionChanged: (pos, hasGesture) {
-                  if (hasGesture && _isNavigationTracking) {
-                    setState(() {
-                      _isNavigationTracking = false;
-                    });
-                  }
-                },
-                interactionOptions: const InteractionOptions(
-                  flags: InteractiveFlag.pinchZoom |
-                      InteractiveFlag.drag |
-                      InteractiveFlag.doubleTapZoom |
-                      InteractiveFlag.scrollWheelZoom |
-                      InteractiveFlag.rotate,
+          _buildMap(),
+          _buildSearchHeader(),
+          if (_devMode) _buildDevCursorBadge(),
+          if (_devMode && _selectedBuilding != null) _buildDevControls(onCampus),
+          _buildGuidanceCard(onCampus),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMap() {
+    final walk = _walkResult;
+    final bestLotId = walk?.lotId;
+
+    return MouseRegion(
+      onHover: (event) {
+        if (!_devMode) return;
+        try {
+          _cursor.value = _mapController.camera.offsetToCrs(event.localPosition);
+        } catch (_) {}
+      },
+      onExit: (_) {
+        if (_devMode) _cursor.value = null;
+      },
+      child: FlutterMap(
+        mapController: _mapController,
+        options: MapOptions(
+          initialCenter: _fauCenter,
+          initialZoom: 15.3,
+          minZoom: 15.0,
+          maxZoom: 19.5,
+          cameraConstraint: CameraConstraint.containCenter(bounds: _fauBounds),
+          onPositionChanged: (pos, hasGesture) {
+            if (hasGesture && _navTracking) {
+              _cameraAnim.stop();
+              setState(() => _navTracking = false);
+            }
+          },
+          interactionOptions: const InteractionOptions(
+            flags: InteractiveFlag.pinchZoom |
+                InteractiveFlag.drag |
+                InteractiveFlag.doubleTapZoom |
+                InteractiveFlag.scrollWheelZoom |
+                InteractiveFlag.rotate,
+          ),
+        ),
+        children: [
+          TileLayer(
+            urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+            userAgentPackageName: 'com.smartcurb.app',
+            maxNativeZoom: 19,
+            maxZoom: 20,
+          ),
+          PolylineLayer(
+            polylines: [
+              // Walking path from the lot to the building (A* result).
+              if (walk != null && _selectedBuilding != null)
+                Polyline(
+                  points: walk.pathPoints,
+                  strokeWidth: 3.0,
+                  color: kDev.withOpacity(0.85),
                 ),
-              ),
-              children: [
-                TileLayer(
-                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                  userAgentPackageName: 'com.smartcurb.app',
-                  maxNativeZoom: 19,
-                  maxZoom: 20,
+              // Driving route.
+              if (_displayRoute.length >= 2) ...[
+                Polyline(
+                  points: _displayRoute,
+                  strokeWidth: 6.5,
+                  color: Colors.black87,
                 ),
-
-                if (_currentRoute != null && _currentRoute!.pathPoints.isNotEmpty)
-                  PolylineLayer(
-                    polylines: [
-                      Polyline(
-                        points: _currentRoute!.pathPoints,
-                        strokeWidth: 6.5,
-                        color: Colors.black87,
-                      ),
-                      Polyline(
-                        points: _currentRoute!.pathPoints,
-                        strokeWidth: 4.0,
-                        color: const Color(0xFFC6F24A),
-                      ),
-                    ],
-                  ),
-
-                MarkerLayer(
-                  markers: [
-                    // ⭐️ Heading Indicator Puck (Screen relative angle: heading - mapRotation)
-                    // ⭐️ Heading Indicator Puck (Locked to Guideline)
-                    if (_currentUserLocation != null)
-                      Marker(
-                        point: _currentUserLocation!,
-                        alignment: Alignment.center,
-                        width: 52,
-                        height: 52,
-                        rotate: true, // Prevents map drag/spin from turning the arrow
-                        child: Builder(
-                          builder: (context) {
-                            double angleDeg = _currentHeading;
-
-                            // Point strictly along the active front segment of the route
-                            if (_currentRoute != null && _currentRoute!.pathPoints.length >= 2) {
-                              angleDeg = _calculateBearing(
-                                _currentRoute!.pathPoints[0],
-                                _currentRoute!.pathPoints[1],
-                              );
-                            }
-
-                            return Transform.rotate(
-                              angle: angleDeg * (math.pi / 180.0),
-                              child: Stack(
-                                alignment: Alignment.center,
-                                children: [
-                                  Container(
-                                    width: 44,
-                                    height: 44,
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      color: const Color(0xFFC6F24A).withOpacity(0.25),
-                                    ),
-                                  ),
-                                  Container(
-                                    width: 34,
-                                    height: 34,
-                                    decoration: BoxDecoration(
-                                      color: Colors.black,
-                                      shape: BoxShape.circle,
-                                      border: Border.all(
-                                        color: const Color(0xFFC6F24A),
-                                        width: 2.5,
-                                      ),
-                                      boxShadow: const [
-                                        BoxShadow(
-                                          color: Colors.black54,
-                                          blurRadius: 6,
-                                        ),
-                                      ],
-                                    ),
-                                    child: const Center(
-                                      child: Icon(
-                                        Icons.navigation,
-                                        size: 18,
-                                        color: Colors.black54,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-
-                    // ⭐️ Campus Building Markers (rotate: true keeps them upright)
-                    ..._campusBuildings.map((bldg) {
-                      final isSelected = _selectedBuilding?.id == bldg.id;
-
-                      return Marker(
-                        point: bldg.position,
-                        alignment: Alignment.center,
-                        width: isSelected ? 120 : 80,
-                        height: isSelected ? 48 : 30,
-                        rotate: true,
-                        child: GestureDetector(
-                          onTap: () => _onBuildingSelected(bldg),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 6,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              color: isSelected
-                                  ? Colors.cyanAccent
-                                  : const Color(0xDD1F242A),
-                              borderRadius: BorderRadius.circular(6),
-                              border: Border.all(
-                                color: isSelected
-                                    ? Colors.white
-                                    : Colors.cyanAccent.withOpacity(0.7),
-                                width: isSelected ? 2 : 1,
-                              ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: (isSelected
-                                          ? Colors.cyanAccent
-                                          : Colors.black)
-                                      .withOpacity(0.4),
-                                  blurRadius: 4,
-                                ),
-                              ],
-                            ),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(
-                                  Icons.business,
-                                  size: isSelected ? 14 : 11,
-                                  color: isSelected
-                                      ? Colors.black
-                                      : Colors.cyanAccent,
-                                ),
-                                const SizedBox(width: 4),
-                                Flexible(
-                                  child: Text(
-                                    bldg.code,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      color: isSelected
-                                          ? Colors.black
-                                          : Colors.white,
-                                      fontSize: isSelected ? 11 : 9,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      );
-                    }),
-
-                    // ⭐️ Dynamic Parking Lot Badges (rotate: true keeps them upright)
-                    ..._liveLots.entries.map((entry) {
-                      final isBest = _currentRoute != null &&
-                          _currentRoute!.lotId == entry.key;
-
-                      return _buildLotMarker(
-                        point: entry.value['position'] as LatLng,
-                        name: entry.value['name'] as String,
-                        status: entry.value['status'] as String,
-                        badgeColor: isBest
-                            ? const Color(0xFFC6F24A)
-                            : entry.value['color'] as Color,
-                        isHighlighted: isBest,
-                      );
-                    }),
-                  ],
+                Polyline(
+                  points: _displayRoute,
+                  strokeWidth: 4.0,
+                  color: kAccent,
                 ),
               ],
-            ),
+            ],
           ),
-
-          // Destination Search Header
-          Positioned(
-            top: 16,
-            left: 16,
-            right: 16,
-            child: GestureDetector(
-              onTap: _showBuildingSelector,
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF171714),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: _selectedBuilding != null
-                        ? const Color(0xFFC6F24A)
-                        : Colors.white24,
-                    width: 1.5,
-                  ),
-                  boxShadow: const [
-                    BoxShadow(
-                      color: Colors.black54,
-                      blurRadius: 8,
-                      offset: Offset(0, 3),
-                    ),
-                  ],
+          MarkerLayer(
+            markers: [
+              for (final b in _campusBuildings) _buildBuildingMarker(b),
+              for (final e in _liveLots.entries)
+                _buildLotMarker(
+                  point: e.value['position'] as LatLng,
+                  name: e.value['name'] as String,
+                  status: e.value['status'] as String,
+                  badgeColor:
+                      e.key == bestLotId ? kAccent : e.value['color'] as Color,
+                  isHighlighted: e.key == bestLotId,
                 ),
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.search,
-                      color: _selectedBuilding != null
-                          ? const Color(0xFFC6F24A)
-                          : Colors.white70,
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        _selectedBuilding != null
-                            ? 'Destination: ${_selectedBuilding!.name}'
-                            : 'Search for destination...',
-                        style: TextStyle(
-                          color: _selectedBuilding != null
-                              ? Colors.white
-                              : Colors.white60,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 14,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    if (_selectedBuilding != null)
-                      GestureDetector(
-                        onTap: () => setState(() {
-                          _selectedBuilding = null;
-                          _currentRoute = null;
-                        }),
-                        child: const Icon(
-                          Icons.cancel,
-                          color: Colors.white54,
-                          size: 20,
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-
-          // Dev Mode: Cursor Coordinates Header
-          if (_developerMode)
-            Positioned(
-              top: 80,
-              left: 20,
-              right: 20,
-              child: Center(
-                child: GestureDetector(
-                  onTap: () {
-                    if (_cursorLocation != null) {
-                      final str =
-                          'LatLng(${_cursorLocation!.latitude.toStringAsFixed(6)}, ${_cursorLocation!.longitude.toStringAsFixed(6)})';
-                      Clipboard.setData(ClipboardData(text: str));
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('Copied to clipboard: $str'),
-                          duration: const Duration(seconds: 2),
-                        ),
-                      );
-                    }
-                  },
-                  child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: const Color(0xEE0B1A24),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: Colors.cyanAccent, width: 1.5),
-                      boxShadow: const [
-                        BoxShadow(color: Colors.black87, blurRadius: 8),
-                      ],
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.gps_fixed,
-                            color: Colors.cyanAccent, size: 16),
-                        const SizedBox(width: 8),
-                        Text(
-                          _cursorLocation != null
-                              ? 'Cursor GPS: Lat ${_cursorLocation!.latitude.toStringAsFixed(6)}, Lng ${_cursorLocation!.longitude.toStringAsFixed(6)} (Tap to copy)'
-                              : 'Move cursor over map to read coordinates',
-                          style: const TextStyle(
-                            color: Colors.cyanAccent,
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 0.5,
-                          ),
-                        ),
-                      ],
-                    ),
+              // Puck last so it draws on top.
+              if (_userPos != null)
+                Marker(
+                  point: _userPos!,
+                  alignment: Alignment.center,
+                  width: 52,
+                  height: 52,
+                  // rotate: false → the puck turns with the map, so a
+                  // map-relative bearing is correct at any map rotation.
+                  rotate: false,
+                  child: Transform.rotate(
+                    angle: _puckBearing() * math.pi / 180.0,
+                    child: const _UserPuck(),
                   ),
                 ),
-              ),
-            ),
-
-    // ⭐️ Developer Route Controls: Instant Travel & 20 mph Run/Stop
-          if (_developerMode && _currentRoute != null)
-            Positioned(
-              right: 20,
-              bottom: 105,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  // Button 1: Instant Travel to FAU route start if not already there
-                  if (!isInsideCampus)
-                    ElevatedButton.icon(
-                      onPressed: _instantTravelToRouteStart,
-                      icon: const Icon(Icons.flight_takeoff, size: 18),
-                      label: const Text('Travel to FAU'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.cyanAccent,
-                        foregroundColor: Colors.black,
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      ),
-                    ),
-
-                  const SizedBox(height: 8),
-
-                  // Button 2: Simulate 20 mph follow run/stop (when inside FAU)
-                  if (isInsideCampus)
-                    ElevatedButton.icon(
-                      onPressed: _toggleRouteSimulation,
-                      icon: Icon(_isSimulatingRoute ? Icons.pause : Icons.play_arrow, size: 20),
-                      label: Text(_isSimulatingRoute ? 'Stop (20 mph)' : 'Simulate Run'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: _isSimulatingRoute ? Colors.redAccent : const Color(0xFFC6F24A),
-                        foregroundColor: Colors.black,
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                        elevation: 6,
-                      ),
-                    ),
-                ],
-              ),
-            ),
-
-          // Bottom Guidance Card
-          Positioned(
-            bottom: 24,
-            left: 20,
-            right: 20,
-            child: Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: theme.cardColor,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: _selectedBuilding != null
-                      ? const Color(0xFFC6F24A)
-                      : theme.dividerColor,
-                  width: 1.5,
-                ),
-                boxShadow: const [
-                  BoxShadow(
-                    color: Colors.black54,
-                    blurRadius: 10,
-                    offset: Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    _selectedBuilding != null
-                        ? Icons.assistant_direction
-                        : Icons.my_location,
-                    color: theme.primaryColor,
-                    size: 24,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          _selectedBuilding != null
-                              ? 'Best Lot: ${recommendedLot?['name'] ?? 'Finding open lot...'}'
-                              : 'FAU Boca Raton Main Campus',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: theme.colorScheme.onSurface,
-                          ),
-                        ),
-                        Text(
-                          _selectedBuilding != null
-                              ? (recommendedLot != null
-                                  ? 'Routing from live GPS to ${recommendedLot['name']} (${_currentRoute?.totalDistanceMeters.round() ?? 0}m)'
-                                  : 'All nearby lots are currently full')
-                              : (_currentUserLocation == null
-                                  ? _gpsStatus
-                                  : (isInsideCampus
-                                      ? 'On Campus • Heading: ${_currentHeading.round()}°'
-                                      : 'Outside Campus Area')),
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
+            ],
           ),
         ],
       ),
     );
   }
 
-  
+  Marker _buildBuildingMarker(FauBuilding bldg) {
+    final isSelected = _selectedBuilding?.id == bldg.id;
+    return Marker(
+      point: bldg.position,
+      alignment: Alignment.center,
+      width: isSelected ? 120 : 80,
+      height: isSelected ? 48 : 30,
+      rotate: true,
+      child: GestureDetector(
+        onTap: () => _onBuildingSelected(bldg),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          decoration: BoxDecoration(
+            color: isSelected ? kDev : const Color(0xDD1F242A),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(
+              color: isSelected ? Colors.white : kDev.withOpacity(0.7),
+              width: isSelected ? 2 : 1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: (isSelected ? kDev : Colors.black).withOpacity(0.4),
+                blurRadius: 4,
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.business,
+                size: isSelected ? 14 : 11,
+                color: isSelected ? Colors.black : kDev,
+              ),
+              const SizedBox(width: 4),
+              Flexible(
+                child: Text(
+                  bldg.code,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: isSelected ? Colors.black : Colors.white,
+                    fontSize: isSelected ? 11 : 9,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
   Marker _buildLotMarker({
     required LatLng point,
@@ -2448,12 +2225,9 @@ void _smoothMoveAndRotate(LatLng targetPos, double targetBearing) {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
         decoration: BoxDecoration(
-          color: const Color(0xFF0F0F0D),
+          color: kBg,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: badgeColor,
-            width: isHighlighted ? 3 : 2,
-          ),
+          border: Border.all(color: badgeColor, width: isHighlighted ? 3 : 2),
           boxShadow: [
             BoxShadow(
               color: badgeColor.withOpacity(isHighlighted ? 0.6 : 0.25),
@@ -2492,42 +2266,335 @@ void _smoothMoveAndRotate(LatLng targetPos, double targetBearing) {
       ),
     );
   }
+
+  Widget _buildSearchHeader() {
+    final selected = _selectedBuilding;
+    return Positioned(
+      top: 16,
+      left: 16,
+      right: 16,
+      child: GestureDetector(
+        onTap: _showBuildingSelector,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            color: kCard,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: selected != null ? kAccent : Colors.white24,
+              width: 1.5,
+            ),
+            boxShadow: const [
+              BoxShadow(
+                color: Colors.black54,
+                blurRadius: 8,
+                offset: Offset(0, 3),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Icon(
+                Icons.search,
+                color: selected != null ? kAccent : Colors.white70,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  selected != null
+                      ? 'Destination: ${selected.name}'
+                      : 'Search for destination...',
+                  style: TextStyle(
+                    color: selected != null ? Colors.white : Colors.white60,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (selected != null)
+                GestureDetector(
+                  onTap: _clearDestination,
+                  child: const Icon(Icons.cancel, color: Colors.white54, size: 20),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDevCursorBadge() {
+    return Positioned(
+      top: 80,
+      left: 20,
+      right: 20,
+      child: Center(
+        child: ValueListenableBuilder<LatLng?>(
+          valueListenable: _cursor,
+          builder: (context, cursor, _) {
+            return GestureDetector(
+              onTap: () {
+                if (cursor == null) return;
+                final str =
+                    'LatLng(${cursor.latitude.toStringAsFixed(6)}, ${cursor.longitude.toStringAsFixed(6)})';
+                Clipboard.setData(ClipboardData(text: str));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Copied to clipboard: $str'),
+                    duration: const Duration(seconds: 2),
+                  ),
+                );
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xEE0B1A24),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: kDev, width: 1.5),
+                  boxShadow: const [
+                    BoxShadow(color: Colors.black87, blurRadius: 8),
+                  ],
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.gps_fixed, color: kDev, size: 16),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        cursor != null
+                            ? 'Cursor GPS: Lat ${cursor.latitude.toStringAsFixed(6)}, Lng ${cursor.longitude.toStringAsFixed(6)} (Tap to copy)'
+                            : 'Move cursor over map to read coordinates',
+                        style: const TextStyle(
+                          color: kDev,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDevControls(bool onCampus) {
+    final canSimulate = onCampus && _fullRoute.length >= 2 && !_arrived;
+    return Positioned(
+      right: 20,
+      bottom: 105,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          if (!onCampus)
+            ElevatedButton.icon(
+              onPressed: _teleportToCampus,
+              icon: const Icon(Icons.flight_takeoff, size: 18),
+              label: const Text('Travel to FAU'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: kDev,
+                foregroundColor: Colors.black,
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+            ),
+          if (canSimulate || _isSimulating)
+            ElevatedButton.icon(
+              onPressed: _toggleSimulation,
+              icon: Icon(_isSimulating ? Icons.pause : Icons.play_arrow, size: 20),
+              label: Text(_isSimulating ? 'Stop (20 mph)' : 'Simulate Run'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _isSimulating ? Colors.redAccent : kAccent,
+                foregroundColor: Colors.black,
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                elevation: 6,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildGuidanceCard(bool onCampus) {
+    final building = _selectedBuilding;
+    final walk = _walkResult;
+    final String title;
+    final String subtitle;
+
+    if (building == null) {
+      title = 'FAU Boca Raton Main Campus';
+      subtitle = _userPos == null
+          ? _gpsStatus
+          : (onCampus
+              ? 'On Campus • Heading: ${_heading.round()}°'
+              : 'Outside Campus Area');
+    } else if (walk == null) {
+      title = _liveLots.isEmpty ? 'Loading live parking data...' : 'No open lot';
+      subtitle = _liveLots.isEmpty
+          ? 'Waiting for sensor data'
+          : 'All nearby lots are currently full';
+    } else {
+      final lot = _liveLots[walk.lotId];
+      final free = lot == null
+          ? 0
+          : (lot['capacity'] as int) - (lot['occupied'] as int);
+      title = 'Best Lot: ${lot?['name'] ?? walk.lotId} ($free free)';
+      final walkText = formatDistance(walk.totalDistanceMeters);
+      if (_arrived) {
+        subtitle = 'Arrived • $walkText walk to ${building.code}';
+      } else if (_fullRoute.isEmpty) {
+        subtitle = 'Calculating driving route...';
+      } else {
+        subtitle =
+            'Drive ${formatDistance(_routeRemaining)} • then walk $walkText';
+      }
+    }
+
+    return Positioned(
+      bottom: 24,
+      left: 20,
+      right: 20,
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: kCard,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: building != null ? kAccent : kDivider,
+            width: 1.5,
+          ),
+          boxShadow: const [
+            BoxShadow(
+              color: Colors.black54,
+              blurRadius: 10,
+              offset: Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Icon(
+              building != null ? Icons.assistant_direction : Icons.my_location,
+              color: kAccent,
+              size: 24,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: kText,
+                    ),
+                  ),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(fontSize: 12, color: kTextMuted),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Const widget so the puck's visuals are never rebuilt; only its rotation changes.
+class _UserPuck extends StatelessWidget {
+  const _UserPuck();
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: kAccent.withOpacity(0.25),
+          ),
+        ),
+        Container(
+          width: 34,
+          height: 34,
+          decoration: BoxDecoration(
+            color: Colors.black,
+            shape: BoxShape.circle,
+            border: Border.all(color: kAccent, width: 2.5),
+            boxShadow: const [
+              BoxShadow(color: Colors.black54, blurRadius: 6),
+            ],
+          ),
+          // Was black-on-black (invisible); now the arrow actually shows.
+          child: const Center(
+            child: Icon(Icons.navigation, size: 18, color: kAccent),
+          ),
+        ),
+      ],
+    );
+  }
 }
 
 // ==========================================
 // TAB 2: VEHICLES
 // ==========================================
 
-class _VehicleTab extends StatelessWidget {
+class _VehicleTab extends StatefulWidget {
   const _VehicleTab();
 
-  void _openAddVehicleDialog(BuildContext context) {
+  @override
+  State<_VehicleTab> createState() => _VehicleTabState();
+}
+
+class _VehicleTabState extends State<_VehicleTab> {
+  late final String? _uid = FirebaseAuth.instance.currentUser?.uid;
+  late final Stream<DatabaseEvent>? _stream = _uid == null
+      ? null
+      : FirebaseDatabase.instance.ref('drivers/$_uid/vehicles').onValue;
+
+  void _openAddVehicleDialog() {
     showDialog(
       context: context,
       barrierDismissible: true,
-      builder: (dialogCtx) => const _VehicleFormDialog(),
+      builder: (_) => const _VehicleFormDialog(),
     );
   }
 
-  void _showVehicleDetails(
-    BuildContext context,
-    Map<String, dynamic> data,
-    String key,
-  ) {
-    final theme = Theme.of(context);
+  void _showVehicleDetails(Map<String, dynamic> data, String key) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: theme.cardColor,
+        backgroundColor: kCard,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
           children: [
-            Icon(Icons.directions_car, color: theme.primaryColor),
+            const Icon(Icons.directions_car, color: kAccent),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
                 '${data['model'] ?? 'Vehicle'}',
-                style: TextStyle(color: theme.colorScheme.onSurface),
+                style: const TextStyle(color: kText),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
@@ -2537,28 +2604,20 @@ class _VehicleTab extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             DetailInfoRow(
-              label: 'Plate Number',
-              value: data['plate']?.toString() ?? 'N/A',
-            ),
+                label: 'Plate Number', value: data['plate']?.toString() ?? 'N/A'),
             DetailInfoRow(
-              label: 'Manufacturer',
-              value: data['manufacturer']?.toString() ?? 'N/A',
-            ),
+                label: 'Manufacturer',
+                value: data['manufacturer']?.toString() ?? 'N/A'),
+            DetailInfoRow(label: 'Year', value: data['year']?.toString() ?? 'N/A'),
             DetailInfoRow(
-              label: 'Year',
-              value: data['year']?.toString() ?? 'N/A',
-            ),
-            DetailInfoRow(
-              label: 'Color',
-              value: data['color']?.toString() ?? 'N/A',
-            ),
+                label: 'Color', value: data['color']?.toString() ?? 'N/A'),
           ],
         ),
         actions: [
           TextButton(
             onPressed: () {
               Navigator.of(ctx).pop();
-              final uid = FirebaseAuth.instance.currentUser?.uid;
+              final uid = _uid;
               if (uid != null) {
                 FirebaseDatabase.instance
                     .ref('drivers/$uid/vehicles/$key')
@@ -2573,7 +2632,7 @@ class _VehicleTab extends StatelessWidget {
           ElevatedButton(
             onPressed: () => Navigator.of(ctx).pop(),
             style: ElevatedButton.styleFrom(
-              backgroundColor: theme.primaryColor,
+              backgroundColor: kAccent,
               foregroundColor: Colors.black,
             ),
             child: const Text('Close'),
@@ -2585,13 +2644,10 @@ class _VehicleTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return const Center(child: Text('User not signed in.'));
-
-    final theme = Theme.of(context);
+    if (_uid == null) return const Center(child: Text('User not signed in.'));
 
     return StreamBuilder<DatabaseEvent>(
-      stream: FirebaseDatabase.instance.ref('drivers/$uid/vehicles').onValue,
+      stream: _stream,
       builder: (context, snapshot) {
         if (snapshot.hasError) {
           return Center(
@@ -2606,85 +2662,88 @@ class _VehicleTab extends StatelessWidget {
         }
 
         final rawData = snapshot.data?.snapshot.value;
-        if (rawData == null) {
+        if (rawData is! Map) {
           return AnimatedAddCard(
             title: 'No Vehicle Found',
             subtitle: 'Tap to add a new vehicle to your account',
-            onTap: () => _openAddVehicleDialog(context),
+            onTap: _openAddVehicleDialog,
           );
         }
-
-        final vehiclesMap = Map<dynamic, dynamic>.from(rawData as Map);
-        final vehicleEntries = vehiclesMap.entries.toList();
 
         return ListView(
           padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0),
           children: [
-            ...vehicleEntries.map((entry) {
-              final key = entry.key.toString();
-              final data = Map<String, dynamic>.from(entry.value as Map);
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 12.0),
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(12),
-                  onTap: () => _showVehicleDetails(context, data, key),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 24,
-                      vertical: 20,
-                    ),
-                    decoration: BoxDecoration(
-                      color: theme.cardColor,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: theme.dividerColor, width: 2),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          data['model']?.toString() ?? 'Unknown Model',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: theme.colorScheme.onSurface,
-                          ),
-                        ),
-                        Text(
-                          data['plate']?.toString() ?? 'No Plate',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: theme.primaryColor,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+            for (final entry in rawData.entries)
+              if (entry.value is Map)
+                _buildVehicleCard(
+                  entry.key.toString(),
+                  Map<String, dynamic>.from(entry.value as Map),
                 ),
-              );
-            }),
             const SizedBox(height: 8),
             OutlinedButton(
-              onPressed: () => _openAddVehicleDialog(context),
+              onPressed: _openAddVehicleDialog,
               style: OutlinedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 16),
-                side: BorderSide(color: theme.primaryColor, width: 1.5),
+                side: const BorderSide(color: kAccent, width: 1.5),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
               ),
-              child: Text(
+              child: const Text(
                 'Add more vehicle',
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
-                  color: theme.primaryColor,
+                  color: kAccent,
                 ),
               ),
             ),
           ],
         );
       },
+    );
+  }
+
+  Widget _buildVehicleCard(String key, Map<String, dynamic> data) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12.0),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => _showVehicleDetails(data, key),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+          decoration: BoxDecoration(
+            color: kCard,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: kDivider, width: 2),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Flexible(
+                child: Text(
+                  data['model']?.toString() ?? 'Unknown Model',
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: kText,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                data['plate']?.toString() ?? 'No Plate',
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: kAccent,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -2718,9 +2777,7 @@ class _VehicleFormDialogState extends State<_VehicleFormDialog> {
     final plate = _plateCtrl.text.trim();
     if (model.isEmpty || plate.isEmpty) {
       showErrorSnackBar(
-        context,
-        'Please fill out at least Model and License Plate.',
-      );
+          context, 'Please fill out at least Model and License Plate.');
       return;
     }
 
@@ -2741,9 +2798,8 @@ class _VehicleFormDialogState extends State<_VehicleFormDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Dialog(
-      backgroundColor: theme.cardColor,
+      backgroundColor: kCard,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
       child: SingleChildScrollView(
@@ -2754,12 +2810,12 @@ class _VehicleFormDialogState extends State<_VehicleFormDialog> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
+                const Text(
                   'Add New Vehicle',
                   style: TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.bold,
-                    color: theme.colorScheme.onSurface,
+                    color: kText,
                   ),
                 ),
                 IconButton(
@@ -2808,45 +2864,55 @@ class _VehicleFormDialogState extends State<_VehicleFormDialog> {
               ],
             ),
             const SizedBox(height: 24),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: theme.colorScheme.onSurface,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      side: BorderSide(color: theme.dividerColor),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                    ),
-                    child: const Text('Cancel'),
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: _submit,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: theme.primaryColor,
-                      foregroundColor: Colors.black,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                    ),
-                    child: const Text(
-                      'Confirm',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ),
-              ],
-            ),
+            _DialogButtons(onConfirm: _submit),
           ],
         ),
       ),
+    );
+  }
+}
+
+class _DialogButtons extends StatelessWidget {
+  final VoidCallback onConfirm;
+  const _DialogButtons({required this.onConfirm});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: OutlinedButton(
+            onPressed: () => Navigator.of(context).pop(),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: kText,
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              side: const BorderSide(color: kDivider),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            child: const Text('Cancel'),
+          ),
+        ),
+        const SizedBox(width: 16),
+        Expanded(
+          child: ElevatedButton(
+            onPressed: onConfirm,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: kAccent,
+              foregroundColor: Colors.black,
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            child: const Text(
+              'Confirm',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -2855,51 +2921,49 @@ class _VehicleFormDialogState extends State<_VehicleFormDialog> {
 // TAB 3: PROFILE
 // ==========================================
 
-class _ProfileTab extends StatelessWidget {
+class _ProfileTab extends StatefulWidget {
   const _ProfileTab();
 
-  void _openContactDialog(BuildContext context, {Map<String, dynamic>? data}) {
+  @override
+  State<_ProfileTab> createState() => _ProfileTabState();
+}
+
+class _ProfileTabState extends State<_ProfileTab> {
+  late final User? _user = FirebaseAuth.instance.currentUser;
+  late final Stream<DatabaseEvent>? _stream = _user == null
+      ? null
+      : FirebaseDatabase.instance.ref('drivers/${_user!.uid}/profile').onValue;
+
+  void _openContactDialog({Map<String, dynamic>? data}) {
     showDialog(
       context: context,
       barrierDismissible: true,
-      builder: (dialogCtx) => _ContactInfoDialog(existingData: data),
+      builder: (_) => _ContactInfoDialog(existingData: data),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final user = FirebaseAuth.instance.currentUser;
+    final user = _user;
     if (user == null) return const Center(child: Text('User not signed in.'));
 
-    final theme = Theme.of(context);
-
     return StreamBuilder<DatabaseEvent>(
-      stream: FirebaseDatabase.instance
-          .ref('drivers/${user.uid}/profile')
-          .onValue,
+      stream: _stream,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
         }
 
         final rawData = snapshot.data?.snapshot.value;
-        if (rawData == null) {
+        if (rawData is! Map || rawData['firstName'] == null) {
           return AnimatedAddCard(
             title: 'Profile Incomplete',
             subtitle: 'Tap to add your contact information',
-            onTap: () => _openContactDialog(context),
+            onTap: _openContactDialog,
           );
         }
 
-        final data = Map<String, dynamic>.from(rawData as Map);
-        if (data['firstName'] == null) {
-          return AnimatedAddCard(
-            title: 'Profile Incomplete',
-            subtitle: 'Tap to add your contact information',
-            onTap: () => _openContactDialog(context),
-          );
-        }
-
+        final data = Map<String, dynamic>.from(rawData);
         final middle = (data['middleName'] ?? '').toString().trim();
         final fullName = middle.isEmpty
             ? '${data['firstName']} ${data['lastName']}'
@@ -2907,9 +2971,10 @@ class _ProfileTab extends StatelessWidget {
 
         final addr2 = (data['address2'] ?? '').toString().trim();
         final zip = data['zipCode'] ?? '';
-        final fullAddress = addr2.isEmpty
-            ? '${data['address1']}\n${data['city']}, ${data['state']} $zip\n${data['country']}'
-            : '${data['address1']}, $addr2\n${data['city']}, ${data['state']} $zip\n${data['country']}';
+        final line1 =
+            addr2.isEmpty ? '${data['address1']}' : '${data['address1']}, $addr2';
+        final fullAddress =
+            '$line1\n${data['city']}, ${data['state']} $zip\n${data['country']}';
 
         return SafeArea(
           child: Column(
@@ -2921,20 +2986,16 @@ class _ProfileTab extends StatelessWidget {
                     Container(
                       padding: const EdgeInsets.all(20),
                       decoration: BoxDecoration(
-                        color: theme.cardColor,
+                        color: kCard,
                         borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: theme.dividerColor),
+                        border: Border.all(color: kDivider),
                       ),
                       child: Row(
                         children: [
-                          CircleAvatar(
+                          const CircleAvatar(
                             radius: 34,
-                            backgroundColor: theme.scaffoldBackgroundColor,
-                            child: Icon(
-                              Icons.person,
-                              size: 38,
-                              color: theme.primaryColor,
-                            ),
+                            backgroundColor: kBg,
+                            child: Icon(Icons.person, size: 38, color: kAccent),
                           ),
                           const SizedBox(width: 16),
                           Expanded(
@@ -2943,18 +3004,18 @@ class _ProfileTab extends StatelessWidget {
                               children: [
                                 Text(
                                   fullName,
-                                  style: TextStyle(
+                                  style: const TextStyle(
                                     fontSize: 20,
                                     fontWeight: FontWeight.bold,
-                                    color: theme.colorScheme.onSurface,
+                                    color: kText,
                                   ),
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
                                   user.email ?? '',
-                                  style: TextStyle(
+                                  style: const TextStyle(
                                     fontSize: 14,
-                                    color: theme.colorScheme.onSurfaceVariant,
+                                    color: kTextMuted,
                                   ),
                                 ),
                               ],
@@ -2967,9 +3028,9 @@ class _ProfileTab extends StatelessWidget {
                     Container(
                       padding: const EdgeInsets.all(20),
                       decoration: BoxDecoration(
-                        color: theme.cardColor,
+                        color: kCard,
                         borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: theme.dividerColor),
+                        border: Border.all(color: kDivider),
                       ),
                       child: Column(
                         children: [
@@ -2991,14 +3052,12 @@ class _ProfileTab extends StatelessWidget {
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 24.0,
-                  vertical: 16.0,
-                ),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
                 child: PrimaryButton(
                   title: 'Edit Information',
                   icon: Icons.edit_outlined,
-                  onPressed: () => _openContactDialog(context, data: data),
+                  onPressed: () => _openContactDialog(data: data),
                 ),
               ),
             ],
@@ -3018,6 +3077,8 @@ class _ContactInfoDialog extends StatefulWidget {
 }
 
 class _ContactInfoDialogState extends State<_ContactInfoDialog> {
+  static const List<String> _genders = ['Male', 'Female', 'Other'];
+
   late final TextEditingController _phoneCtrl;
   late final TextEditingController _firstCtrl;
   late final TextEditingController _lastCtrl;
@@ -3034,46 +3095,53 @@ class _ContactInfoDialogState extends State<_ContactInfoDialog> {
   void initState() {
     super.initState();
     final d = widget.existingData;
-    _phoneCtrl = TextEditingController(text: d?['phone']?.toString() ?? '');
-    _firstCtrl = TextEditingController(text: d?['firstName']?.toString() ?? '');
-    _lastCtrl = TextEditingController(text: d?['lastName']?.toString() ?? '');
-    _middleCtrl =
-        TextEditingController(text: d?['middleName']?.toString() ?? '');
-    _addr1Ctrl = TextEditingController(text: d?['address1']?.toString() ?? '');
-    _addr2Ctrl = TextEditingController(text: d?['address2']?.toString() ?? '');
-    _cityCtrl = TextEditingController(text: d?['city']?.toString() ?? '');
-    _stateCtrl = TextEditingController(text: d?['state']?.toString() ?? '');
-    _zipCtrl = TextEditingController(text: d?['zipCode']?.toString() ?? '');
-    _countryCtrl =
-        TextEditingController(text: d?['country']?.toString() ?? '');
-    _gender = d?['gender']?.toString();
+    String v(String k) => d?[k]?.toString() ?? '';
+    _phoneCtrl = TextEditingController(text: v('phone'));
+    _firstCtrl = TextEditingController(text: v('firstName'));
+    _lastCtrl = TextEditingController(text: v('lastName'));
+    _middleCtrl = TextEditingController(text: v('middleName'));
+    _addr1Ctrl = TextEditingController(text: v('address1'));
+    _addr2Ctrl = TextEditingController(text: v('address2'));
+    _cityCtrl = TextEditingController(text: v('city'));
+    _stateCtrl = TextEditingController(text: v('state'));
+    _zipCtrl = TextEditingController(text: v('zipCode'));
+    _countryCtrl = TextEditingController(text: v('country'));
+    // Guard: an unexpected stored value would crash the dropdown.
+    final g = d?['gender']?.toString();
+    _gender = _genders.contains(g) ? g : null;
   }
 
   @override
   void dispose() {
-    _phoneCtrl.dispose();
-    _firstCtrl.dispose();
-    _lastCtrl.dispose();
-    _middleCtrl.dispose();
-    _addr1Ctrl.dispose();
-    _addr2Ctrl.dispose();
-    _cityCtrl.dispose();
-    _stateCtrl.dispose();
-    _zipCtrl.dispose();
-    _countryCtrl.dispose();
+    for (final c in [
+      _phoneCtrl,
+      _firstCtrl,
+      _lastCtrl,
+      _middleCtrl,
+      _addr1Ctrl,
+      _addr2Ctrl,
+      _cityCtrl,
+      _stateCtrl,
+      _zipCtrl,
+      _countryCtrl,
+    ]) {
+      c.dispose();
+    }
     super.dispose();
   }
 
   void _submit() {
-    if (_phoneCtrl.text.trim().isEmpty ||
-        _firstCtrl.text.trim().isEmpty ||
-        _lastCtrl.text.trim().isEmpty ||
-        _gender == null ||
-        _addr1Ctrl.text.trim().isEmpty ||
-        _cityCtrl.text.trim().isEmpty ||
-        _stateCtrl.text.trim().isEmpty ||
-        _zipCtrl.text.trim().isEmpty ||
-        _countryCtrl.text.trim().isEmpty) {
+    final required = [
+      _phoneCtrl,
+      _firstCtrl,
+      _lastCtrl,
+      _addr1Ctrl,
+      _cityCtrl,
+      _stateCtrl,
+      _zipCtrl,
+      _countryCtrl,
+    ];
+    if (_gender == null || required.any((c) => c.text.trim().isEmpty)) {
       showErrorSnackBar(context, 'Please fill in all required fields.');
       return;
     }
@@ -3101,9 +3169,8 @@ class _ContactInfoDialogState extends State<_ContactInfoDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Dialog(
-      backgroundColor: theme.cardColor,
+      backgroundColor: kCard,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
       child: ConstrainedBox(
@@ -3120,10 +3187,10 @@ class _ContactInfoDialogState extends State<_ContactInfoDialog> {
                     widget.existingData == null
                         ? 'Add Contact Info'
                         : 'Edit Contact Info',
-                    style: TextStyle(
+                    style: const TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.bold,
-                      color: theme.colorScheme.onSurface,
+                      color: kText,
                     ),
                   ),
                   IconButton(
@@ -3167,37 +3234,28 @@ class _ContactInfoDialogState extends State<_ContactInfoDialog> {
               ),
               const SizedBox(height: 12),
               Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 4,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                 decoration: BoxDecoration(
-                  color: theme.cardColor,
+                  color: kCard,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: theme.dividerColor),
+                  border: Border.all(color: kDivider),
                 ),
                 child: DropdownButtonHideUnderline(
                   child: DropdownButton<String>(
                     value: _gender,
                     isExpanded: true,
-                    hint: Row(
+                    hint: const Row(
                       children: [
-                        Icon(Icons.transgender, color: theme.primaryColor),
-                        const SizedBox(width: 12),
-                        Text(
-                          'Gender *',
-                          style: TextStyle(
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
-                        ),
+                        Icon(Icons.transgender, color: kAccent),
+                        SizedBox(width: 12),
+                        Text('Gender *', style: TextStyle(color: kTextMuted)),
                       ],
                     ),
-                    dropdownColor: theme.cardColor,
-                    icon: Icon(Icons.arrow_drop_down, color: theme.primaryColor),
-                    items: const [
-                      DropdownMenuItem(value: 'Male', child: Text('Male')),
-                      DropdownMenuItem(value: 'Female', child: Text('Female')),
-                      DropdownMenuItem(value: 'Other', child: Text('Other')),
+                    dropdownColor: kCard,
+                    icon: const Icon(Icons.arrow_drop_down, color: kAccent),
+                    items: [
+                      for (final g in _genders)
+                        DropdownMenuItem(value: g, child: Text(g)),
                     ],
                     onChanged: (val) => setState(() => _gender = val),
                   ),
@@ -3257,42 +3315,7 @@ class _ContactInfoDialogState extends State<_ContactInfoDialog> {
                 ],
               ),
               const SizedBox(height: 24),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: theme.colorScheme.onSurface,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        side: BorderSide(color: theme.dividerColor),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                      ),
-                      child: const Text('Cancel'),
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: _submit,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: theme.primaryColor,
-                        foregroundColor: Colors.black,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                      ),
-                      child: const Text(
-                        'Confirm',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+              _DialogButtons(onConfirm: _submit),
             ],
           ),
         ),
@@ -3323,30 +3346,24 @@ class AppTextField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Container(
       decoration: BoxDecoration(
-        color: theme.cardColor,
+        color: kCard,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: theme.dividerColor),
+        border: Border.all(color: kDivider),
       ),
       child: TextField(
         controller: controller,
         obscureText: obscureText,
         keyboardType: keyboardType,
-        style: TextStyle(color: theme.colorScheme.onSurface),
+        style: const TextStyle(color: kText),
         decoration: InputDecoration(
           border: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 16,
-            vertical: 16,
-          ),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
           hintText: hintText,
-          hintStyle: TextStyle(
-            color: theme.colorScheme.onSurfaceVariant,
-            fontSize: 14,
-          ),
-          prefixIcon: Icon(icon, color: theme.primaryColor, size: 20),
+          hintStyle: const TextStyle(color: kTextMuted, fontSize: 14),
+          prefixIcon: Icon(icon, color: kAccent, size: 20),
         ),
       ),
     );
@@ -3369,14 +3386,13 @@ class PrimaryButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return SizedBox(
       width: double.infinity,
       child: ElevatedButton(
         onPressed: isLoading ? null : onPressed,
         style: ElevatedButton.styleFrom(
-          backgroundColor: theme.primaryColor,
-          foregroundColor: const Color(0xFF12110F),
+          backgroundColor: kAccent,
+          foregroundColor: kOnAccent,
           padding: const EdgeInsets.symmetric(vertical: 16),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           elevation: 0,
@@ -3387,7 +3403,7 @@ class PrimaryButton extends StatelessWidget {
                 width: 20,
                 child: CircularProgressIndicator(
                   strokeWidth: 2,
-                  color: Color(0xFF12110F),
+                  color: kOnAccent,
                 ),
               )
             : Row(
@@ -3420,26 +3436,19 @@ class DetailInfoRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6.0),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            label,
-            style: TextStyle(
-              color: theme.colorScheme.onSurfaceVariant,
-              fontSize: 14,
-            ),
-          ),
+          Text(label, style: const TextStyle(color: kTextMuted, fontSize: 14)),
           const SizedBox(width: 8),
           Flexible(
             child: Text(
               value,
               textAlign: TextAlign.right,
-              style: TextStyle(
-                color: theme.colorScheme.onSurface,
+              style: const TextStyle(
+                color: kText,
                 fontWeight: FontWeight.bold,
                 fontSize: 14,
               ),
@@ -3472,7 +3481,6 @@ class _AnimatedAddCardState extends State<AnimatedAddCard> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24.0),
@@ -3483,71 +3491,67 @@ class _AnimatedAddCardState extends State<AnimatedAddCard> {
             widget.onTap();
           },
           onTapCancel: () => setState(() => _isPressed = false),
-          child: AnimatedContainer(
+          child: AnimatedScale(
+            scale: _isPressed ? 0.95 : 1.0,
             duration: const Duration(milliseconds: 150),
             curve: Curves.easeInOut,
-            width: double.infinity,
-            height: 220,
-            transform: Matrix4.identity()..scale(_isPressed ? 0.95 : 1.0),
-            transformAlignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: theme.cardColor,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color: _isPressed
-                    ? theme.primaryColor.withOpacity(0.6)
-                    : theme.dividerColor,
-                width: 2,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              curve: Curves.easeInOut,
+              width: double.infinity,
+              height: 220,
+              decoration: BoxDecoration(
+                color: kCard,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: _isPressed ? kAccent.withOpacity(0.6) : kDivider,
+                  width: 2,
+                ),
+                boxShadow: _isPressed
+                    ? [
+                        BoxShadow(
+                          color: kAccent.withOpacity(0.15),
+                          blurRadius: 20,
+                          spreadRadius: 2,
+                        ),
+                      ]
+                    : null,
               ),
-              boxShadow: _isPressed
-                  ? [
-                      BoxShadow(
-                        color: theme.primaryColor.withOpacity(0.15),
-                        blurRadius: 20,
-                        spreadRadius: 2,
-                      ),
-                    ]
-                  : null,
-            ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 150),
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: theme.scaffoldBackgroundColor,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: _isPressed
-                            ? theme.primaryColor.withOpacity(0.4)
-                            : theme.primaryColor.withOpacity(0.1),
-                        blurRadius: _isPressed ? 25 : 15,
-                        spreadRadius: _isPressed ? 8 : 5,
-                      ),
-                    ],
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 150),
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: kBg,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: kAccent.withOpacity(_isPressed ? 0.4 : 0.1),
+                          blurRadius: _isPressed ? 25 : 15,
+                          spreadRadius: _isPressed ? 8 : 5,
+                        ),
+                      ],
+                    ),
+                    child: const Icon(Icons.add, size: 40, color: kAccent),
                   ),
-                  child: Icon(Icons.add, size: 40, color: theme.primaryColor),
-                ),
-                const SizedBox(height: 20),
-                Text(
-                  widget.title,
-                  style: TextStyle(
-                    color: theme.colorScheme.onSurface,
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
+                  const SizedBox(height: 20),
+                  Text(
+                    widget.title,
+                    style: const TextStyle(
+                      color: kText,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  widget.subtitle,
-                  style: TextStyle(
-                    color: theme.colorScheme.onSurfaceVariant,
-                    fontSize: 14,
+                  const SizedBox(height: 8),
+                  Text(
+                    widget.subtitle,
+                    style: const TextStyle(color: kTextMuted, fontSize: 14),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -3560,59 +3564,85 @@ class _AnimatedAddCardState extends State<AnimatedAddCard> {
 // STATIC USER PAGES
 // ==========================================
 
-class UserSettingsPage extends StatelessWidget {
+class UserSettingsPage extends StatefulWidget {
   const UserSettingsPage({super.key});
 
   @override
+  State<UserSettingsPage> createState() => _UserSettingsPageState();
+}
+
+class _UserSettingsPageState extends State<UserSettingsPage> {
+  late final String? _uid = FirebaseAuth.instance.currentUser?.uid;
+  late final DatabaseReference? _notifRef = _uid == null
+      ? null
+      : FirebaseDatabase.instance.ref('drivers/$_uid/settings/notifications');
+  late final Stream<DatabaseEvent>? _notifStream = _notifRef?.onValue;
+
+  void _showContactDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: kCard,
+        title: const Text('Contact Us', style: TextStyle(color: kText)),
+        content: const SelectableText(
+          kSupportEmail,
+          style: TextStyle(color: kAccent, fontWeight: FontWeight.bold),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Clipboard.setData(const ClipboardData(text: kSupportEmail));
+              Navigator.pop(ctx);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Email copied to clipboard')),
+              );
+            },
+            child: const Text('Copy email', style: TextStyle(color: kAccent)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close', style: TextStyle(color: kTextMuted)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: ListView(
         padding: const EdgeInsets.all(16.0),
         children: [
-          ListTile(
-            leading: Icon(Icons.dark_mode, color: theme.primaryColor),
-            title: Text(
-              'Dark Mode',
-              style: TextStyle(color: theme.colorScheme.onSurface),
-            ),
-            trailing: Switch(
-              value: themeNotifier.value == ThemeMode.dark,
-              onChanged: (val) =>
-                  themeNotifier.value = val ? ThemeMode.dark : ThemeMode.light,
-              activeColor: theme.scaffoldBackgroundColor,
-              activeTrackColor: theme.primaryColor,
-            ),
+          StreamBuilder<DatabaseEvent>(
+            stream: _notifStream,
+            builder: (context, snapshot) {
+              // Default ON until the user turns it off.
+              final enabled = snapshot.data?.snapshot.value != false;
+              return ListTile(
+                leading: const Icon(Icons.notifications_active, color: kAccent),
+                title:
+                    const Text('Notifications', style: TextStyle(color: kText)),
+                trailing: Switch(
+                  value: enabled,
+                  onChanged:
+                      _notifRef == null ? null : (val) => _notifRef!.set(val),
+                  activeColor: kBg,
+                  activeTrackColor: kAccent,
+                ),
+              );
+            },
           ),
           ListTile(
-            leading: Icon(
-              Icons.notifications_active,
-              color: theme.primaryColor,
-            ),
-            title: Text(
-              'Notifications',
-              style: TextStyle(color: theme.colorScheme.onSurface),
-            ),
-            trailing: Switch(
-              value: true,
-              onChanged: (_) {},
-              activeColor: theme.scaffoldBackgroundColor,
-              activeTrackColor: theme.primaryColor,
-            ),
-          ),
-          ListTile(
-            leading: Icon(Icons.mail_outline, color: theme.primaryColor),
-            title: Text(
-              'Contact Us',
-              style: TextStyle(color: theme.colorScheme.onSurface),
-            ),
-            trailing: Icon(
+            leading: const Icon(Icons.mail_outline, color: kAccent),
+            title: const Text('Contact Us', style: TextStyle(color: kText)),
+            trailing: const Icon(
               Icons.arrow_forward_ios,
-              color: theme.colorScheme.onSurfaceVariant,
+              color: kTextMuted,
               size: 16,
             ),
-            onTap: () {},
+            onTap: _showContactDialog,
           ),
         ],
       ),
@@ -3625,31 +3655,26 @@ class UserAboutPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(title: const Text('About App')),
-      body: Padding(
-        padding: const EdgeInsets.all(24.0),
+      body: const Padding(
+        padding: EdgeInsets.all(24.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(Icons.radar, color: theme.primaryColor, size: 60),
-            const SizedBox(height: 20),
+            Icon(Icons.radar, color: kAccent, size: 60),
+            SizedBox(height: 20),
             Text(
               'Smart Curb is an intelligent IoT parking sensing application designed to monitor space availability and manage vehicles for individual users.',
-              style: TextStyle(
-                color: theme.colorScheme.onSurfaceVariant,
-                height: 1.5,
-                fontSize: 16,
-              ),
+              style: TextStyle(color: kTextMuted, height: 1.5, fontSize: 16),
             ),
-            const SizedBox(height: 30),
-            Divider(color: theme.dividerColor),
-            const SizedBox(height: 10),
+            SizedBox(height: 30),
+            Divider(color: kDivider),
+            SizedBox(height: 10),
             Text(
               'Version: 1.0.0 (Beta)',
               style: TextStyle(
-                color: theme.primaryColor,
+                color: kAccent,
                 fontWeight: FontWeight.bold,
                 fontSize: 14,
               ),
@@ -3667,10 +3692,7 @@ void showErrorSnackBar(BuildContext context, String message) {
     SnackBar(
       content: Text(
         message,
-        style: const TextStyle(
-          color: Colors.white,
-          fontWeight: FontWeight.bold,
-        ),
+        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
       ),
       backgroundColor: Colors.redAccent,
     ),
