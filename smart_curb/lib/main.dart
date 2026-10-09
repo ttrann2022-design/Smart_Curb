@@ -15,6 +15,7 @@ import 'package:geolocator/geolocator.dart' as geo;
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:maplibre_gl/maplibre_gl.dart';
+import 'package:pointer_interceptor/pointer_interceptor.dart';
 
 import 'firebase_options.dart';
 
@@ -23,6 +24,7 @@ void main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+  await CampusPathfinder.load(); // campus walking network for A*
   runApp(const MyApp());
 }
 
@@ -45,6 +47,7 @@ const Color kRed = Color(0xFFF2694C); // c.busy
 const Color kNavBg = Color(0xFF232B15); // c.navBg
 const Color kNavText = Color(0xFFA5A399); // c.navText
 const Color kDev = Colors.cyanAccent;
+const Color kDevBlue = Color(0xFF3D8BFF); // dev "Click to move" toggle
 
 /// Dashboard corner radius (5–6px everywhere).
 const double kRadius = 6;
@@ -1125,8 +1128,52 @@ class _MinHeap {
 }
 
 class CampusPathfinder {
-  /// Walkway nodes. The map key IS the id, so ids can never mismatch.
-  static final Map<String, LatLng> nodes = {
+  /// Where each parking lot is (lots are not graph nodes; like buildings,
+  /// they are snapped onto the nearest walkway when routing).
+  static const Map<String, LatLng> lotPositions = {
+    'lot12': LatLng(26.373262, -80.106806),
+    'lot14': LatLng(26.373005, -80.099683),
+    'lot07': LatLng(26.373999, -80.105842),
+    'lot06': LatLng(26.374013, -80.104280),
+  };
+
+  /// True once the full OpenStreetMap walkway network has been loaded.
+  static bool usingOsmGraph = false;
+
+  /// Loads the campus walking network (every sidewalk, footpath, crossing,
+  /// campus road and parking aisle from OpenStreetMap) from
+  /// assets/campus_walkways.json. Format: `nodes` = flat [lat, lon, ...],
+  /// `edges` = flat [nodeIndex, nodeIndex, ...]. If it can't be read, the
+  /// small built-in graph below stays in use.
+  static Future<void> load() async {
+    try {
+      final raw = await rootBundle.loadString('assets/campus_walkways.json');
+      final json = jsonDecode(raw) as Map<String, dynamic>;
+      final n = (json['nodes'] as List).cast<num>();
+      final e = (json['edges'] as List).cast<num>();
+      final newNodes = <String, LatLng>{
+        for (var i = 0; i < n.length ~/ 2; i++)
+          'n$i': LatLng(n[2 * i].toDouble(), n[2 * i + 1].toDouble()),
+      };
+      final newEdges = <List<String>>[
+        for (var i = 0; i < e.length ~/ 2; i++)
+          ['n${e[2 * i].toInt()}', 'n${e[2 * i + 1].toInt()}'],
+      ];
+      if (newNodes.isEmpty || newEdges.isEmpty) return;
+      nodes = newNodes;
+      edges = newEdges;
+      _adj = _buildAdjacency();
+      _cache.clear();
+      _snapCache.clear();
+      usingOsmGraph = true;
+    } catch (err) {
+      debugPrint('[walkways] using the built-in graph: $err');
+    }
+  }
+
+  /// Walkway nodes. Starts as the small hand-made graph around the first
+  /// lots and buildings; [load] replaces it with the full campus network.
+  static Map<String, LatLng> nodes = {
     'lot12': const LatLng(26.373262, -80.106806),
     'lot14': const LatLng(26.373005, -80.099683),
     'lot07': const LatLng(26.373999, -80.105842),
@@ -1143,7 +1190,7 @@ class CampusPathfinder {
 
   /// Walkways, listed once each. They are always two-way, so a one-sided
   /// neighbor list can no longer break the graph.
-  static const List<List<String>> edges = [
+  static List<List<String>> edges = [
     ['lot12', 'ed47_west'],
     ['lot07', 'ed47_west'],
     ['ed47', 'ed47_west'],
@@ -1159,7 +1206,7 @@ class CampusPathfinder {
     ['bc71_east', 'lot14'],
   ];
 
-  static final Map<String, Map<String, double>> _adj = _buildAdjacency();
+  static Map<String, Map<String, double>> _adj = _buildAdjacency();
 
   static Map<String, Map<String, double>> _buildAdjacency() {
     final adj = <String, Map<String, double>>{};
@@ -1214,19 +1261,28 @@ class CampusPathfinder {
     return best;
   }
 
+  /// Lots and buildings never move, so where each one joins the network is
+  /// worked out once (there are thousands of walkway segments to check).
+  static final Map<String, _GraphSnap> _snapCache = {};
+
   /// Projects p onto the nearest walkway segment (not just nearest node),
   /// so start/goal points between nodes route correctly.
   static _GraphSnap _snapToGraph(LatLng p) {
-    _GraphSnap? best;
-    for (final e in edges) {
-      final pa = nodes[e[0]];
-      final pb = nodes[e[1]];
-      if (pa == null || pb == null) continue;
-      final q = Geo.lerp(pa, pb, Geo.projectT(p, pa, pb));
-      final d = Geo.meters(p, q);
-      if (best == null || d < best.dist) best = _GraphSnap(e[0], e[1], q, d);
-    }
-    return best!;
+    // Walking reroutes start from live GPS points (each one new), so keep the
+    // cache from growing forever.
+    if (_snapCache.length > 500) _snapCache.clear();
+    return _snapCache.putIfAbsent('${p.latitude},${p.longitude}', () {
+      _GraphSnap? best;
+      for (final e in edges) {
+        final pa = nodes[e[0]];
+        final pb = nodes[e[1]];
+        if (pa == null || pb == null) continue;
+        final q = Geo.lerp(pa, pb, Geo.projectT(p, pa, pb));
+        final d = Geo.meters(p, q);
+        if (best == null || d < best.dist) best = _GraphSnap(e[0], e[1], q, d);
+      }
+      return best!;
+    });
   }
 
   static List<LatLng> findPath(LatLng start, LatLng goal) {
@@ -1450,13 +1506,19 @@ class _FauMapScreenState extends State<FauMapScreen> {
 
   // ---- camera tuning ----
   static const double _overviewZoom = 16.0;
-  static const double _overviewTilt = 50.0;
+  // Performance: the steeper the tilt, the more of the horizon is visible,
+  // and the more distant 3D buildings MapLibre has to load and draw. Near
+  // 60° it extrudes most of Boca Raton, which drops frames. 45° keeps the 3D
+  // look with far fewer buildings on screen.
+  static const double _overviewTilt = 45.0;
+  /// Tilting further by hand eases back to this when you let go.
+  static const double _maxTilt = 50.0;
   // Turn-by-turn camera, tuned to feel like Apple / Google Maps: course-up,
   // close-in street-level zoom, arrow in the lower part of the screen.
   // (Max map zoom is 20, see minMaxZoomPreference.)
   static const double _navZoom3D = 19.5;
   static const double _navZoom2D = 18.0;
-  static const double _navTilt = 55.0;
+  static const double _navTilt = 45.0;
 
   /// Arrow sits this far down the map (0 = top, 1 = bottom).
   static const double _navPuckY = 0.72;
@@ -1473,8 +1535,12 @@ class _FauMapScreenState extends State<FauMapScreen> {
 
   // ---- campus geometry ----
   static const LatLng _campusEntrance = LatLng(26.3685, -80.1020);
+  // Campus box: the map can't be panned outside it, and inside it counts as
+  // "on campus". The north edge sits just past NW Spanish River Blvd, so the
+  // map starts counting at its traffic lights coming in from I-95 (I-95 ramp
+  // lights ~26.3873, the Airport Rd and FAU Blvd 4-way lights ~26.3861-66).
   static const LatLng _sw = LatLng(26.3630, -80.1170);
-  static const LatLng _ne = LatLng(26.3860, -80.0890);
+  static const LatLng _ne = LatLng(26.3880, -80.0890);
   static const LatLng _fauCenter = LatLng(26.3745, -80.1030);
   static final CameraTargetBounds _cameraBounds =
       CameraTargetBounds(LatLngBounds(southwest: _sw, northeast: _ne));
@@ -1487,6 +1553,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
 
   // ---- map source / layer ids ----
   static const String _srcRoute = 'sc-route';
+  static const String _srcWalk = 'sc-walk';
   static const String _srcLots = 'sc-lots';
   static const String _srcBuildings = 'sc-buildings';
   static const String _srcPuck = 'sc-puck';
@@ -1495,30 +1562,361 @@ class _FauMapScreenState extends State<FauMapScreen> {
   static const List<String> _fonts = ['Noto Sans Regular'];
 
   static final Map<String, LatLng> _lotPositions = {
-    'lot12': CampusPathfinder.nodes['lot12']!,
-    'lot14': CampusPathfinder.nodes['lot14']!,
-    'lot07': CampusPathfinder.nodes['lot07']!,
-    'lot06': CampusPathfinder.nodes['lot06']!,
+    ...CampusPathfinder.lotPositions,
   };
 
+  /// Every FAU Boca Raton building that has an official building code, from
+  /// OpenStreetMap (© OpenStreetMap contributors, ODbL), pulled Oct 2026.
+  /// Position = centre of the building's outline, so the dots line up with
+  /// the buildings drawn on the map. Parking garages (PK-) are left out.
   static const List<FauBuilding> _campusBuildings = [
     FauBuilding(
-      id: 'ed47',
-      code: 'ED-47',
-      name: 'College of Education (ED-47)',
-      position: LatLng(26.373358, -80.105828),
+      id: 'ad10',
+      code: 'AD-10',
+      name: 'Kenneth R. Williams Administration (AD-10)',
+      position: LatLng(26.371848, -80.101591),
+    ),
+    FauBuilding(
+      id: 'ag39',
+      code: 'AG-39',
+      name: 'Ritter Art Gallery (AG-39)',
+      position: LatLng(26.371550, -80.103648),
+    ),
+    FauBuilding(
+      id: 'ah52',
+      code: 'AH-52',
+      name: 'Dorothy F. Schmidt Center for Arts and Humanities (AH-52)',
+      position: LatLng(26.369743, -80.101365),
+    ),
+    FauBuilding(
+      id: 'al9',
+      code: 'AL-9',
+      name: 'Dorothy F. Schmidt Arts and Letters (AL-9)',
+      position: LatLng(26.369474, -80.102208),
+    ),
+    FauBuilding(
+      id: 'au31a',
+      code: 'AU-31A',
+      name: 'Carole & Barry Kaye Performing Arts Auditorium (AU-31A)',
+      position: LatLng(26.370302, -80.105596),
+    ),
+    FauBuilding(
+      id: 'az79',
+      code: 'AZ-79',
+      name: 'Memory & Wellness Center, Louis & Anne Green (AZ-79)',
+      position: LatLng(26.379654, -80.097165),
+    ),
+    FauBuilding(
+      id: 'bb48',
+      code: 'BB-48',
+      name: 'Baseball Stadium (BB-48)',
+      position: LatLng(26.370815, -80.109459),
     ),
     FauBuilding(
       id: 'bc71',
       code: 'BC-71',
       name: 'Charles E. Schmidt Biomedical Science Center (BC-71)',
-      position: LatLng(26.373263, -80.100446),
+      position: LatLng(26.373296, -80.100442),
+    ),
+    FauBuilding(
+      id: 'bk76',
+      code: 'BK-76',
+      name: 'Bookstore (BK-76)',
+      position: LatLng(26.370663, -80.103727),
+    ),
+    FauBuilding(
+      id: 'bs12',
+      code: 'BS-12',
+      name: 'Behavioral Sciences (BS-12)',
+      position: LatLng(26.372992, -80.102838),
+    ),
+    FauBuilding(
+      id: 'bu86',
+      code: 'BU-86',
+      name: 'College of Business (BU-86)',
+      position: LatLng(26.373213, -80.104676),
+    ),
+    FauBuilding(
+      id: 'ce31d',
+      code: 'CE-31D',
+      name: 'Continuing Education Hall (CE-31D)',
+      position: LatLng(26.370530, -80.106951),
     ),
     FauBuilding(
       id: 'cm22',
       code: 'CM-22',
       name: 'Computer Center (CM-22)',
-      position: LatLng(26.372528, -80.104044),
+      position: LatLng(26.372498, -80.104066),
+    ),
+    FauBuilding(
+      id: 'co69',
+      code: 'CO-69',
+      name: 'Campus Operations & Police (CO-69)',
+      position: LatLng(26.378060, -80.097316),
+    ),
+    FauBuilding(
+      id: 'cr31e',
+      code: 'CR-31E',
+      name: 'Student Activities Center (CR-31E)',
+      position: LatLng(26.369951, -80.106673),
+    ),
+    FauBuilding(
+      id: 'cu97',
+      code: 'CU-97',
+      name: 'Culture & Society Building (CU-97)',
+      position: LatLng(26.368409, -80.101906),
+    ),
+    FauBuilding(
+      id: 'dm6',
+      code: 'DM-6',
+      name: 'Nations North Residence Hall - Algonquin (DM-6)',
+      position: LatLng(26.369466, -80.104897),
+    ),
+    FauBuilding(
+      id: 'dp49',
+      code: 'DP-49',
+      name: 'Gladys Davis Pavilion (DP-49)',
+      position: LatLng(26.372508, -80.107069),
+    ),
+    FauBuilding(
+      id: 'ds87',
+      code: 'DS-87',
+      name: 'Desantis Pavilion (DS-87)',
+      position: LatLng(26.373398, -80.104460),
+    ),
+    FauBuilding(
+      id: 'ed47',
+      code: 'ED-47',
+      name: 'College of Education (ED-47)',
+      position: LatLng(26.373268, -80.105829),
+    ),
+    FauBuilding(
+      id: 'ee96',
+      code: 'EE-96',
+      name: 'Engineering & Computer Science (EE-96)',
+      position: LatLng(26.372883, -80.098079),
+    ),
+    FauBuilding(
+      id: 'eg36',
+      code: 'EG-36',
+      name: 'College of Engineering West (EG-36)',
+      position: LatLng(26.370577, -80.104460),
+    ),
+    FauBuilding(
+      id: 'fa94',
+      code: 'FA-94',
+      name: 'Marleen & Harold Forkas Alumni Center (FA-94)',
+      position: LatLng(26.374215, -80.103465),
+    ),
+    FauBuilding(
+      id: 'fl24',
+      code: 'FL-24',
+      name: 'Fleming Hall (FL-24)',
+      position: LatLng(26.373073, -80.103857),
+    ),
+    FauBuilding(
+      id: 'fw23',
+      code: 'FW-23',
+      name: 'Fleming West (FW-23)',
+      position: LatLng(26.373242, -80.104207),
+    ),
+    FauBuilding(
+      id: 'gn73',
+      code: 'GN-73',
+      name: 'General Classroom North (GN-73)',
+      position: LatLng(26.373214, -80.102372),
+    ),
+    FauBuilding(
+      id: 'gp92',
+      code: 'GP-92',
+      name: 'Glades Park Towers (GP-92)',
+      position: LatLng(26.367746, -80.104263),
+    ),
+    FauBuilding(
+      id: 'gs2',
+      code: 'GS-2',
+      name: 'General Classroom South (GS-2)',
+      position: LatLng(26.371073, -80.102823),
+    ),
+    FauBuilding(
+      id: 'gy38',
+      code: 'GY-38',
+      name: 'The Burrow Arena (GY-38)',
+      position: LatLng(26.372357, -80.109352),
+    ),
+    FauBuilding(
+      id: 'hp89',
+      code: 'HP-89',
+      name: 'Heritage Park Towers (HP-89)',
+      position: LatLng(26.369451, -80.103761),
+    ),
+    FauBuilding(
+      id: 'ir70',
+      code: 'IR-70',
+      name: 'Indian River Towers (IR-70)',
+      position: LatLng(26.368233, -80.103209),
+    ),
+    FauBuilding(
+      id: 'is4',
+      code: 'IS-4',
+      name: 'Instructional Services (IS-4)',
+      position: LatLng(26.371261, -80.103649),
+    ),
+    FauBuilding(
+      id: 'kh25',
+      code: 'KH-25',
+      name: 'Barry Kaye Hall (KH-25)',
+      position: LatLng(26.373115, -80.103473),
+    ),
+    FauBuilding(
+      id: 'll31c',
+      code: 'LL-31C',
+      name: 'Friedberg Lifelong Learning Center (LL-31C)',
+      position: LatLng(26.370811, -80.106865),
+    ),
+    FauBuilding(
+      id: 'lo31b',
+      code: 'LO-31B',
+      name: 'Live Oak Pavilion (LO-31B)',
+      position: LatLng(26.370781, -80.105759),
+    ),
+    FauBuilding(
+      id: 'ly3',
+      code: 'LY-3',
+      name: 'S E Wimberly Library (LY-3)',
+      position: LatLng(26.371845, -80.104117),
+    ),
+    FauBuilding(
+      id: 'ly3a',
+      code: 'LY-3A',
+      name: 'Hillel Jewish Life Center (LY-3A)',
+      position: LatLng(26.371831, -80.103370),
+    ),
+    FauBuilding(
+      id: 'nu84',
+      code: 'NU-84',
+      name: 'Christine E Lynn College of Nursing (NU-84)',
+      position: LatLng(26.370830, -80.100582),
+    ),
+    FauBuilding(
+      id: 'od93',
+      code: 'OD-93',
+      name: 'Office Depot Center for Executive Education (OD-93)',
+      position: LatLng(26.373414, -80.104990),
+    ),
+    FauBuilding(
+      id: 'pa51',
+      code: 'PA-51',
+      name: 'Dorothy F. Schmidt Performing Arts (PA-51)',
+      position: LatLng(26.368891, -80.101744),
+    ),
+    FauBuilding(
+      id: 'pg35',
+      code: 'PG-35',
+      name: 'Plant Growth Complex (PG-35)',
+      position: LatLng(26.373576, -80.103010),
+    ),
+    FauBuilding(
+      id: 'pr75',
+      code: 'PR-75',
+      name: 'Eleanor R. Baldwin House (PR-75)',
+      position: LatLng(26.370914, -80.095192),
+    ),
+    FauBuilding(
+      id: 'ps55',
+      code: 'PS-55',
+      name: 'Physical Science (PS-55)',
+      position: LatLng(26.372671, -80.101989),
+    ),
+    FauBuilding(
+      id: 'pw62',
+      code: 'PW-62',
+      name: 'B.P.W. Scholarship House (PW-62)',
+      position: LatLng(26.367102, -80.096201),
+    ),
+    FauBuilding(
+      id: 'rc91',
+      code: 'RC-91',
+      name: 'Recreation & Fitness Center (RC-91)',
+      position: LatLng(26.374130, -80.102294),
+    ),
+    FauBuilding(
+      id: 'rd01',
+      code: 'RD-01',
+      name: 'Innovation Centre 1 (RD-01)',
+      position: LatLng(26.385306, -80.097104),
+    ),
+    FauBuilding(
+      id: 'rd02',
+      code: 'RD-02',
+      name: 'Innovation Centre 2 (RD-02)',
+      position: LatLng(26.383796, -80.097171),
+    ),
+    FauBuilding(
+      id: 'sb68',
+      code: 'SB-68',
+      name: 'Softball Stadium (SB-68)',
+      position: LatLng(26.373551, -80.110084),
+    ),
+    FauBuilding(
+      id: 'sc1',
+      code: 'SC-1',
+      name: 'Sanson Life Science (SC-1)',
+      position: LatLng(26.372423, -80.102987),
+    ),
+    FauBuilding(
+      id: 'se43',
+      code: 'SE-43',
+      name: 'Science & Engineering (SE-43)',
+      position: LatLng(26.373294, -80.101803),
+    ),
+    FauBuilding(
+      id: 'sh46',
+      code: 'SH-46',
+      name: 'Student Housing Services (SH-46)',
+      position: LatLng(26.368800, -80.104836),
+    ),
+    FauBuilding(
+      id: 'so44',
+      code: 'SO-44',
+      name: 'Social Sciences (SO-44)',
+      position: LatLng(26.370683, -80.101659),
+    ),
+    FauBuilding(
+      id: 'ss8',
+      code: 'SS-8',
+      name: 'Student Services (SS-8)',
+      position: LatLng(26.370406, -80.103054),
+    ),
+    FauBuilding(
+      id: 'ss8w',
+      code: 'SS-8W',
+      name: 'Student Health Services (SS-8W)',
+      position: LatLng(26.370394, -80.103400),
+    ),
+    FauBuilding(
+      id: 'su80',
+      code: 'SU-80',
+      name: 'Student Support Services (SU-80)',
+      position: LatLng(26.369258, -80.105631),
+    ),
+    FauBuilding(
+      id: 'un31',
+      code: 'UN-31',
+      name: 'Student Union (UN-31)',
+      position: LatLng(26.370257, -80.106234),
+    ),
+    FauBuilding(
+      id: 'ut5',
+      code: 'UT-5',
+      name: 'Utilities (UT-5)',
+      position: LatLng(26.372408, -80.104928),
+    ),
+    FauBuilding(
+      id: 'va53',
+      code: 'VA-53',
+      name: 'Dorothy F. Schmidt Visual Arts (VA-53)',
+      position: LatLng(26.369090, -80.100889),
     ),
   ];
 
@@ -1639,6 +2037,28 @@ class _FauMapScreenState extends State<FauMapScreen> {
   // ---- modes ----
   bool _navTracking = false;
   bool _devMode = false;
+
+  /// Dev: when on, a map tap moves the location arrow there.
+  bool _clickToMove = false;
+
+  /// Last time a finger/mouse went down on one of our controls over the map.
+  /// On web the map also receives that click, so map clicks right after it
+  /// are ignored (no arrow move or building pick from pressing a button).
+  DateTime _lastOverlayPressAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// Wraps a control that sits on top of the map so presses on it never
+  /// "click through" to the map underneath. On web the map is a separate
+  /// browser element, so without PointerInterceptor it also receives the
+  /// mouse: scrolling the suggestion list zoomed the map and a quick double
+  /// click on the guidance card double-click-zoomed it, which (correctly,
+  /// from the map's point of view) switched focus mode off. On phones it
+  /// does nothing extra.
+  Widget _tapShield(Widget child) => PointerInterceptor(
+        child: Listener(
+          onPointerDown: (_) => _lastOverlayPressAt = DateTime.now(),
+          child: child,
+        ),
+      );
   bool _devLocationOverride = false;
   bool _isSimulating = false;
 
@@ -1678,6 +2098,8 @@ class _FauMapScreenState extends State<FauMapScreen> {
   void dispose() {
     _simTimer?.cancel();
     _glideTimer?.cancel();
+    _walkRevealTimer?.cancel();
+    _walkSimTimer?.cancel();
     _positionSub?.cancel();
     _compassSub?.cancel();
     _parkingSub?.cancel();
@@ -1790,21 +2212,22 @@ class _FauMapScreenState extends State<FauMapScreen> {
               40, '#D1C8B6',
               90, '#BFB5A1',
             ],
-            // Buildings "grow" out of the ground as you zoom in.
+            // Buildings "grow" out of the ground as you zoom in. No 3D below
+            // zoom 15, where it costs a lot and adds little.
             fillExtrusionHeight: [
               'interpolate', ['linear'], ['zoom'],
-              14.5, 0,
-              15.5, height,
+              15, 0,
+              16, height,
             ],
             fillExtrusionBase: [
               'interpolate', ['linear'], ['zoom'],
-              14.5, 0,
-              15.5, base,
+              15, 0,
+              16, base,
             ],
             fillExtrusionOpacity: 0.9,
           ),
           sourceLayer: 'building',
-          minzoom: 14.5,
+          minzoom: 15,
           belowLayerId: firstLabel,
           enableInteraction: false,
         ),
@@ -1826,6 +2249,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
     // ---- our GeoJSON sources (start empty, filled by _pushAll) ----
     for (final id in [
       _srcRoute,
+      _srcWalk,
       _srcLots,
       _srcBuildings,
       _srcPuck,
@@ -1867,19 +2291,67 @@ class _FauMapScreenState extends State<FauMapScreen> {
       ),
     );
 
+    // ---- walking line (lot -> building), shown once you've parked ----
+    // Footstep-style dark dots over a soft accent glow, the usual "walk this
+    // part" look, clearly different from the solid driving route.
+    await safe(
+      'walk glow',
+      () => m.addLineLayer(
+        _srcWalk,
+        'sc-walk-glow',
+        LineLayerProperties(
+          lineColor: _hex(kAccent),
+          lineWidth: 11.0,
+          lineOpacity: 0.35,
+          lineBlur: 2.0,
+          lineCap: 'round',
+          lineJoin: 'round',
+        ),
+        belowLayerId: routeBelow,
+        enableInteraction: false,
+      ),
+    );
+    await safe(
+      'walk dots',
+      () => m.addLineLayer(
+        _srcWalk,
+        'sc-walk-dots',
+        LineLayerProperties(
+          lineColor: _hex(kOnAccent),
+          lineWidth: 5.0,
+          lineDasharray: const [0, 1.8], // zero-length dashes + round caps = dots
+          lineCap: 'round',
+          lineJoin: 'round',
+        ),
+        belowLayerId: routeBelow,
+        enableInteraction: false,
+      ),
+    );
 
     // ---- building markers ----
+    // ~60 buildings: dots stay small when zoomed out and grow as you zoom
+    // in; code labels only appear once zoomed in, and labels that would
+    // overlap are hidden. The selected building is always big and labelled.
     const isSelected = ['==', ['get', 'selected'], true];
+    const notSelected = ['!=', ['get', 'selected'], true];
     await safe(
       'building dots',
       () => m.addCircleLayer(
         _srcBuildings,
         'sc-buildings-dot',
         CircleLayerProperties(
-          circleRadius: ['case', isSelected, 8, 5],
+          circleRadius: [
+            'interpolate', ['linear'], ['zoom'],
+            15, ['case', isSelected, 7, 2.5],
+            18, ['case', isSelected, 9, 5],
+          ],
           circleColor: ['case', isSelected, _hex(kAccent), _hex(kDev)],
           circleStrokeColor: '#000000',
-          circleStrokeWidth: 2,
+          circleStrokeWidth: [
+            'interpolate', ['linear'], ['zoom'],
+            15, ['case', isSelected, 2, 1],
+            18, 2,
+          ],
         ),
         enableInteraction: false,
       ),
@@ -1892,8 +2364,29 @@ class _FauMapScreenState extends State<FauMapScreen> {
         SymbolLayerProperties(
           textField: ['get', 'code'],
           textFont: _fonts,
-          textSize: ['case', isSelected, 14, 11],
-          textColor: ['case', isSelected, _hex(kAccent), '#FFFFFF'],
+          textSize: 11,
+          textColor: '#FFFFFF',
+          textHaloColor: '#000000',
+          textHaloWidth: 1.6,
+          textAnchor: 'top',
+          textOffset: [0, 0.9],
+          textAllowOverlap: false, // hide labels that would collide
+        ),
+        filter: notSelected,
+        minzoom: 16.3,
+        enableInteraction: false,
+      ),
+    );
+    await safe(
+      'selected building label',
+      () => m.addSymbolLayer(
+        _srcBuildings,
+        'sc-buildings-label-selected',
+        SymbolLayerProperties(
+          textField: ['get', 'code'],
+          textFont: _fonts,
+          textSize: 14,
+          textColor: _hex(kAccent),
           textHaloColor: '#000000',
           textHaloWidth: 1.6,
           textAnchor: 'top',
@@ -1901,6 +2394,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
           textAllowOverlap: true,
           textIgnorePlacement: true,
         ),
+        filter: isSelected,
         enableInteraction: false,
       ),
     );
@@ -1988,6 +2482,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
   // ==========================================
 
   void _pushAll() {
+    _walkShownFor = null; // a (re)loaded style starts with empty sources
     _pushOverlays();
     _pushRoute();
     _pushPuck();
@@ -2045,6 +2540,98 @@ class _FauMapScreenState extends State<FauMapScreen> {
               },
             ]),
     );
+    _pushWalk();
+  }
+
+  // ---- walking line ----
+
+  static const Duration _walkRevealTime = Duration(milliseconds: 700);
+  Timer? _walkRevealTimer;
+  String? _walkShownFor; // lot|building currently drawn (avoids re-animating)
+
+  Map<String, dynamic> _lineFeature(List<LatLng> pts) => {
+        'type': 'Feature',
+        'properties': <String, dynamic>{},
+        'geometry': {
+          'type': 'LineString',
+          'coordinates': [for (final p in pts) _coord(p)],
+        },
+      };
+
+  /// The first [meters] of [pts] (the line "drawing itself" from the lot).
+  static List<LatLng> _pathPrefix(List<LatLng> pts, double meters) {
+    final out = <LatLng>[pts.first];
+    var left = meters;
+    for (var i = 0; i < pts.length - 1; i++) {
+      final d = Geo.meters(pts[i], pts[i + 1]);
+      if (d >= left) {
+        out.add(Geo.lerp(pts[i], pts[i + 1], d == 0 ? 0 : left / d));
+        return out;
+      }
+      left -= d;
+      out.add(pts[i + 1]);
+    }
+    return out;
+  }
+
+  /// Shows the A* walking path from the lot to the building only after
+  /// arriving at the lot; hidden the rest of the time. When it first appears
+  /// it draws itself out from the lot toward the building.
+  void _pushWalk() {
+    final walk = _walkResult;
+    final building = _selectedBuilding;
+    final show = _arrived &&
+        !_walkDone && // already walked to the building
+        walk != null &&
+        building != null &&
+        walk.pathPoints.length >= 2;
+
+    if (!show) {
+      _walkPath = const [];
+      if (_walkShownFor != null || _walkRevealTimer != null) {
+        _walkRevealTimer?.cancel();
+        _walkRevealTimer = null;
+        _walkShownFor = null;
+        _sync.push(_srcWalk, _fc(const <Map<String, dynamic>>[]));
+      }
+      return;
+    }
+
+    final key = '${walk.lotId}|${building.id}';
+    if (_walkShownFor == key) return; // already drawn (or drawing)
+    _walkShownFor = key;
+    // Start of the walk: lot -> building.
+    if (mounted) setState(() => _setWalkPath(walk.pathPoints));
+    _revealWalk(_walkPath);
+  }
+
+  /// Draws [pts] as the walking line, "drawing itself" from its start.
+  void _revealWalk(List<LatLng> pts) {
+    _walkRevealTimer?.cancel();
+    _walkRevealTimer = null;
+    if (pts.length < 2) return;
+    if (reduceMotion(context)) {
+      _sync.push(_srcWalk, _fc([_lineFeature(pts)]));
+      return;
+    }
+    final total = Geo.pathLength(pts);
+    final start = DateTime.now();
+    _walkRevealTimer = Timer.periodic(_glideFrame, (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      final t = (DateTime.now().difference(start).inMilliseconds /
+              _walkRevealTime.inMilliseconds)
+          .clamp(0.0, 1.0);
+      final eased = kEaseOut.transform(t);
+      final part = t >= 1 ? pts : _pathPrefix(pts, total * eased);
+      if (part.length >= 2) _sync.push(_srcWalk, _fc([_lineFeature(part)]));
+      if (t >= 1) {
+        timer.cancel();
+        _walkRevealTimer = null;
+      }
+    });
   }
 
   void _pushPuck() {
@@ -2079,9 +2666,31 @@ class _FauMapScreenState extends State<FauMapScreen> {
   /// Called for every camera change. In focus mode, a camera that isn't where
   /// the app put it means the user dragged, zoomed, rotated or tilted the map,
   /// so focus mode switches off and leaves the camera where they put it.
+  /// When the camera comes to rest after a gesture, ease any tilt steeper
+  /// than [_maxTilt] back to it (the plugin has no max-pitch setting), so the
+  /// map never sits at a horizon view that drops frames.
+  void _onCameraIdle() {
+    final m = _map;
+    final cam = m?.cameraPosition;
+    if (m == null || cam == null || !_styleReady) return;
+    if (DateTime.now().isBefore(_camAnimUntil)) return;
+    if (cam.tilt > _maxTilt + 0.5) {
+      _guard(() => m.animateCamera(
+            CameraUpdate.tiltTo(_maxTilt),
+            duration: const Duration(milliseconds: 350),
+          ));
+    }
+  }
+
+  /// Camera reports in a row that disagree with where the app put the camera.
+  int _camOffCount = 0;
+
   void _onCameraMove(CameraPosition cam) {
     if (!_navTracking) return;
-    if (DateTime.now().isBefore(_camAnimUntil)) return;
+    if (DateTime.now().isBefore(_camAnimUntil)) {
+      _camOffCount = 0;
+      return;
+    }
     final expected = _expectedCamTarget();
     if (expected == null) return;
 
@@ -2098,7 +2707,17 @@ class _FauMapScreenState extends State<FauMapScreen> {
     final positionOk = near(expected, _expectedCamBearing()) ||
         near(_cmdTarget, _cmdBearing) ||
         near(_prevCmdTarget, _prevCmdBearing);
-    if (zoomOrTilt || !positionOk) _setNavTracking(false, userGesture: true);
+    if (!zoomOrTilt && positionOk) {
+      _camOffCount = 0;
+      return;
+    }
+    // A real drag or zoom sends a stream of camera reports, so needing two
+    // in a row still reacts instantly but ignores a single stray report
+    // (e.g. one that arrives late on a phone).
+    if (++_camOffCount >= 2) {
+      _camOffCount = 0;
+      _setNavTracking(false, userGesture: true);
+    }
   }
 
   /// Direction the nav camera should face: exactly where the car's arrow
@@ -2321,6 +2940,8 @@ class _FauMapScreenState extends State<FauMapScreen> {
     _startGlide(loc); // moves the arrow (and nav camera) smoothly to the fix
 
     if (progress == _Progress.arrived) _onArrived();
+    // Parked and walking: follow the walking line (and reroute if needed).
+    if (_arrived) _trackWalk(loc, p.accuracy);
     if (progress == _Progress.offRoute &&
         p.accuracy <= _maxGpsAccuracyForReroute) {
       _maybeReroute();
@@ -2375,6 +2996,10 @@ class _FauMapScreenState extends State<FauMapScreen> {
       if (_glideFrameCount % 3 == 0 || t >= 1) _pushRoute(); // ~10 Hz
     }
     _pushPuck(); // the camera is already easing along on its own
+    // Walking: keep the walking line attached to the arrow (~10 Hz).
+    if (_walkActive && _glideFrameCount % 3 == 0) {
+      _drawWalkLine(pos);
+    }
 
     if (t >= 1) {
       _glideTimer?.cancel();
@@ -2636,6 +3261,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
       _routeSeg = 0;
       _distToRoute = 0;
       _arrived = false;
+      _walkDone = false;
       _displayRoute = List<LatLng>.of(road);
       _routeRemaining = _routeSuffix.first;
     });
@@ -2665,6 +3291,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
     _routeRemaining = 0;
     _distToRoute = 0;
     _arrived = false;
+    _walkDone = false;
   }
 
   _RouteProjection _project(LatLng p, int from, int to) {
@@ -2707,6 +3334,9 @@ class _FauMapScreenState extends State<FauMapScreen> {
 
   void _onArrived() {
     if (!mounted) return;
+    // Parked: clear the finished driving line and show the walk to the
+    // building (_pushRoute also pushes the walking line).
+    _pushRoute();
     final lotName = _liveLots[_routeLotId]?['name'] ?? 'the lot';
     final walk = _walkResult;
     final building = _selectedBuilding;
@@ -2768,10 +3398,25 @@ class _FauMapScreenState extends State<FauMapScreen> {
   // ==========================================
 
   void _onMapClick(math.Point<double> point, LatLng latLng) {
+    // A press on one of our buttons/cards also reaches the map on web;
+    // ignore that echo so buttons never move the arrow or pick a building.
+    if (DateTime.now().difference(_lastOverlayPressAt) <
+        const Duration(milliseconds: 600)) {
+      return;
+    }
     if (_devMode) _devTap.value = latLng;
 
+    // Dev mode: a tap anywhere just moves the arrow there. Routes, the
+    // walking line and the destination are left untouched.
+    if (_devMode && _clickToMove) {
+      _devMoveTo(latLng);
+      return;
+    }
+
+    // With ~60 buildings close together, a tap picks whichever building or
+    // lot is actually nearest (lots first on a tie), within reach.
     FauBuilding? nearest;
-    var nearestDist = 45.0; // meters
+    var nearestDist = 35.0; // meters
     for (final b in _campusBuildings) {
       final d = Geo.meters(latLng, b.position);
       if (d < nearestDist) {
@@ -2779,23 +3424,29 @@ class _FauMapScreenState extends State<FauMapScreen> {
         nearest = b;
       }
     }
-    if (nearest != null) {
-      _onBuildingSelected(nearest);
-      return;
-    }
 
+    Map<String, dynamic>? nearestLot;
+    var lotDist = 40.0; // meters
     for (final lot in _liveLots.values) {
-      if (Geo.meters(latLng, lot['position'] as LatLng) < 40) {
-        final free = (lot['capacity'] as int) - (lot['occupied'] as int);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('${lot['name']}: $free free of ${lot['capacity']}'),
-            duration: const Duration(seconds: 2),
-          ),
-        );
-        return;
+      final d = Geo.meters(latLng, lot['position'] as LatLng);
+      if (d < lotDist) {
+        lotDist = d;
+        nearestLot = lot;
       }
     }
+
+    if (nearestLot != null && (nearest == null || lotDist <= nearestDist)) {
+      final lot = nearestLot;
+      final free = (lot['capacity'] as int) - (lot['occupied'] as int);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${lot['name']}: $free free of ${lot['capacity']}'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+    if (nearest != null) _onBuildingSelected(nearest);
   }
 
   // ==========================================
@@ -2915,6 +3566,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
   }
 
   void _stopSimulation() {
+    _stopWalkSimulation(); // anything that stops the drive stops a walk too
     _simTimer?.cancel();
     _simTimer = null;
     if (mounted && _isSimulating) {
@@ -2923,9 +3575,319 @@ class _FauMapScreenState extends State<FauMapScreen> {
     }
   }
 
+  // ==========================================
+  // WALKING (lot -> building, after parking)
+  // ==========================================
+  // Works like the driving route: your position is matched to the walking
+  // line, the line shrinks behind you, and if you head off another way the
+  // line is recalculated (A*) from where you are. Live GPS and the dev
+  // "Simulate Walk" both go through this.
+
+  /// Off the walking line by more than this (for [_walkOffFixesToReroute]
+  /// fixes in a row) means you took another way. Phone GPS between buildings
+  /// often drifts 5–15 m, so a single stray fix doesn't trigger a reroute.
+  static const double _walkOffRouteMeters = 20;
+  static const int _walkOffFixesToReroute = 2;
+  static const Duration _walkRerouteCooldown = Duration(seconds: 4);
+
+  /// "You've arrived" when this little of the path is left, or when this
+  /// close to the building's centre (big buildings: you reach a door first).
+  static const double _walkArriveRemaining = 15;
+  static const double _walkArriveNearBuilding = 25;
+
+  /// The walking path being followed right now (replaced on reroute).
+  List<LatLng> _walkPath = const [];
+  List<double> _walkSuffix = const [];
+  int _walkPathSeg = 0;
+  int _walkOffCount = 0;
+  DateTime _lastWalkRerouteAt = DateTime.fromMillisecondsSinceEpoch(0);
+  bool _walkDone = false; // reached the building
+  double _walkRemaining = 0;
+
+  /// Parked, line showing, building not reached yet.
+  bool get _walkActive => _arrived && !_walkDone && _walkPath.length >= 2;
+
+  /// Must be called inside setState (or before a rebuild).
+  void _setWalkPath(List<LatLng> pts) {
+    _walkPath = pts;
+    _walkSuffix = _suffixLengths(pts);
+    _walkPathSeg = 0;
+    _walkOffCount = 0;
+    _walkRemaining = _walkSuffix.isEmpty ? 0 : _walkSuffix.first;
+  }
+
+  /// Nearest point on [path] (searching segments [from]..[to]) to [p].
+  static _RouteProjection _projectOnPath(
+    List<LatLng> path,
+    LatLng p,
+    int from,
+    int to,
+  ) {
+    var best = _RouteProjection(from, path[from], double.infinity);
+    for (var i = from; i <= to; i++) {
+      final a = path[i];
+      final b = path[i + 1];
+      final q = Geo.lerp(a, b, Geo.projectT(p, a, b));
+      final d = Geo.meters(p, q);
+      if (d < best.dist) best = _RouteProjection(i, q, d);
+    }
+    return best;
+  }
+
+  /// Redraws the walking line from [from] (the arrow) to the building.
+  void _drawWalkLine(LatLng from) {
+    if (!_walkActive || _walkRevealTimer != null) return;
+    _sync.push(
+      _srcWalk,
+      _fc([
+        _lineFeature([from, ..._walkPath.sublist(_walkPathSeg + 1)]),
+      ]),
+    );
+  }
+
+  /// Live GPS while walking: progress along the line, reroute if you leave
+  /// it, and "arrived" when you reach the building. [immediate] (dev-mode
+  /// tap moves) reroutes on the first off-line position, without waiting.
+  void _trackWalk(LatLng pos, double accuracy, {bool immediate = false}) {
+    final building = _selectedBuilding;
+    if (!_walkActive || building == null || _isWalkSim) return;
+
+    final proj = _projectOnPath(_walkPath, pos, 0, _walkPath.length - 2);
+    if (proj.dist > _walkOffRouteMeters) {
+      if (immediate) {
+        _rerouteWalk(pos);
+        return;
+      }
+      if (accuracy > _maxGpsAccuracyForReroute) return; // fix too fuzzy
+      _walkOffCount++;
+      if (_walkOffCount >= _walkOffFixesToReroute &&
+          DateTime.now().difference(_lastWalkRerouteAt) >
+              _walkRerouteCooldown) {
+        _rerouteWalk(pos);
+      }
+      return;
+    }
+
+    _walkOffCount = 0;
+    setState(() {
+      _walkPathSeg = proj.seg;
+      _walkRemaining = Geo.meters(proj.point, _walkPath[proj.seg + 1]) +
+          _walkSuffix[proj.seg + 1];
+    });
+    if (_walkRemaining <= _walkArriveRemaining ||
+        Geo.meters(pos, building.position) <= _walkArriveNearBuilding) {
+      _finishWalk();
+    }
+  }
+
+  /// You went another way: new A* walk from where you are to the building.
+  void _rerouteWalk(LatLng from) {
+    final building = _selectedBuilding;
+    if (building == null || !_arrived || _walkDone) return;
+    _lastWalkRerouteAt = DateTime.now();
+    final path = CampusPathfinder.findPath(from, building.position);
+    if (path.length < 2) return;
+    setState(() => _setWalkPath(path));
+    _revealWalk(path); // the new line draws itself out from you
+  }
+
+  /// Reached the building: hide the line and say so. [end] places the arrow
+  /// exactly at the end (simulation only; real GPS keeps its own position).
+  void _finishWalk({LatLng? end}) {
+    _stopWalkSimulation();
+    if (end != null) _stopGlide();
+    final building = _selectedBuilding;
+    setState(() {
+      if (end != null) {
+        _userPos = end;
+        _gpsStatus = 'Walk finished';
+      }
+      _walkDone = true;
+      _walkRemaining = 0;
+    });
+    _pushPuck();
+    _pushWalk(); // hides the line now that you're there
+    if (building != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("You've arrived at ${building.name}.")),
+      );
+    }
+  }
+
+  /// Dev mode: move the location arrow to [p] (a tapped point) and treat it
+  /// like a real GPS reading there, so routing can be tested:
+  ///  * driving, on the route  -> the route trims to start at the arrow
+  ///  * driving, off the route -> the driving route reroutes from there
+  ///  * at the lot             -> arrival (walking line appears)
+  ///  * walking, off the line  -> the walking line reroutes from there
+  ///  * near the building      -> "You've arrived"
+  /// Dev moves reroute straight away (no 2-reading wait or cooldown, which
+  /// only exist to filter real GPS drift). The destination is never changed.
+  /// Running simulations stop so the arrow stays where it was put; real GPS
+  /// stays ignored until dev mode is switched off.
+  void _devMoveTo(LatLng p) {
+    _stopSimulation(); // also stops a simulated walk
+    final from = _shownPos ?? _userPos;
+    _stopGlide();
+    setState(() {
+      _devLocationOverride = true;
+      _userPos = p;
+      if (from != null && Geo.meters(from, p) > 1) {
+        _heading = Geo.bearing(from, p); // face the way it moved
+      }
+      _gpsStatus = 'Dev location (tap the map to move)';
+    });
+
+    const moveTime = Duration(milliseconds: 450);
+    if (from == null || reduceMotion(context)) {
+      _pushPuck();
+      if (_navTracking) _jumpNavCamera(p);
+    } else {
+      // Quick glide from where the arrow was; the lines follow the arrow
+      // the same way they do for real GPS.
+      _shownPos = from;
+      _glideFrom = from;
+      _glideTo = p;
+      _glideStart = DateTime.now();
+      _glideDuration = moveTime;
+      _glideTimer = Timer.periodic(_glideFrame, (_) => _glideStep());
+      if (_navTracking) _easeNavCamera(p, moveTime);
+    }
+
+    _applyDevFix(p);
+  }
+
+  /// Runs a dev-moved position through the same route logic as a GPS fix.
+  void _applyDevFix(LatLng p) {
+    // Driving: progress along the route, arrival, or leaving it.
+    var progress = _Progress.none;
+    setState(() => progress = _updateRouteProgress(p));
+    _pushRoute();
+    if (progress == _Progress.arrived) {
+      _onArrived();
+    } else if (progress == _Progress.offRoute &&
+        !_isRouting &&
+        _selectedBuilding != null) {
+      _updateNavigationRoute(); // reroute the drive from the arrow, now
+    }
+
+    // Walking (after parking): progress, reroute or arrival.
+    if (_arrived) _trackWalk(p, 0, immediate: true);
+  }
+
+  // ---- DEV: simulated walk ----
+
+  /// Average adult walking pace: 1.4 m/s (about 5 km/h / 3.1 mph).
+  static const double _walkSpeedMps = 1.4;
+
+  /// Dev speed-up for the walk: real walking barely moves on screen (about
+  /// 7 px/s even fully zoomed in), so it can run faster for testing.
+  static const List<int> _walkSpeedSteps = [1, 3, 8];
+  int _walkSpeedIndex = 1; // start at 3x so the movement is easy to see
+  int get _walkSpeedMult => _walkSpeedSteps[_walkSpeedIndex];
+
+  void _cycleWalkSpeed() {
+    setState(() {
+      _walkSpeedIndex = (_walkSpeedIndex + 1) % _walkSpeedSteps.length;
+      if (_isWalkSim) _gpsStatus = 'Simulating walk ($_walkSpeedMult×)';
+    });
+  }
+
+  Timer? _walkSimTimer;
+  bool _isWalkSim = false;
+  int _walkTick = 0;
+
+  /// Walks the arrow along the current walking path at a normal pace,
+  /// through the same glide as GPS, so the focus-mode camera follows.
+  /// Resumes from where the arrow is; if it's off the path, the walk is
+  /// rerouted from there first.
+  void _toggleWalkSimulation() {
+    if (_isWalkSim) {
+      _stopWalkSimulation();
+      return;
+    }
+    if (!_walkActive) return;
+
+    var start = _walkPath.first;
+    final here = _userPos;
+    if (here != null) {
+      final proj = _projectOnPath(_walkPath, here, 0, _walkPath.length - 2);
+      if (proj.dist > _walkOffRouteMeters) {
+        _rerouteWalk(here); // start the walk from where you actually are
+        start = _walkPath.first;
+      } else {
+        _walkPathSeg = proj.seg;
+        start = proj.point;
+      }
+    }
+
+    _stopGlide();
+    _walkTick = 0;
+    setState(() {
+      _isWalkSim = true;
+      _devLocationOverride = true; // ignore real GPS while walking
+      _userPos = start;
+      _heading = Geo.bearing(start, _walkPath[_walkPathSeg + 1]);
+      _gpsStatus = 'Simulating walk ($_walkSpeedMult×)';
+    });
+    _pushPuck();
+    _walkSimTimer = Timer.periodic(_simTick, (_) => _walkStep());
+  }
+
+  void _walkStep() {
+    final pts = _walkPath;
+    if (!mounted || !_walkActive) {
+      _stopWalkSimulation();
+      return;
+    }
+    var cur = _userPos ?? pts.first;
+    var seg = _walkPathSeg;
+    var budget =
+        _walkSpeedMps * _walkSpeedMult * _simTick.inMilliseconds / 1000;
+
+    while (seg < pts.length - 1) {
+      final next = pts[seg + 1];
+      final d = Geo.meters(cur, next);
+      if (d > budget) {
+        cur = Geo.lerp(cur, next, budget / d);
+        break;
+      }
+      budget -= d;
+      cur = next;
+      seg++;
+    }
+
+    if (seg >= pts.length - 1) {
+      _finishWalk(end: pts.last);
+      return;
+    }
+
+    _walkTick++;
+    _userPos = cur;
+    _walkPathSeg = seg;
+    final next = pts[seg + 1];
+    // Face the way you're walking (skip tiny bits of path that jitter).
+    if (Geo.meters(cur, next) > 0.3) _heading = Geo.bearing(cur, next);
+    _walkRemaining = Geo.meters(cur, next) + _walkSuffix[seg + 1];
+
+    // A "fix" every 0.5 s through the glide: smooth arrow + camera, and the
+    // glide keeps the line attached to the arrow.
+    if (_walkTick % 10 == 1) _startGlide(cur);
+    if (_walkTick % 5 == 0) setState(() {}); // refresh the countdown
+  }
+
+  void _stopWalkSimulation() {
+    _walkSimTimer?.cancel();
+    _walkSimTimer = null;
+    if (mounted && _isWalkSim) setState(() => _isWalkSim = false);
+  }
+
   void _toggleDevMode() {
     final turningOff = _devMode;
-    setState(() => _devMode = !_devMode);
+    setState(() {
+      _devMode = !_devMode;
+      if (turningOff) _clickToMove = false; // always starts off
+    });
     if (turningOff) {
       _stopSimulation();
       _devTap.value = null;
@@ -3073,7 +4035,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
             ),
           ),
           if (_devMode) _buildDevTapBadge(),
-          if (_devMode && _selectedBuilding != null)
+          if (_devMode)
             _buildDevControls(onCampus, bottomInset),
           _buildAttribution(bottomInset),
           _buildGuidanceCard(onCampus, bottomInset),
@@ -3121,6 +4083,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
         myLocationEnabled: false,
         trackCameraPosition: true, // needed for onCameraMove
         onCameraMove: _onCameraMove,
+        onCameraIdle: _onCameraIdle,
       ),
     );
   }
@@ -3158,7 +4121,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
       // On web/desktop a TextField unfocuses on any mouse-down outside it,
       // which removed the list before a suggestion's tap could land. The tap
       // region makes the list count as part of the field.
-      child: TextFieldTapRegion(
+      child: _tapShield(TextFieldTapRegion(
         // Slides down into place when the map opens.
         child: FadeSlideIn(
         offsetY: -14,
@@ -3293,7 +4256,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
         ],
       ),
       ),
-      ),
+      )),
     );
   }
 
@@ -3364,7 +4327,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
         child: ValueListenableBuilder<LatLng?>(
           valueListenable: _devTap,
           builder: (context, tap, _) {
-            return GestureDetector(
+            return _tapShield(GestureDetector(
               onTap: () {
                 if (tap == null) return;
                 final str =
@@ -3409,7 +4372,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
                   ],
                 ),
               ),
-            );
+            ));
           },
         ),
       ),
@@ -3429,13 +4392,59 @@ class _FauMapScreenState extends State<FauMapScreen> {
 
   Widget _buildDevControls(bool onCampus, double bottomInset) {
     final canSimulate = onCampus && _fullRoute.length >= 2 && !_arrived;
+    // Parked, walking line showing, and not yet walked to the building.
+    final canWalk = _walkActive && !_isSimulating;
     return Positioned(
       right: 20,
       bottom: 105 + bottomInset,
-      child: Column(
+      child: _tapShield(Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
+          // Blue toggle: tap-to-move the location arrow only while ON.
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: PressScale(
+              child: AnimatedContainer(
+                duration: kMotion,
+                curve: kEaseOut,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(kRadius),
+                  boxShadow: [
+                    BoxShadow(
+                      color: kDevBlue.withValues(alpha: _clickToMove ? 0.45 : 0),
+                      blurRadius: 14,
+                    ),
+                  ],
+                ),
+                child: ElevatedButton.icon(
+                  onPressed: () =>
+                      setState(() => _clickToMove = !_clickToMove),
+                  icon: Icon(
+                    _clickToMove ? Icons.touch_app : Icons.touch_app_outlined,
+                    size: 18,
+                  ),
+                  label: AnimatedText(
+                    'Click to move: ${_clickToMove ? 'ON' : 'OFF'}',
+                    style: GoogleFonts.archivo(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: _clickToMove ? Colors.white : kDevBlue,
+                    ),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _clickToMove ? kDevBlue : kCard,
+                    foregroundColor: _clickToMove ? Colors.white : kDevBlue,
+                    side: const BorderSide(color: kDevBlue),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 10,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
           // Buttons pop in/out, and Simulate <-> Stop morphs smoothly.
           AnimatedSwitcher(
             duration: kMotion,
@@ -3486,8 +4495,58 @@ class _FauMapScreenState extends State<FauMapScreen> {
                   )
                 : const SizedBox.shrink(key: ValueKey('no-sim')),
           ),
+          // After parking: walk the arrow to the building at a normal pace.
+          AnimatedSwitcher(
+            duration: kMotion,
+            transitionBuilder: _popTransition,
+            child: (canWalk || _isWalkSim)
+                ? Row(
+                    key: ValueKey('walk-$_isWalkSim'),
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Speed chip: tap to cycle 1x (real pace) / 3x / 8x.
+                      PressScale(
+                        child: OutlinedButton(
+                          onPressed: _cycleWalkSpeed,
+                          style: OutlinedButton.styleFrom(
+                            backgroundColor: kCard,
+                            foregroundColor: kText,
+                            minimumSize: const Size(0, 40),
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                          ),
+                          child: AnimatedText(
+                            '$_walkSpeedMult×',
+                            style: mono(fontSize: 13, color: kAccent),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      PressScale(
+                        child: ElevatedButton.icon(
+                          onPressed: _toggleWalkSimulation,
+                          icon: Icon(
+                            _isWalkSim ? Icons.pause : Icons.directions_walk,
+                            size: 20,
+                          ),
+                          label: Text(
+                            _isWalkSim ? 'Stop walk' : 'Simulate Walk',
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: _isWalkSim ? kRed : kAccent,
+                            foregroundColor: kOnAccent,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 10,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  )
+                : const SizedBox.shrink(key: ValueKey('no-walk')),
+          ),
         ],
-      ),
+      )),
     );
   }
 
@@ -3538,8 +4597,17 @@ class _FauMapScreenState extends State<FauMapScreen> {
           : (lot['capacity'] as int) - (lot['occupied'] as int);
       title = 'Best Lot: ${lot?['name'] ?? walk.lotId} ($free free)';
       final walkText = formatDistance(walk.totalDistanceMeters);
-      if (_arrived) {
-        subtitle = 'Arrived • $walkText walk to ${building.code}';
+      if (_isWalkSim) {
+        subtitle =
+            'Walking • ${formatDistance(_walkRemaining)} to ${building.code}';
+        phase = 'walking';
+      } else if (_walkDone) {
+        subtitle = "You've arrived at ${building.code}";
+        phase = 'walkdone';
+      } else if (_arrived) {
+        // Counts down as you walk (and updates after a reroute).
+        final left = _walkPath.length >= 2 ? formatDistance(_walkRemaining) : walkText;
+        subtitle = 'Arrived • $left walk to ${building.code}';
         phase = 'arrived';
       } else if (_fullRoute.isEmpty) {
         subtitle = 'Calculating driving route...';
@@ -3558,7 +4626,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
       bottom: 24 + bottomInset,
       left: 20,
       right: 20,
-      child: FadeSlideIn(
+      child: _tapShield(FadeSlideIn(
         index: 2,
         offsetY: 24,
         child: AnimatedContainer(
@@ -3658,7 +4726,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
             ],
           ),
         ),
-      ),
+      )),
     );
   }
 }
