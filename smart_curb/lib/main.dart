@@ -8,6 +8,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_compass/flutter_compass.dart';
@@ -1263,56 +1264,87 @@ class CampusPathfinder {
 
   /// Lots and buildings never move, so where each one joins the network is
   /// worked out once (there are thousands of walkway segments to check).
-  static final Map<String, _GraphSnap> _snapCache = {};
+  static final Map<String, List<_GraphSnap>> _snapCache = {};
 
-  /// Projects p onto the nearest walkway segment (not just nearest node),
-  /// so start/goal points between nodes route correctly.
-  static _GraphSnap _snapToGraph(LatLng p) {
+  /// How much farther than its nearest walkway the destination may still
+  /// join the network. Building positions are their centres, and the nearest
+  /// walkway can be on the far side (BU-86's is south, but Lot 6 is north, so
+  /// every route walked all the way around it). A building can be entered
+  /// from any side, so the goal joins every walkway in reach and A* picks
+  /// the side that is actually shorter; the walk from that walkway to the
+  /// centre is part of the route's cost. The start (a lot or the user's
+  /// position) still joins only its nearest walkway, or a route could skip
+  /// the network at both ends.
+  static const double _goalReach = 45.0; // meters
+
+  /// Projects p onto every walkway segment (not just nodes) within [reach]
+  /// of the nearest one, so points between nodes route correctly.
+  static List<_GraphSnap> _snapToGraph(LatLng p, {double reach = 0}) {
     // Walking reroutes start from live GPS points (each one new), so keep the
     // cache from growing forever.
     if (_snapCache.length > 500) _snapCache.clear();
-    return _snapCache.putIfAbsent('${p.latitude},${p.longitude}', () {
-      _GraphSnap? best;
+    return _snapCache.putIfAbsent('$reach|${p.latitude},${p.longitude}', () {
+      final all = <_GraphSnap>[];
+      var nearest = double.infinity;
       for (final e in edges) {
         final pa = nodes[e[0]];
         final pb = nodes[e[1]];
         if (pa == null || pb == null) continue;
         final q = Geo.lerp(pa, pb, Geo.projectT(p, pa, pb));
         final d = Geo.meters(p, q);
-        if (best == null || d < best.dist) best = _GraphSnap(e[0], e[1], q, d);
+        all.add(_GraphSnap(e[0], e[1], q, d));
+        if (d < nearest) nearest = d;
       }
-      return best!;
+      return [
+        for (final s in all)
+          if (s.dist <= nearest + reach) s,
+      ];
     });
   }
 
   static List<LatLng> findPath(LatLng start, LatLng goal) {
-    final s = _snapToGraph(start);
-    final g = _snapToGraph(goal);
+    final ss = _snapToGraph(start);
+    final gs = _snapToGraph(goal, reach: _goalReach);
     const sId = '__start';
     const gId = '__goal';
 
-    // Temporary edges connecting the snapped start/goal into the graph.
+    // Temporary nodes/edges joining start and goal to the walkways: the
+    // point itself, a node where it meets each walkway in reach, and that
+    // walkway's two ends.
     final extra = <String, Map<String, double>>{};
+    final pos = <String, LatLng>{sId: start, gId: goal};
     void link(String u, String v, double w) {
       extra.putIfAbsent(u, () => {})[v] = w;
       extra.putIfAbsent(v, () => {})[u] = w;
     }
 
-    link(sId, s.a, Geo.meters(s.point, nodes[s.a]!));
-    link(sId, s.b, Geo.meters(s.point, nodes[s.b]!));
-    link(gId, g.a, Geo.meters(g.point, nodes[g.a]!));
-    link(gId, g.b, Geo.meters(g.point, nodes[g.b]!));
-    if (s.a == g.a && s.b == g.b) {
-      link(sId, gId, Geo.meters(s.point, g.point)); // same walkway
+    void join(String end, String prefix, List<_GraphSnap> snaps) {
+      for (var i = 0; i < snaps.length; i++) {
+        final s = snaps[i];
+        final id = '$prefix$i';
+        pos[id] = s.point;
+        link(end, id, s.dist);
+        link(id, s.a, Geo.meters(s.point, nodes[s.a]!));
+        link(id, s.b, Geo.meters(s.point, nodes[s.b]!));
+      }
     }
 
-    LatLng posOf(String id) =>
-        id == sId ? s.point : (id == gId ? g.point : nodes[id]!);
+    join(sId, '__s', ss);
+    join(gId, '__g', gs);
+    for (var i = 0; i < ss.length; i++) {
+      for (var j = 0; j < gs.length; j++) {
+        if (ss[i].a == gs[j].a && ss[i].b == gs[j].b) {
+          link('__s$i', '__g$j', Geo.meters(ss[i].point, gs[j].point)); // same walkway
+        }
+      }
+    }
+
+    LatLng posOf(String id) => pos[id] ?? nodes[id]!;
 
     final gScore = <String, double>{sId: 0.0};
     final cameFrom = <String, String>{};
     final closed = <String>{};
-    final open = _MinHeap()..push(Geo.meters(s.point, g.point), sId);
+    final open = _MinHeap()..push(Geo.meters(start, goal), sId);
 
     while (open.isNotEmpty) {
       final current = open.pop();
@@ -1325,7 +1357,7 @@ class CampusPathfinder {
           c = cameFrom[c]!;
           ids.add(c);
         }
-        final raw = <LatLng>[start, ...ids.reversed.map(posOf), goal];
+        final raw = ids.reversed.map(posOf); // starts at start, ends at goal
         // Drop near-duplicate consecutive points.
         final out = <LatLng>[raw.first];
         for (final p in raw.skip(1)) {
@@ -1345,7 +1377,7 @@ class CampusPathfinder {
           if (tentative < (gScore[nId] ?? double.infinity)) {
             gScore[nId] = tentative;
             cameFrom[nId] = current;
-            open.push(tentative + Geo.meters(posOf(nId), g.point), nId);
+            open.push(tentative + Geo.meters(posOf(nId), goal), nId);
           }
         });
       }
@@ -1929,8 +1961,9 @@ class _FauMapScreenState extends State<FauMapScreen> {
   Offset? _pointerDownAt;
   double _camBearing = 0;
 
-  /// Height of the map area (below the app bar), set by the LayoutBuilder.
+  /// Size of the map area (below the app bar), set by the LayoutBuilder.
   double _mapHeight = 0;
+  double _mapWidth = 0;
 
   // ---- subscriptions ----
   StreamSubscription<geo.Position>? _positionSub;
@@ -2078,6 +2111,15 @@ class _FauMapScreenState extends State<FauMapScreen> {
   DateTime _lastRouteAt = DateTime.fromMillisecondsSinceEpoch(0);
 
   Map<String, Map<String, dynamic>> _liveLots = {};
+
+  /// Lot whose spot bubble is open over the map (tap a lot to show it).
+  String? _openLotId;
+
+  /// Where that lot's dot is on screen, in logical pixels from the map's
+  /// top-left; the bubble is drawn just above it.
+  Offset? _lotAnchor;
+  bool _anchorBusy = false;
+  bool _anchorDirty = false;
 
   bool get _isOnCampus => _userPos != null && _inCampus(_userPos!);
 
@@ -2670,6 +2712,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
   /// than [_maxTilt] back to it (the plugin has no max-pitch setting), so the
   /// map never sits at a horizon view that drops frames.
   void _onCameraIdle() {
+    if (_openLotId != null) _updateLotAnchor(); // settle the lot bubble
     final m = _map;
     final cam = m?.cameraPosition;
     if (m == null || cam == null || !_styleReady) return;
@@ -2686,6 +2729,8 @@ class _FauMapScreenState extends State<FauMapScreen> {
   int _camOffCount = 0;
 
   void _onCameraMove(CameraPosition cam) {
+    // Keep the lot bubble on top of its dot while the map moves.
+    if (_openLotId != null) _updateLotAnchor();
     if (!_navTracking) return;
     if (DateTime.now().isBefore(_camAnimUntil)) {
       _camOffCount = 0;
@@ -3137,14 +3182,29 @@ class _FauMapScreenState extends State<FauMapScreen> {
 
     final capacity = <String, int>{};
     final occupied = <String, int>{};
-    for (final unit in rawUnits.values) {
-      if (unit is! Map) continue;
+    final spots = <String, List<Map<String, dynamic>>>{};
+    rawUnits.forEach((unitId, unit) {
+      if (unit is! Map) return;
       final lot = unit['lot']?.toString();
-      if (lot == null || lot.isEmpty) continue;
+      if (lot == null || lot.isEmpty) return;
       final occ = unit['occupied'];
       final isOcc = occ == true || occ == 1 || occ == 'true';
+      // Units without an `online` flag are treated as reporting.
+      final on = unit['online'];
+      final isOnline = !(on == false || on == 0 || on == 'false');
       capacity[lot] = (capacity[lot] ?? 0) + 1;
-      if (isOcc) occupied[lot] = (occupied[lot] ?? 0) + 1;
+      // An offline curb can't be trusted as free, so it counts as taken:
+      // it stays in the lot's total but drops out of the free count
+      // (labels, colours and best-lot routing all use this tally).
+      if (isOcc || !isOnline) occupied[lot] = (occupied[lot] ?? 0) + 1;
+      (spots[lot] ??= []).add({
+        'id': unitId.toString(),
+        'occupied': isOcc,
+        'online': isOnline,
+      });
+    });
+    for (final list in spots.values) {
+      list.sort((a, b) => (a['id'] as String).compareTo(b['id'] as String));
     }
 
     final result = <String, Map<String, dynamic>>{};
@@ -3177,6 +3237,8 @@ class _FauMapScreenState extends State<FauMapScreen> {
         'capacity': total,
         'position': pos,
         'color': color,
+        // Every curb unit in the lot, for the tap-a-lot spot grid.
+        'units': spots[lotId] ?? const <Map<String, dynamic>>[],
       };
     });
     return result;
@@ -3432,27 +3494,29 @@ class _FauMapScreenState extends State<FauMapScreen> {
       }
     }
 
-    Map<String, dynamic>? nearestLot;
+    String? nearestLot;
     var lotDist = 40.0; // meters
-    for (final lot in _liveLots.values) {
+    _liveLots.forEach((id, lot) {
       final d = Geo.meters(latLng, lot['position'] as LatLng);
       if (d < lotDist) {
         lotDist = d;
-        nearestLot = lot;
+        nearestLot = id;
       }
-    }
+    });
 
     if (nearestLot != null && (nearest == null || lotDist <= nearestDist)) {
-      final lot = nearestLot;
-      final free = (lot['capacity'] as int) - (lot['occupied'] as int);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('${lot['name']}: $free free of ${lot['capacity']}'),
-          duration: const Duration(seconds: 2),
-        ),
-      );
+      if (nearestLot != _openLotId) {
+        // Hidden until the new dot's screen position comes back.
+        setState(() {
+          _openLotId = nearestLot;
+          _lotAnchor = null;
+        });
+      }
+      _updateLotAnchor();
       return;
     }
+    // Tapping anywhere else closes the lot bubble.
+    if (_openLotId != null) setState(() => _openLotId = null);
     if (nearest != null) _onBuildingSelected(nearest);
   }
 
@@ -4037,6 +4101,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
             child: LayoutBuilder(
               builder: (context, constraints) {
                 _mapHeight = constraints.maxHeight;
+                _mapWidth = constraints.maxWidth;
                 return _buildMap();
               },
             ),
@@ -4044,6 +4109,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
           if (_devMode) _buildDevTapBadge(),
           if (_devMode)
             _buildDevControls(onCampus, bottomInset),
+          _buildLotPopup(),
           _buildAttribution(bottomInset),
           _buildGuidanceCard(onCampus, bottomInset),
           // Last, so the suggestion list draws above the other overlays.
@@ -4736,6 +4802,241 @@ class _FauMapScreenState extends State<FauMapScreen> {
       )),
     );
   }
+
+  /// Small bubble that sits on top of the tapped lot's dot and moves with it
+  /// as the map is dragged, zoomed or rotated. Shows every spot as a chip,
+  /// 3 per row: green = available, red = occupied, gray = offline.
+  Widget _buildLotPopup() {
+    final id = _openLotId;
+    final lot = id == null ? null : _liveLots[id];
+    final anchor = _lotAnchor;
+    // Must stay Positioned even when hidden: a non-positioned child would
+    // make the map's Stack size itself to it (0x0) and hide everything.
+    const hidden = Positioned(left: 0, top: 0, child: SizedBox.shrink());
+    if (id == null || lot == null || anchor == null) return hidden;
+
+    final mapW = _mapWidth > 0 ? _mapWidth : MediaQuery.of(context).size.width;
+    final mapH = _mapHeight > 0 ? _mapHeight : MediaQuery.of(context).size.height;
+    // Hide while the dot is scrolled off screen.
+    if (anchor.dx < 0 || anchor.dx > mapW || anchor.dy < 0 || anchor.dy > mapH) {
+      return hidden;
+    }
+
+    final units = lot['units'] as List<Map<String, dynamic>>;
+    final free = (lot['capacity'] as int) - (lot['occupied'] as int);
+
+    const width = 190.0;
+    const arrowW = 12.0;
+    const arrowH = 7.0;
+    // Keep the bubble on screen near the edges; the arrow still points at
+    // the dot.
+    final left = (anchor.dx - width / 2)
+        .clamp(8.0, math.max(8.0, mapW - width - 8))
+        .toDouble();
+    final arrowX =
+        (anchor.dx - left - arrowW / 2).clamp(6.0, width - arrowW - 6).toDouble();
+
+    return Positioned(
+      left: left,
+      width: width,
+      // Clear of the dot (radius 6-8 plus its stroke).
+      bottom: mapH - anchor.dy + 12,
+      child: _tapShield(FadeSlideIn(
+        key: ValueKey(id),
+        offsetY: 8,
+        duration: kMotion,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.fromLTRB(8, 6, 4, 8),
+              decoration: BoxDecoration(
+                color: kCard,
+                borderRadius: BorderRadius.circular(kRadius),
+                border: Border.all(color: kDivider),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Colors.black45,
+                    blurRadius: 8,
+                    offset: Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '${lot['name']} • $free/${units.length} free',
+                          style: mono(fontSize: 11.5),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      InkWell(
+                        borderRadius: BorderRadius.circular(10),
+                        onTap: () => setState(() => _openLotId = null),
+                        child: const Padding(
+                          padding: EdgeInsets.all(2),
+                          child:
+                              Icon(Icons.close, size: 15, color: kTextMuted),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Padding(
+                    padding: const EdgeInsets.only(right: 4),
+                    child: units.isEmpty
+                        ? const Text(
+                            'No sensors yet',
+                            style: TextStyle(fontSize: 11, color: kTextMuted),
+                          )
+                        : ConstrainedBox(
+                            // About 4 rows; scroll for the rest.
+                            constraints: const BoxConstraints(maxHeight: 108),
+                            child: GridView.builder(
+                              shrinkWrap: true,
+                              padding: EdgeInsets.zero,
+                              itemCount: units.length,
+                              gridDelegate:
+                                  const SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: 3,
+                                mainAxisSpacing: 4,
+                                crossAxisSpacing: 4,
+                                mainAxisExtent: 24,
+                              ),
+                              itemBuilder: (context, i) {
+                                final u = units[i];
+                                return _SpotChip(
+                                  name: u['id'] as String,
+                                  online: u['online'] == true,
+                                  occupied: u['occupied'] == true,
+                                );
+                              },
+                            ),
+                          ),
+                  ),
+                ],
+              ),
+            ),
+            // Little pointer down to the dot.
+            Padding(
+              padding: EdgeInsets.only(left: arrowX),
+              child: CustomPaint(
+                size: const Size(arrowW, arrowH),
+                painter: _BubbleArrowPainter(),
+              ),
+            ),
+          ],
+        ),
+      )),
+    );
+  }
+
+  /// Re-reads where the open lot's dot is on screen. Requests are coalesced:
+  /// while one is in flight, further camera moves just mark it dirty and a
+  /// single follow-up runs afterwards.
+  Future<void> _updateLotAnchor() async {
+    final m = _map;
+    final id = _openLotId;
+    final lot = id == null ? null : _liveLots[id];
+    if (m == null || lot == null) return;
+    if (_anchorBusy) {
+      _anchorDirty = true;
+      return;
+    }
+    _anchorBusy = true;
+    try {
+      final p = await m.toScreenLocation(lot['position'] as LatLng);
+      if (!mounted || _openLotId != id) return;
+      // Android reports physical pixels; iOS and web already use logical.
+      final scale = !kIsWeb && defaultTargetPlatform == TargetPlatform.android
+          ? MediaQuery.of(context).devicePixelRatio
+          : 1.0;
+      setState(() => _lotAnchor = Offset(p.x / scale, p.y / scale));
+    } catch (e) {
+      debugPrint('[map] $e');
+    } finally {
+      _anchorBusy = false;
+      if (_anchorDirty) {
+        _anchorDirty = false;
+        _updateLotAnchor();
+      }
+    }
+  }
+}
+
+/// One spot in the lot bubble: a small rectangle with the spot name,
+/// green = available, red = occupied, gray = offline.
+class _SpotChip extends StatelessWidget {
+  final String name;
+  final bool online;
+  final bool occupied;
+
+  const _SpotChip({
+    required this.name,
+    required this.online,
+    required this.occupied,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final (color, label) = !online
+        ? (kTextMuted, 'offline')
+        : occupied
+            ? (kRed, 'occupied')
+            : (kOpen, 'available');
+
+    // Fades to the new colour when a spot changes state.
+    return Semantics(
+      label: '$name, $label',
+      child: AnimatedContainer(
+        duration: kMotion,
+        alignment: Alignment.center,
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.18),
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: color, width: 1.2),
+        ),
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            name,
+            style: mono(fontSize: 11, fontWeight: FontWeight.w700, color: color),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Downward triangle under the lot bubble, pointing at the lot's dot.
+class _BubbleArrowPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final path = Path()
+      ..moveTo(0, 0)
+      ..lineTo(size.width, 0)
+      ..lineTo(size.width / 2, size.height)
+      ..close();
+    canvas.drawPath(path, Paint()..color = kCard);
+    // Outline the two slanted sides only, so it joins the card's border.
+    final edge = Paint()
+      ..color = kDivider
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1;
+    canvas.drawLine(Offset.zero, Offset(size.width / 2, size.height), edge);
+    canvas.drawLine(
+        Offset(size.width, 0), Offset(size.width / 2, size.height), edge);
+  }
+
+  @override
+  bool shouldRepaint(_BubbleArrowPainter old) => false;
 }
 
 // ==========================================
