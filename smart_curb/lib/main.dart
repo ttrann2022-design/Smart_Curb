@@ -7,6 +7,7 @@ import 'dart:ui' as ui;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_compass/flutter_compass.dart';
@@ -81,6 +82,29 @@ final ThemeData appTheme = ThemeData(
   textTheme: GoogleFonts.archivoTextTheme(ThemeData.dark().textTheme)
       .apply(bodyColor: kText, displayColor: kText),
   dividerTheme: const DividerThemeData(color: kDivider, thickness: 1),
+  // Slim, rounded scrollbar in the dashboard's colours.
+  scrollbarTheme: ScrollbarThemeData(
+    thickness: const WidgetStatePropertyAll(4),
+    radius: const Radius.circular(4),
+    thumbColor: WidgetStateProperty.resolveWith(
+      (s) => s.contains(WidgetState.dragged) || s.contains(WidgetState.hovered)
+          ? kAccent.withValues(alpha: 0.8)
+          : kTextMuted.withValues(alpha: 0.45),
+    ),
+    crossAxisMargin: 2,
+  ),
+  // Modern page transitions: new pages fade in while sliding forward
+  // (iOS/macOS keep the native slide so swipe-back still works).
+  pageTransitionsTheme: const PageTransitionsTheme(
+    builders: {
+      TargetPlatform.android: FadeForwardsPageTransitionsBuilder(),
+      TargetPlatform.fuchsia: FadeForwardsPageTransitionsBuilder(),
+      TargetPlatform.windows: FadeForwardsPageTransitionsBuilder(),
+      TargetPlatform.linux: FadeForwardsPageTransitionsBuilder(),
+      TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+      TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
+    },
+  ),
   dialogTheme: DialogThemeData(backgroundColor: kCard, shape: _panelShape),
   bottomSheetTheme: const BottomSheetThemeData(backgroundColor: kCard),
   popupMenuTheme: PopupMenuThemeData(color: kCard, shape: _panelShape),
@@ -190,6 +214,7 @@ class MyApp extends StatelessWidget {
       title: 'Smart Curb App',
       debugShowCheckedModeBanner: false,
       theme: appTheme,
+      scrollBehavior: const AppScrollBehavior(),
       home: StreamBuilder<User?>(
         stream: FirebaseAuth.instance.authStateChanges(),
         builder: (context, snapshot) {
@@ -257,55 +282,62 @@ class _LoginPageState extends State<LoginPage> {
             padding: const EdgeInsets.symmetric(horizontal: 32.0),
             child: Column(
               children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(14),
-                  child: Image.asset(
-                    'assets/logo.png',
-                    height: 140,
-                    fit: BoxFit.contain,
-                    errorBuilder: (_, __, ___) =>
-                        const Icon(Icons.radar, size: 100, color: kAccent),
-                  ),
-                ),
+                // Logo pops in (scale + fade), then the rest rises in order.
+                const _LogoEntrance(),
                 const SizedBox(height: 20),
-                const _BrandTitle(fontSize: 26),
+                const FadeSlideIn(index: 2, child: _BrandTitle(fontSize: 26)),
                 const SizedBox(height: 6),
-                const Text(
-                  'SMART PARKING',
-                  style: TextStyle(
-                    color: kTextMuted,
-                    fontSize: 10,
-                    letterSpacing: 1.2,
-                    fontWeight: FontWeight.w600,
+                const FadeSlideIn(
+                  index: 3,
+                  child: Text(
+                    'SMART PARKING',
+                    style: TextStyle(
+                      color: kTextMuted,
+                      fontSize: 10,
+                      letterSpacing: 1.2,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 40),
-                AppTextField(
-                  controller: _emailCtrl,
-                  hintText: 'Email',
-                  icon: Icons.email_outlined,
-                  keyboardType: TextInputType.emailAddress,
+                FadeSlideIn(
+                  index: 4,
+                  child: AppTextField(
+                    controller: _emailCtrl,
+                    hintText: 'Email',
+                    icon: Icons.email_outlined,
+                    keyboardType: TextInputType.emailAddress,
+                  ),
                 ),
                 const SizedBox(height: 16),
-                AppTextField(
-                  controller: _passwordCtrl,
-                  hintText: 'Password',
-                  icon: Icons.lock_outline,
-                  obscureText: true,
+                FadeSlideIn(
+                  index: 5,
+                  child: AppTextField(
+                    controller: _passwordCtrl,
+                    hintText: 'Password',
+                    icon: Icons.lock_outline,
+                    obscureText: true,
+                  ),
                 ),
                 const SizedBox(height: 28),
-                PrimaryButton(
-                  title: 'Login',
-                  isLoading: _isLoading,
-                  onPressed: _handleLogin,
+                FadeSlideIn(
+                  index: 6,
+                  child: PrimaryButton(
+                    title: 'Login',
+                    isLoading: _isLoading,
+                    onPressed: _handleLogin,
+                  ),
                 ),
                 const SizedBox(height: 16),
-                TextButton(
-                  onPressed: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const RegisterPage()),
+                FadeSlideIn(
+                  index: 7,
+                  child: TextButton(
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const RegisterPage()),
+                    ),
+                    child: const Text("Don't have an account? Register"),
                   ),
-                  child: const Text("Don't have an account? Register"),
                 ),
               ],
             ),
@@ -329,6 +361,51 @@ class _BrandTitle extends StatelessWidget {
           TextSpan(text: 'SMART ', style: TextStyle(color: kText)),
           TextSpan(text: 'CURB', style: TextStyle(color: kAccent)),
         ],
+      ),
+    );
+  }
+}
+
+/// Login logo: scales up from 85% with a soft accent glow that fades out.
+class _LogoEntrance extends StatelessWidget {
+  const _LogoEntrance();
+
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: reduceMotion(context) ? Duration.zero : kMotionSlow * 2,
+      curve: Curves.easeOutBack,
+      builder: (context, t, child) => Opacity(
+        opacity: t.clamp(0.0, 1.0),
+        child: Transform.scale(
+          scale: 0.85 + 0.15 * t,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: [
+                BoxShadow(
+                  color: kAccent.withValues(
+                    alpha: 0.25 * (1 - t.clamp(0.0, 1.0)),
+                  ),
+                  blurRadius: 40,
+                  spreadRadius: 6,
+                ),
+              ],
+            ),
+            child: child,
+          ),
+        ),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(14),
+        child: Image.asset(
+          'assets/logo.png',
+          height: 140,
+          fit: BoxFit.contain,
+          errorBuilder: (_, _, _) =>
+              const Icon(Icons.radar, size: 100, color: kAccent),
+        ),
       ),
     );
   }
@@ -392,40 +469,60 @@ class _RegisterPageState extends State<RegisterPage> {
             padding: const EdgeInsets.symmetric(horizontal: 32.0),
             child: Column(
               children: [
-                const Icon(Icons.person_add_alt_1, size: 70, color: kAccent),
+                const FadeSlideIn(
+                  child: Icon(Icons.person_add_alt_1, size: 70, color: kAccent),
+                ),
                 const SizedBox(height: 16),
-                Text('Join Smart Curb', style: mono(fontSize: 24)),
+                FadeSlideIn(
+                  index: 1,
+                  child: Text('Join Smart Curb', style: mono(fontSize: 24)),
+                ),
                 const SizedBox(height: 32),
-                AppTextField(
-                  controller: _emailCtrl,
-                  hintText: 'Email Address',
-                  icon: Icons.email_outlined,
-                  keyboardType: TextInputType.emailAddress,
+                FadeSlideIn(
+                  index: 2,
+                  child: AppTextField(
+                    controller: _emailCtrl,
+                    hintText: 'Email Address',
+                    icon: Icons.email_outlined,
+                    keyboardType: TextInputType.emailAddress,
+                  ),
                 ),
                 const SizedBox(height: 16),
-                AppTextField(
-                  controller: _passwordCtrl,
-                  hintText: 'Password',
-                  icon: Icons.lock_outline,
-                  obscureText: true,
+                FadeSlideIn(
+                  index: 3,
+                  child: AppTextField(
+                    controller: _passwordCtrl,
+                    hintText: 'Password',
+                    icon: Icons.lock_outline,
+                    obscureText: true,
+                  ),
                 ),
                 const SizedBox(height: 16),
-                AppTextField(
-                  controller: _confirmCtrl,
-                  hintText: 'Confirm Password',
-                  icon: Icons.lock_reset,
-                  obscureText: true,
+                FadeSlideIn(
+                  index: 4,
+                  child: AppTextField(
+                    controller: _confirmCtrl,
+                    hintText: 'Confirm Password',
+                    icon: Icons.lock_reset,
+                    obscureText: true,
+                  ),
                 ),
                 const SizedBox(height: 28),
-                PrimaryButton(
-                  title: 'Register',
-                  isLoading: _isLoading,
-                  onPressed: _handleRegister,
+                FadeSlideIn(
+                  index: 5,
+                  child: PrimaryButton(
+                    title: 'Register',
+                    isLoading: _isLoading,
+                    onPressed: _handleRegister,
+                  ),
                 ),
                 const SizedBox(height: 16),
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('Already have an account? Back to Login'),
+                FadeSlideIn(
+                  index: 6,
+                  child: TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Already have an account? Back to Login'),
+                  ),
                 ),
               ],
             ),
@@ -479,7 +576,7 @@ class _UserSpaceState extends State<UserSpace> {
           ),
         ],
       ),
-      body: IndexedStack(
+      body: FadeIndexedStack(
         index: _currentIndex,
         children: const [
           _HomeTab(),
@@ -595,7 +692,7 @@ class _HomeTabState extends State<_HomeTab> {
       for (final c in _availableCampuses)
         if (!_addedIds.contains(c['id'])) c,
     ];
-    showDialog(
+    showAppDialog(
       context: context,
       barrierDismissible: true,
       builder: (_) => _SelectLocationDialog(
@@ -675,8 +772,10 @@ class _HomeTabState extends State<_HomeTab> {
         data['address']?.toString() ?? '777 Glades Rd, Boca Raton, FL 33431';
 
     return Padding(
+      key: ValueKey('loc-$locKey'),
       padding: const EdgeInsets.only(bottom: 12.0),
-      child: InkWell(
+      child: PressScale(
+        child: InkWell(
         borderRadius: BorderRadius.circular(kRadius),
         onTap: () => Navigator.push(
           context,
@@ -724,6 +823,7 @@ class _HomeTabState extends State<_HomeTab> {
             ],
           ),
         ),
+      ),
       ),
     );
   }
@@ -2851,18 +2951,22 @@ class _FauMapScreenState extends State<FauMapScreen> {
 
   // ---- destination search ----
 
-  static const int _maxSuggestions = 5;
+  /// The suggestion panel is tall enough for this many rows; any more are
+  /// reached by scrolling inside the panel.
+  static const int _maxVisibleSuggestions = 5;
+  static const double _suggestionRowHeight = 58;
 
-  /// Suggestions shown while the box is empty, reshuffled on each focus.
+  /// Every building in random order, shown while the box is empty
+  /// (reshuffled each time the search opens).
   List<FauBuilding> _randomPicks = const [];
+  DateTime _searchOpenedAt = DateTime.fromMillisecondsSinceEpoch(0);
 
   void _onSearchFocusChanged() {
     if (!mounted) return;
     setState(() {
       if (_searchFocus.hasFocus) {
-        _randomPicks = (List<FauBuilding>.of(_campusBuildings)..shuffle())
-            .take(_maxSuggestions)
-            .toList();
+        _searchOpenedAt = DateTime.now();
+        _randomPicks = List<FauBuilding>.of(_campusBuildings)..shuffle();
         // Show fresh suggestions; typing replaces the selected name.
         _searchQuery = '';
         _searchCtrl.selection = TextSelection(
@@ -3021,8 +3125,9 @@ class _FauMapScreenState extends State<FauMapScreen> {
     );
   }
 
-  /// Google-style search: focusing shows up to [_maxSuggestions] buildings
-  /// (random picks while the box is empty, matches once you type).
+  /// Google-style search: focusing shows every building (random order while
+  /// the box is empty, matches once you type) in a panel that fits
+  /// [_maxVisibleSuggestions] rows and scrolls for the rest.
   Widget _buildSearchHeader() {
     final selected = _selectedBuilding;
     final focused = _searchFocus.hasFocus;
@@ -3037,9 +3142,9 @@ class _FauMapScreenState extends State<FauMapScreen> {
           .where((b) =>
               b.code.toLowerCase().contains(q) ||
               b.name.toLowerCase().contains(q))
-          .take(_maxSuggestions)
           .toList();
     }
+    final scrolls = suggestions.length > _maxVisibleSuggestions;
 
     const shadow = [
       // Light shadow only so the panel separates from the bright map.
@@ -3054,6 +3159,9 @@ class _FauMapScreenState extends State<FauMapScreen> {
       // which removed the list before a suggestion's tap could land. The tap
       // region makes the list count as part of the field.
       child: TextFieldTapRegion(
+        // Slides down into place when the map opens.
+        child: FadeSlideIn(
+        offsetY: -14,
         child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -3106,35 +3214,84 @@ class _FauMapScreenState extends State<FauMapScreen> {
               ),
             ),
           ),
-          if (focused)
-            Container(
-              margin: const EdgeInsets.only(top: 6),
-              decoration: BoxDecoration(
-                color: kCard,
-                borderRadius: BorderRadius.circular(kRadius),
-                border: Border.all(color: kDivider),
-                boxShadow: shadow,
+          // The suggestion panel unfolds from under the search bar and folds
+          // away again; its rows rise in one after another.
+          AnimatedSwitcher(
+            duration: kMotion,
+            switchInCurve: kEaseOut,
+            switchOutCurve: Curves.easeInCubic,
+            transitionBuilder: (child, anim) => FadeTransition(
+              opacity: anim,
+              child: SizeTransition(
+                sizeFactor: anim,
+                alignment: Alignment.topCenter,
+                child: child,
               ),
-              clipBehavior: Clip.antiAlias,
-              child: suggestions.isEmpty
-                  ? Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Text(
-                        'No buildings match "${_searchQuery.trim()}".',
-                        style: const TextStyle(color: kTextMuted, fontSize: 13),
-                      ),
-                    )
-                  : Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        for (var i = 0; i < suggestions.length; i++) ...[
-                          if (i > 0) const Divider(height: 1),
-                          _buildSuggestionRow(suggestions[i]),
-                        ],
-                      ],
-                    ),
             ),
+            child: !focused
+                ? const SizedBox(key: ValueKey('closed'), width: double.infinity)
+                : Container(
+                    key: const ValueKey('open'),
+                    margin: const EdgeInsets.only(top: 6),
+                    decoration: BoxDecoration(
+                      color: kCard,
+                      borderRadius: BorderRadius.circular(kRadius),
+                      border: Border.all(color: kDivider),
+                      boxShadow: shadow,
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: AnimatedSize(
+                      duration: kMotion,
+                      curve: kEaseOut,
+                      alignment: Alignment.topCenter,
+                      child: suggestions.isEmpty
+                          ? Padding(
+                              padding: const EdgeInsets.all(16),
+                              child: Text(
+                                'No buildings match "${_searchQuery.trim()}".',
+                                style: const TextStyle(
+                                  color: kTextMuted,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            )
+                          // At most 5 rows tall; more scroll smoothly inside.
+                          : ConstrainedBox(
+                              constraints: const BoxConstraints(
+                                maxHeight: _suggestionRowHeight *
+                                        _maxVisibleSuggestions +
+                                    (_maxVisibleSuggestions - 1),
+                              ),
+                              child: StaggerScope(
+                                openedAt: _searchOpenedAt,
+                                child: SmoothScroll(
+                                  fade: scrolls ? 14 : 0,
+                                  alwaysShowThumb: scrolls,
+                                  child: ListView.separated(
+                                    shrinkWrap: true,
+                                    physics: scrolls
+                                        ? kScrollPhysics
+                                        : const NeverScrollableScrollPhysics(),
+                                    padding: EdgeInsets.zero,
+                                    itemCount: suggestions.length,
+                                    separatorBuilder: (_, _) =>
+                                        const Divider(height: 1),
+                                    itemBuilder: (context, i) => FadeSlideIn(
+                                      key: ValueKey('sug-${suggestions[i].id}'),
+                                      index: i,
+                                      offsetY: -8,
+                                      duration: kMotion,
+                                      child: _buildSuggestionRow(suggestions[i]),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                    ),
+                  ),
+          ),
         ],
+      ),
       ),
       ),
     );
@@ -3151,8 +3308,10 @@ class _FauMapScreenState extends State<FauMapScreen> {
 
     return InkWell(
       onTap: () => _pickSuggestion(bldg),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      // Fixed height so the panel can size itself to exactly 5 rows.
+      child: Container(
+        height: _suggestionRowHeight,
+        padding: const EdgeInsets.symmetric(horizontal: 14),
         child: Row(
           children: [
             Container(
@@ -3257,6 +3416,17 @@ class _FauMapScreenState extends State<FauMapScreen> {
     );
   }
 
+  static Widget _popTransition(Widget child, Animation<double> anim) =>
+      FadeTransition(
+        opacity: anim,
+        child: ScaleTransition(
+          scale: Tween(begin: 0.85, end: 1.0)
+              .animate(CurvedAnimation(parent: anim, curve: kEaseOut)),
+          alignment: Alignment.centerRight,
+          child: child,
+        ),
+      );
+
   Widget _buildDevControls(bool onCampus, double bottomInset) {
     final canSimulate = onCampus && _fullRoute.length >= 2 && !_arrived;
     return Positioned(
@@ -3266,31 +3436,56 @@ class _FauMapScreenState extends State<FauMapScreen> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          if (!onCampus)
-            ElevatedButton.icon(
-              onPressed: _teleportToCampus,
-              icon: const Icon(Icons.flight_takeoff, size: 18),
-              label: const Text('Travel to FAU'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: kDev,
-                foregroundColor: kOnAccent,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              ),
-            ),
-          if (canSimulate || _isSimulating)
-            ElevatedButton.icon(
-              onPressed: _toggleSimulation,
-              icon: Icon(_isSimulating ? Icons.pause : Icons.play_arrow,
-                  size: 20),
-              label: Text(_isSimulating ? 'Stop (20 mph)' : 'Simulate Run'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _isSimulating ? kRed : kAccent,
-                foregroundColor: kOnAccent,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              ),
-            ),
+          // Buttons pop in/out, and Simulate <-> Stop morphs smoothly.
+          AnimatedSwitcher(
+            duration: kMotion,
+            transitionBuilder: _popTransition,
+            child: !onCampus
+                ? PressScale(
+                    key: const ValueKey('travel'),
+                    child: ElevatedButton.icon(
+                      onPressed: _teleportToCampus,
+                      icon: const Icon(Icons.flight_takeoff, size: 18),
+                      label: const Text('Travel to FAU'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: kDev,
+                        foregroundColor: kOnAccent,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 10,
+                        ),
+                      ),
+                    ),
+                  )
+                : const SizedBox.shrink(key: ValueKey('no-travel')),
+          ),
+          AnimatedSwitcher(
+            duration: kMotion,
+            transitionBuilder: _popTransition,
+            child: (canSimulate || _isSimulating)
+                ? PressScale(
+                    key: ValueKey('sim-$_isSimulating'),
+                    child: ElevatedButton.icon(
+                      onPressed: _toggleSimulation,
+                      icon: Icon(
+                        _isSimulating ? Icons.pause : Icons.play_arrow,
+                        size: 20,
+                      ),
+                      label: Text(
+                        _isSimulating ? 'Stop (20 mph)' : 'Simulate Run',
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _isSimulating ? kRed : kAccent,
+                        foregroundColor: kOnAccent,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 10,
+                        ),
+                      ),
+                    ),
+                  )
+                : const SizedBox.shrink(key: ValueKey('no-sim')),
+          ),
         ],
       ),
     );
@@ -3319,6 +3514,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
     final walk = _walkResult;
     final String title;
     final String subtitle;
+    final String phase; // kind of message; the subtitle animates when it changes
 
     if (building == null) {
       title = 'FAU Boca Raton Main Campus';
@@ -3327,12 +3523,14 @@ class _FauMapScreenState extends State<FauMapScreen> {
           : (onCampus
               ? 'On Campus • Heading: ${_heading.round()}°'
               : 'Outside Campus Area');
+      phase = _userPos == null ? 'gps' : (onCampus ? 'on' : 'off');
     } else if (walk == null) {
       title =
           _liveLots.isEmpty ? 'Loading live parking data...' : 'No open lot';
       subtitle = _liveLots.isEmpty
           ? 'Waiting for sensor data'
           : 'All nearby lots are currently full';
+      phase = 'nolot';
     } else {
       final lot = _liveLots[walk.lotId];
       final free = lot == null
@@ -3342,56 +3540,123 @@ class _FauMapScreenState extends State<FauMapScreen> {
       final walkText = formatDistance(walk.totalDistanceMeters);
       if (_arrived) {
         subtitle = 'Arrived • $walkText walk to ${building.code}';
+        phase = 'arrived';
       } else if (_fullRoute.isEmpty) {
         subtitle = 'Calculating driving route...';
+        phase = 'calc';
       } else {
         subtitle =
             'Drive ${formatDistance(_routeRemaining)} • then walk $walkText';
+        phase = 'drive';
       }
     }
+
+    final routing =
+        _isRouting || (walk != null && _fullRoute.isEmpty && !_arrived);
 
     return Positioned(
       bottom: 24 + bottomInset,
       left: 20,
       right: 20,
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: kCard,
-          borderRadius: BorderRadius.circular(kRadius),
-          border: Border.all(color: building != null ? kAccent : kDivider),
-          boxShadow: const [
-            BoxShadow(
-              color: Colors.black38,
-              blurRadius: 6,
-              offset: Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            Icon(
-              building != null ? Icons.assistant_direction : Icons.my_location,
-              color: kAccent,
-              size: 24,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
+      child: FadeSlideIn(
+        index: 2,
+        offsetY: 24,
+        child: AnimatedContainer(
+          duration: kMotion,
+          curve: kEaseOut,
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: kCard,
+            borderRadius: BorderRadius.circular(kRadius),
+            border: Border.all(color: building != null ? kAccent : kDivider),
+            boxShadow: [
+              const BoxShadow(
+                color: Colors.black38,
+                blurRadius: 6,
+                offset: Offset(0, 2),
+              ),
+              // Soft accent glow while a destination is active.
+              BoxShadow(
+                color: kAccent.withValues(alpha: building != null ? 0.12 : 0),
+                blurRadius: 16,
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
                 children: [
-                  Text(title, style: mono(fontSize: 14)),
-                  const SizedBox(height: 2),
-                  Text(
-                    subtitle,
-                    style: const TextStyle(fontSize: 12.5, color: kTextMuted),
-                    overflow: TextOverflow.ellipsis,
+                  AnimatedSwitcher(
+                    duration: kMotion,
+                    transitionBuilder: (child, anim) => ScaleTransition(
+                      scale: anim,
+                      child: FadeTransition(opacity: anim, child: child),
+                    ),
+                    child: Icon(
+                      building != null
+                          ? Icons.assistant_direction
+                          : Icons.my_location,
+                      key: ValueKey(building != null),
+                      color: kAccent,
+                      size: 24,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        AnimatedText(
+                          title,
+                          style: mono(fontSize: 14),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 2),
+                        Row(
+                          children: [
+                            // Connection quality: green / amber / red wifi.
+                            const ConnectionIndicator(size: 14),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: AnimatedText(
+                                subtitle,
+                                switchKey: phase,
+                                style: const TextStyle(
+                                  fontSize: 12.5,
+                                  color: kTextMuted,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
-            ),
-          ],
+              // Thin indeterminate bar while the driving route is computed.
+              AnimatedSize(
+                duration: kMotion,
+                curve: kEaseOut,
+                child: routing
+                    ? Padding(
+                        padding: const EdgeInsets.only(top: 10),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(2),
+                          child: const LinearProgressIndicator(
+                            minHeight: 2,
+                            color: kAccent,
+                            backgroundColor: kDivider,
+                          ),
+                        ),
+                      )
+                    : const SizedBox(width: double.infinity),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -3416,7 +3681,7 @@ class _VehicleTabState extends State<_VehicleTab> {
       : FirebaseDatabase.instance.ref('drivers/$_uid/vehicles').onValue;
 
   void _openAddVehicleDialog() {
-    showDialog(
+    showAppDialog(
       context: context,
       barrierDismissible: true,
       builder: (_) => const _VehicleFormDialog(),
@@ -3424,7 +3689,7 @@ class _VehicleTabState extends State<_VehicleTab> {
   }
 
   void _showVehicleDetails(Map<String, dynamic> data, String key) {
-    showDialog(
+    showAppDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Row(
@@ -3533,8 +3798,10 @@ class _VehicleTabState extends State<_VehicleTab> {
     final title = [manufacturer, model].where((s) => s.isNotEmpty).join(' ');
 
     return Padding(
+      key: ValueKey('veh-$key'),
       padding: const EdgeInsets.only(bottom: 12.0),
-      child: InkWell(
+      child: PressScale(
+        child: InkWell(
         borderRadius: BorderRadius.circular(kRadius),
         onTap: () => _showVehicleDetails(data, key),
         child: Container(
@@ -3586,13 +3853,14 @@ class _VehicleTabState extends State<_VehicleTab> {
           ),
         ),
       ),
+      ),
     );
   }
 }
 
-/// Scrolling list of cards followed directly by a full-width primary button.
-/// Shared by the Home, Vehicle and Profile tabs.
-class _ListWithBottomAction extends StatelessWidget {
+/// Smooth-scrolling list of cards followed by a compact, centred action
+/// button. Shared by the Home, Vehicle and Profile tabs.
+class _ListWithBottomAction extends StatefulWidget {
   final List<Widget> children;
   final String actionTitle;
   final IconData actionIcon;
@@ -3606,19 +3874,41 @@ class _ListWithBottomAction extends StatelessWidget {
   });
 
   @override
+  State<_ListWithBottomAction> createState() => _ListWithBottomActionState();
+}
+
+class _ListWithBottomActionState extends State<_ListWithBottomAction> {
+  final DateTime _openedAt = DateTime.now();
+
+  @override
   Widget build(BuildContext context) {
+    final children = widget.children;
+    // Rows rise in one after another when the tab opens; rows further down
+    // reveal themselves as they scroll into view (ListView builds lazily).
+    // Keyed rows keep their state, so only newly shown rows animate.
     return SafeArea(
-      child: ListView(
-        padding: const EdgeInsets.all(20.0),
-        children: [
-          ...children,
-          const SizedBox(height: 4),
-          PrimaryButton(
-            title: actionTitle,
-            icon: actionIcon,
-            onPressed: onAction,
+      child: StaggerScope(
+        openedAt: _openedAt,
+        child: SmoothScroll(
+          child: ListView(
+            physics: kScrollPhysics,
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+            children: [
+              for (var i = 0; i < children.length; i++)
+                FadeSlideIn(key: children[i].key, index: i, child: children[i]),
+              const SizedBox(height: 8),
+              FadeSlideIn(
+                index: children.length,
+                child: PrimaryButton(
+                  title: widget.actionTitle,
+                  icon: widget.actionIcon,
+                  onPressed: widget.onAction,
+                  compact: true,
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -3789,7 +4079,7 @@ class _ProfileTabState extends State<_ProfileTab> {
       : FirebaseDatabase.instance.ref('drivers/${_user!.uid}/profile').onValue;
 
   void _openContactDialog({Map<String, dynamic>? data}) {
-    showDialog(
+    showAppDialog(
       context: context,
       barrierDismissible: true,
       builder: (_) => _ContactInfoDialog(existingData: data),
@@ -3881,7 +4171,11 @@ class _ProfileTabState extends State<_ProfileTab> {
                         children: [
                           DetailInfoRow(
                             label: 'Phone Number',
-                            value: data['phone']?.toString() ?? 'N/A',
+                            // Older saves were plain digits; show them
+                            // with dashes too.
+                            value: data['phone'] == null
+                                ? 'N/A'
+                                : formatPhone(data['phone'].toString()),
                           ),
                           const Divider(height: 20),
                           DetailInfoRow(
@@ -3929,7 +4223,7 @@ class _ContactInfoDialogState extends State<_ContactInfoDialog> {
     super.initState();
     final d = widget.existingData;
     String v(String k) => d?[k]?.toString() ?? '';
-    _phoneCtrl = TextEditingController(text: v('phone'));
+    _phoneCtrl = TextEditingController(text: formatPhone(v('phone')));
     _firstCtrl = TextEditingController(text: v('firstName'));
     _lastCtrl = TextEditingController(text: v('lastName'));
     _middleCtrl = TextEditingController(text: v('middleName'));
@@ -3978,6 +4272,10 @@ class _ContactInfoDialogState extends State<_ContactInfoDialog> {
       showErrorSnackBar(context, 'Please fill in all required fields.');
       return;
     }
+    if (_phoneCtrl.text.replaceAll(RegExp(r'\D'), '').length != 10) {
+      showErrorSnackBar(context, 'Please enter a 10-digit phone number.');
+      return;
+    }
 
     Navigator.of(context).pop();
 
@@ -3987,7 +4285,7 @@ class _ContactInfoDialogState extends State<_ContactInfoDialog> {
         'firstName': _firstCtrl.text.trim(),
         'lastName': _lastCtrl.text.trim(),
         'middleName': _middleCtrl.text.trim(),
-        'phone': _phoneCtrl.text.trim(),
+        'phone': formatPhone(_phoneCtrl.text), // saved as xxx-xxx-xxxx
         'gender': _gender,
         'address1': _addr1Ctrl.text.trim(),
         'address2': _addr2Ctrl.text.trim(),
@@ -4055,9 +4353,10 @@ class _ContactInfoDialogState extends State<_ContactInfoDialog> {
               const SizedBox(height: 12),
               AppTextField(
                 controller: _phoneCtrl,
-                hintText: 'Phone Number *',
+                hintText: 'Phone Number * (xxx-xxx-xxxx)',
                 icon: Icons.phone_outlined,
                 keyboardType: TextInputType.phone,
+                inputFormatters: [PhoneInputFormatter()],
               ),
               const SizedBox(height: 12),
               Container(
@@ -4156,8 +4455,611 @@ class _ContactInfoDialogState extends State<_ContactInfoDialog> {
 }
 
 // ==========================================
+// MOTION — mirrors the admin dashboard (motion.js / index.css):
+// staggered fade-up entrances, press feedback, live pulse, flashes.
+// Everything honours the OS "reduce motion" setting.
+// ==========================================
+
+const Duration kMotionFast = Duration(milliseconds: 160);
+const Duration kMotion = Duration(milliseconds: 280);
+const Duration kMotionSlow = Duration(milliseconds: 450);
+const Curve kEaseOut = Curves.easeOutCubic;
+
+/// True when the user asked the OS to reduce motion.
+bool reduceMotion(BuildContext context) =>
+    MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+
+/// Fades and rises its child into place once, like the dashboard's
+/// `.sws-enter`. [index] staggers siblings (each one starts a bit later).
+class FadeSlideIn extends StatefulWidget {
+  final Widget child;
+  final int index;
+  final double offsetY; // start this many px lower (negative = higher)
+  final Duration duration;
+
+  const FadeSlideIn({
+    super.key,
+    required this.child,
+    this.index = 0,
+    this.offsetY = 14,
+    this.duration = kMotionSlow,
+  });
+
+  @override
+  State<FadeSlideIn> createState() => _FadeSlideInState();
+}
+
+class _FadeSlideInState extends State<FadeSlideIn>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c =
+      AnimationController(vsync: this, duration: widget.duration);
+  late final Animation<double> _t = CurvedAnimation(parent: _c, curve: kEaseOut);
+  Timer? _delay;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_c.status != AnimationStatus.dismissed || _delay != null) return;
+    if (reduceMotion(context)) {
+      _c.value = 1;
+      return;
+    }
+    // Stagger only during a list's opening moment. Items revealed later by
+    // scrolling animate straight away instead of waiting their turn.
+    final scope = StaggerScope.maybeOf(context);
+    final opening = scope == null || scope.isOpening;
+    final ms = opening ? 45 * widget.index.clamp(0, 8) : 0;
+    _delay = Timer(Duration(milliseconds: ms), () {
+      if (mounted) _c.forward();
+    });
+  }
+
+  @override
+  void dispose() {
+    _delay?.cancel();
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _t,
+      child: widget.child,
+      builder: (context, child) => Opacity(
+        opacity: _t.value,
+        child: Transform.translate(
+          offset: Offset(0, widget.offsetY * (1 - _t.value)),
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
+/// Marks when a list first appeared, so [FadeSlideIn] can tell the opening
+/// stagger apart from items that scroll into view later.
+class StaggerScope extends InheritedWidget {
+  final DateTime openedAt;
+
+  const StaggerScope({super.key, required this.openedAt, required super.child});
+
+  bool get isOpening =>
+      DateTime.now().difference(openedAt) < const Duration(milliseconds: 700);
+
+  static StaggerScope? maybeOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<StaggerScope>();
+
+  @override
+  bool updateShouldNotify(StaggerScope old) => old.openedAt != openedAt;
+}
+
+/// Smooth, springy scrolling (iOS-style bounce on every platform), always
+/// scrollable so the bounce works even when the content fits.
+const ScrollPhysics kScrollPhysics = BouncingScrollPhysics(
+  parent: AlwaysScrollableScrollPhysics(),
+  decelerationRate: ScrollDecelerationRate.fast,
+);
+
+/// Polished scroll container: slim themed scrollbar plus soft fades at the
+/// top and bottom edges so content melts away instead of being cut off.
+class SmoothScroll extends StatelessWidget {
+  final Widget child; // a scroll view
+  final double fade;
+  final bool alwaysShowThumb;
+
+  const SmoothScroll({
+    super.key,
+    required this.child,
+    this.fade = 18,
+    this.alwaysShowThumb = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Scrollbar(
+      thumbVisibility: alwaysShowThumb,
+      child: ShaderMask(
+        blendMode: BlendMode.dstIn,
+        shaderCallback: (rect) {
+          final f = rect.height <= 0 ? 0.0 : (fade / rect.height).clamp(0.0, 0.5);
+          return LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: const [
+              Colors.transparent,
+              Colors.black,
+              Colors.black,
+              Colors.transparent,
+            ],
+            stops: [0, f, 1 - f, 1],
+          ).createShader(rect);
+        },
+        child: child,
+      ),
+    );
+  }
+}
+
+/// Lets mouse and trackpad drag-scroll lists too (handy on web/desktop).
+class AppScrollBehavior extends MaterialScrollBehavior {
+  const AppScrollBehavior();
+
+  @override
+  Set<ui.PointerDeviceKind> get dragDevices =>
+      ui.PointerDeviceKind.values.toSet();
+}
+
+/// Shrinks its child slightly while pressed (tactile feedback). It only
+/// listens to the pointer, so taps still reach the InkWell/button inside.
+class PressScale extends StatefulWidget {
+  final Widget child;
+  final double pressedScale;
+
+  const PressScale({super.key, required this.child, this.pressedScale = 0.97});
+
+  @override
+  State<PressScale> createState() => _PressScaleState();
+}
+
+class _PressScaleState extends State<PressScale> {
+  bool _down = false;
+
+  void _set(bool v) {
+    if (_down != v) setState(() => _down = v);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Listener(
+      onPointerDown: (_) => _set(true),
+      onPointerUp: (_) => _set(false),
+      onPointerCancel: (_) => _set(false),
+      child: AnimatedScale(
+        scale: _down && !reduceMotion(context) ? widget.pressedScale : 1,
+        duration: kMotionFast,
+        curve: kEaseOut,
+        child: widget.child,
+      ),
+    );
+  }
+}
+
+/// Pulsing dot that signals live data (the dashboard's `.sws-live-dot`).
+class LiveDot extends StatefulWidget {
+  final Color color;
+  final double size;
+
+  const LiveDot({super.key, this.color = kOpen, this.size = 7});
+
+  @override
+  State<LiveDot> createState() => _LiveDotState();
+}
+
+class _LiveDotState extends State<LiveDot> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1600),
+  );
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (reduceMotion(context)) {
+      _c.stop();
+    } else if (!_c.isAnimating) {
+      _c.repeat();
+    }
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = widget.size;
+    return SizedBox(
+      width: s * 2.6,
+      height: s * 2.6,
+      child: AnimatedBuilder(
+        animation: _c,
+        builder: (context, _) {
+          final t = _c.value;
+          return Stack(
+            alignment: Alignment.center,
+            children: [
+              // Expanding, fading ring.
+              Container(
+                width: s * (1 + 1.6 * t),
+                height: s * (1 + 1.6 * t),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: widget.color.withValues(alpha: 0.45 * (1 - t)),
+                ),
+              ),
+              Container(
+                width: s,
+                height: s,
+                decoration:
+                    BoxDecoration(shape: BoxShape.circle, color: widget.color),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+// ==========================================
+// CONNECTION QUALITY
+// ==========================================
+
+enum NetQuality { checking, good, unstable, bad, offline }
+
+/// Watches the connection to the parking database and grades it.
+///
+/// Two signals: Firebase's own `.info/connected` flag (reacts the moment the
+/// socket drops or comes back) and a tiny timed request every few seconds.
+/// The last [_window] requests decide the grade:
+///  * good     – median under 300 ms, nothing failed
+///  * unstable – median 300–1000 ms, or one request failed
+///  * bad      – median over 1000 ms, or two or more failed
+///  * offline  – Firebase reports no connection, or every request failed
+class ConnectionMonitor extends ChangeNotifier {
+  static const Duration _interval = Duration(seconds: 5);
+  static const Duration _timeout = Duration(seconds: 4);
+  static const int _window = 4;
+
+  final http.Client _client = http.Client(); // keep-alive: measures real RTT
+  final List<int?> _samples = []; // ms per ping; null = failed
+  StreamSubscription<DatabaseEvent>? _connSub;
+  Timer? _timer;
+  bool _firebaseConnected = true;
+  bool _disposed = false;
+
+  NetQuality quality = NetQuality.checking;
+  int? latencyMs; // median of recent successful pings
+
+  Uri get _pingUri {
+    final base = DefaultFirebaseOptions.currentPlatform.databaseURL ??
+        'https://smartcurb-d174e-default-rtdb.firebaseio.com';
+    // A path that holds nothing: the reply is a few bytes either way.
+    return Uri.parse('$base/_ping.json');
+  }
+
+  void start() {
+    _connSub = FirebaseDatabase.instance
+        .ref('.info/connected')
+        .onValue
+        .listen((e) {
+      _firebaseConnected = e.snapshot.value == true;
+      _grade();
+      if (_firebaseConnected) _ping(); // re-measure right after reconnecting
+    });
+    _ping();
+    _timer = Timer.periodic(_interval, (_) => _ping());
+  }
+
+  Future<void> _ping() async {
+    final sw = Stopwatch()..start();
+    int? ms;
+    try {
+      await _client.get(_pingUri).timeout(_timeout);
+      ms = sw.elapsedMilliseconds;
+    } catch (_) {
+      ms = null; // timed out or no network
+    }
+    if (_disposed) return;
+    _samples.add(ms);
+    if (_samples.length > _window) _samples.removeAt(0);
+    _grade();
+  }
+
+  void _grade() {
+    if (_disposed) return;
+    final ok = _samples.whereType<int>().toList()..sort();
+    final failed = _samples.length - ok.length;
+    latencyMs = ok.isEmpty ? null : ok[ok.length ~/ 2];
+
+    final NetQuality q;
+    if (!_firebaseConnected ||
+        (_samples.isNotEmpty && ok.isEmpty && _samples.length >= 2)) {
+      q = NetQuality.offline;
+    } else if (_samples.isEmpty) {
+      q = NetQuality.checking;
+    } else if (failed >= 2 || (latencyMs ?? 99999) > 1000) {
+      q = NetQuality.bad;
+    } else if (failed == 1 || latencyMs! > 300) {
+      q = NetQuality.unstable;
+    } else {
+      q = NetQuality.good;
+    }
+    quality = q;
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _timer?.cancel();
+    _connSub?.cancel();
+    _client.close();
+    super.dispose();
+  }
+}
+
+/// Wi-Fi style signal icon for the connection: green = good, amber =
+/// unstable, red = bad, red "no wifi" = offline. Tap or hover for details.
+/// It owns its own monitor, so it can be dropped anywhere.
+class ConnectionIndicator extends StatefulWidget {
+  final double size;
+
+  const ConnectionIndicator({super.key, this.size = 16});
+
+  @override
+  State<ConnectionIndicator> createState() => _ConnectionIndicatorState();
+}
+
+class _ConnectionIndicatorState extends State<ConnectionIndicator> {
+  final ConnectionMonitor _monitor = ConnectionMonitor();
+
+  @override
+  void initState() {
+    super.initState();
+    _monitor.start();
+  }
+
+  @override
+  void dispose() {
+    _monitor.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: _monitor,
+      builder: (context, _) {
+        final q = _monitor.quality;
+        final ms = _monitor.latencyMs;
+        final (IconData icon, Color color, String label) = switch (q) {
+          NetQuality.checking => (Icons.wifi, kTextMuted, 'Checking connection…'),
+          NetQuality.good => (Icons.wifi, kOpen, 'Connection good'),
+          NetQuality.unstable =>
+            (Icons.wifi_2_bar, kAmber, 'Connection unstable'),
+          NetQuality.bad => (Icons.wifi_1_bar, kRed, 'Connection poor'),
+          NetQuality.offline => (Icons.wifi_off, kRed, 'Offline'),
+        };
+        final detail = (ms != null && q != NetQuality.offline)
+            ? '$label · $ms ms'
+            : label;
+
+        return Tooltip(
+          message: detail,
+          triggerMode: TooltipTriggerMode.tap,
+          child: Semantics(
+            label: detail,
+            child: AnimatedSwitcher(
+              duration: kMotion,
+              transitionBuilder: (child, anim) => FadeTransition(
+                opacity: anim,
+                child: ScaleTransition(scale: anim, child: child),
+              ),
+              child: Icon(
+                icon,
+                key: ValueKey(q),
+                size: widget.size,
+                color: color,
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// showDialog with a modern entrance: fade + gentle scale-up from 95%.
+Future<T?> showAppDialog<T>({
+  required BuildContext context,
+  required WidgetBuilder builder,
+  bool barrierDismissible = true,
+}) {
+  return showGeneralDialog<T>(
+    context: context,
+    barrierDismissible: barrierDismissible,
+    barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
+    barrierColor: Colors.black.withValues(alpha: 0.6),
+    transitionDuration: reduceMotion(context) ? Duration.zero : kMotion,
+    pageBuilder: (ctx, _, _) => builder(ctx),
+    transitionBuilder: (ctx, anim, _, child) {
+      final t = CurvedAnimation(
+        parent: anim,
+        curve: kEaseOut,
+        reverseCurve: Curves.easeInCubic,
+      );
+      return FadeTransition(
+        opacity: t,
+        child: ScaleTransition(
+          scale: Tween(begin: 0.95, end: 1.0).animate(t),
+          child: child,
+        ),
+      );
+    },
+  );
+}
+
+/// Like IndexedStack (keeps every tab alive), but the newly selected tab
+/// fades and rises in instead of appearing instantly.
+class FadeIndexedStack extends StatefulWidget {
+  final int index;
+  final List<Widget> children;
+
+  const FadeIndexedStack({
+    super.key,
+    required this.index,
+    required this.children,
+  });
+
+  @override
+  State<FadeIndexedStack> createState() => _FadeIndexedStackState();
+}
+
+class _FadeIndexedStackState extends State<FadeIndexedStack>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c =
+      AnimationController(vsync: this, duration: kMotion, value: 1);
+  late final Animation<double> _t = CurvedAnimation(parent: _c, curve: kEaseOut);
+
+  @override
+  void didUpdateWidget(FadeIndexedStack old) {
+    super.didUpdateWidget(old);
+    if (old.index != widget.index && !reduceMotion(context)) {
+      _c.forward(from: 0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _t,
+      builder: (context, child) => Opacity(
+        opacity: _t.value,
+        child: Transform.translate(
+          offset: Offset(0, 10 * (1 - _t.value)),
+          child: child,
+        ),
+      ),
+      child: IndexedStack(index: widget.index, children: widget.children),
+    );
+  }
+}
+
+/// Swaps text with a quick fade + slide whenever its content changes.
+/// Pass [switchKey] to animate only when that changes (e.g. the kind of
+/// message), so a value that updates every second just updates in place.
+class AnimatedText extends StatelessWidget {
+  final String text;
+  final TextStyle? style;
+  final TextOverflow? overflow;
+  final Object? switchKey;
+
+  const AnimatedText(
+    this.text, {
+    super.key,
+    this.style,
+    this.overflow,
+    this.switchKey,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedSwitcher(
+      duration: kMotion,
+      switchInCurve: kEaseOut,
+      switchOutCurve: Curves.easeInCubic,
+      layoutBuilder: (current, previous) => Stack(
+        alignment: Alignment.centerLeft,
+        children: [...previous, ?current],
+      ),
+      transitionBuilder: (child, anim) => FadeTransition(
+        opacity: anim,
+        child: SlideTransition(
+          position: Tween(begin: const Offset(0, 0.35), end: Offset.zero)
+              .animate(anim),
+          child: child,
+        ),
+      ),
+      child: Text(
+        text,
+        key: ValueKey(switchKey ?? text),
+        style: style,
+        overflow: overflow,
+        maxLines: 1,
+      ),
+    );
+  }
+}
+
+// ==========================================
 // REUSABLE PRESENTATIONAL WIDGETS
 // ==========================================
+
+/// Formats a US phone number as xxx-xxx-xxxx. Partial numbers are formatted
+/// as far as they go ("97170" -> "971-70"). Anything that isn't 1–10 digits
+/// (e.g. an international number) is returned unchanged.
+String formatPhone(String input) {
+  final digits = input.replaceAll(RegExp(r'\D'), '');
+  if (digits.isEmpty || digits.length > 10) return input.trim();
+  if (digits.length <= 3) return digits;
+  if (digits.length <= 6) {
+    return '${digits.substring(0, 3)}-${digits.substring(3)}';
+  }
+  return '${digits.substring(0, 3)}-${digits.substring(3, 6)}-'
+      '${digits.substring(6)}';
+}
+
+/// Live phone formatting while typing: digits only, at most 10, dashes added
+/// automatically, and the cursor stays next to the digit you just typed.
+class PhoneInputFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    final digits = newValue.text.replaceAll(RegExp(r'\D'), '');
+    final capped = digits.length > 10 ? digits.substring(0, 10) : digits;
+    final text = formatPhone(capped);
+
+    // Where the cursor should land: after the same number of digits.
+    final cursor = newValue.selection.end.clamp(0, newValue.text.length);
+    final digitsBefore = newValue.text
+        .substring(0, cursor)
+        .replaceAll(RegExp(r'\D'), '')
+        .length
+        .clamp(0, capped.length);
+    var offset = 0;
+    var seen = 0;
+    while (offset < text.length && seen < digitsBefore) {
+      if (RegExp(r'\d').hasMatch(text[offset])) seen++;
+      offset++;
+    }
+    return TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: offset),
+    );
+  }
+}
 
 class AppTextField extends StatelessWidget {
   final TextEditingController controller;
@@ -4166,6 +5068,7 @@ class AppTextField extends StatelessWidget {
   final bool obscureText;
   final TextInputType keyboardType;
   final ValueChanged<String>? onChanged;
+  final List<TextInputFormatter>? inputFormatters;
 
   const AppTextField({
     super.key,
@@ -4175,6 +5078,7 @@ class AppTextField extends StatelessWidget {
     this.obscureText = false,
     this.keyboardType = TextInputType.text,
     this.onChanged,
+    this.inputFormatters,
   });
 
   @override
@@ -4192,6 +5096,7 @@ class AppTextField extends StatelessWidget {
         controller: controller,
         obscureText: obscureText,
         keyboardType: keyboardType,
+        inputFormatters: inputFormatters,
         onChanged: onChanged,
         cursorColor: kAccent,
         textAlignVertical: TextAlignVertical.center,
@@ -4220,46 +5125,75 @@ class PrimaryButton extends StatelessWidget {
   final bool isLoading;
   final IconData? icon;
 
+  /// Compact: a smaller button sized to its label and centred, instead of
+  /// full width (used under the card lists).
+  final bool compact;
+
   const PrimaryButton({
     super.key,
     required this.title,
     required this.onPressed,
     this.isLoading = false,
     this.icon,
+    this.compact = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: double.infinity,
-      height: 46,
-      child: ElevatedButton(
-        onPressed: isLoading ? null : onPressed,
-        style: ElevatedButton.styleFrom(
-          disabledBackgroundColor: kAccent.withValues(alpha: 0.6),
-          disabledForegroundColor: kOnAccent,
-        ),
-        child: isLoading
-            ? const SizedBox(
-                height: 20,
-                width: 20,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: kOnAccent,
-                ),
-              )
-            : Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  if (icon != null) ...[
-                    Icon(icon, size: 18),
-                    const SizedBox(width: 8),
-                  ],
-                  Text(title),
-                ],
+    final button = PressScale(
+      child: SizedBox(
+        width: compact ? null : double.infinity,
+        height: compact ? 38 : 46,
+        child: ElevatedButton(
+          onPressed: isLoading ? null : onPressed,
+          style: ElevatedButton.styleFrom(
+            disabledBackgroundColor: kAccent.withValues(alpha: 0.6),
+            disabledForegroundColor: kOnAccent,
+            padding: compact
+                ? const EdgeInsets.symmetric(horizontal: 18)
+                : null,
+            textStyle: compact
+                ? GoogleFonts.archivo(fontSize: 13, fontWeight: FontWeight.w600)
+                : null,
+          ),
+          // Label and spinner cross-fade with a small scale.
+          child: AnimatedSwitcher(
+            duration: kMotionFast,
+            transitionBuilder: (child, anim) => FadeTransition(
+              opacity: anim,
+              child: ScaleTransition(
+                scale: Tween(begin: 0.8, end: 1.0).animate(anim),
+                child: child,
               ),
+            ),
+            child: isLoading
+                ? const SizedBox(
+                    key: ValueKey('loading'),
+                    height: 20,
+                    width: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: kOnAccent,
+                    ),
+                  )
+                : Row(
+                    key: const ValueKey('label'),
+                    mainAxisSize:
+                        compact ? MainAxisSize.min : MainAxisSize.max,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      if (icon != null) ...[
+                        Icon(icon, size: compact ? 16 : 18),
+                        SizedBox(width: compact ? 6 : 8),
+                      ],
+                      Text(title),
+                    ],
+                  ),
+          ),
+        ),
       ),
     );
+    return compact ? Center(child: button) : button;
   }
 }
 
@@ -4311,13 +5245,37 @@ class AnimatedAddCard extends StatefulWidget {
   State<AnimatedAddCard> createState() => _AnimatedAddCardState();
 }
 
-class _AnimatedAddCardState extends State<AnimatedAddCard> {
+class _AnimatedAddCardState extends State<AnimatedAddCard>
+    with SingleTickerProviderStateMixin {
   bool _isPressed = false;
+
+  /// Slow "breathing" of the + icon, inviting a tap.
+  late final AnimationController _breath = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1800),
+  );
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (reduceMotion(context)) {
+      _breath.stop();
+    } else if (!_breath.isAnimating) {
+      _breath.repeat(reverse: true);
+    }
+  }
+
+  @override
+  void dispose() {
+    _breath.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: Padding(
+      child: FadeSlideIn(
+        child: Padding(
         padding: const EdgeInsets.all(24.0),
         child: GestureDetector(
           onTapDown: (_) => setState(() => _isPressed = true),
@@ -4351,12 +5309,29 @@ class _AnimatedAddCardState extends State<AnimatedAddCard> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: kNavBg,
-                      borderRadius: BorderRadius.circular(kRadius),
-                    ),
+                  AnimatedBuilder(
+                    animation: _breath,
+                    builder: (context, child) {
+                      final t = Curves.easeInOut.transform(_breath.value);
+                      return Transform.scale(
+                        scale: 1 + 0.06 * t,
+                        child: Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: kNavBg,
+                            borderRadius: BorderRadius.circular(kRadius),
+                            boxShadow: [
+                              BoxShadow(
+                                color: kAccent.withValues(alpha: 0.18 * t),
+                                blurRadius: 18,
+                                spreadRadius: 1,
+                              ),
+                            ],
+                          ),
+                          child: child,
+                        ),
+                      );
+                    },
                     child: const Icon(Icons.add, size: 36, color: kAccent),
                   ),
                   const SizedBox(height: 18),
@@ -4371,6 +5346,7 @@ class _AnimatedAddCardState extends State<AnimatedAddCard> {
             ),
           ),
         ),
+      ),
       ),
     );
   }
@@ -4395,7 +5371,7 @@ class _UserSettingsPageState extends State<UserSettingsPage> {
   late final Stream<DatabaseEvent>? _notifStream = _notifRef?.onValue;
 
   void _showContactDialog() {
-    showDialog(
+    showAppDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text('Contact Us', style: mono(fontSize: 17)),
@@ -4469,29 +5445,87 @@ class UserAboutPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    const body = TextStyle(color: kNavText, height: 1.6, fontSize: 14.5);
+
     return Scaffold(
       appBar: AppBar(title: const Text('About App')),
-      body: const Padding(
-        padding: EdgeInsets.all(24.0),
+      body: SingleChildScrollView(
+        physics: kScrollPhysics,
+        padding: const EdgeInsets.all(24.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(Icons.radar, color: kAccent, size: 60),
-            SizedBox(height: 20),
-            Text(
-              'Smart Curb is an intelligent IoT parking sensing application designed to monitor space availability and manage vehicles for individual users.',
-              style: TextStyle(color: kNavText, height: 1.6, fontSize: 15),
+            // Logo on the left; app name and version on the right.
+            FadeSlideIn(
+              child: Row(
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(14),
+                    child: Image.asset(
+                      'assets/logo.png',
+                      width: 76,
+                      height: 76,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) =>
+                          const Icon(Icons.radar, size: 60, color: kAccent),
+                    ),
+                  ),
+                  const SizedBox(width: 18),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const _BrandTitle(fontSize: 28),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Version 1.0.8',
+                          style: mono(
+                            fontSize: 13,
+                            color: kTextMuted,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
-            SizedBox(height: 30),
-            Divider(color: kDivider),
-            SizedBox(height: 10),
-            Text(
-              'VERSION 1.0.0 (BETA)',
-              style: TextStyle(
-                color: kAccent,
-                fontWeight: FontWeight.w600,
-                fontSize: 10.5,
-                letterSpacing: 0.8,
+            const SizedBox(height: 24),
+            const FadeSlideIn(index: 1, child: Divider(color: kDivider)),
+            const SizedBox(height: 20),
+            const FadeSlideIn(
+              index: 2,
+              child: Text(
+                'Smart Curb takes the guesswork out of campus parking. Smart '
+                'curb sensors in each parking space report in real time '
+                'whether the spot is free, so the app always knows how full '
+                'every lot is.',
+                style: body,
+              ),
+            ),
+            const SizedBox(height: 14),
+            const FadeSlideIn(
+              index: 3,
+              child: Text(
+                'Choose the building you are heading to and Smart Curb finds '
+                'the closest lot that still has space, measured by the real '
+                'walking distance to your door. It then guides you there '
+                'with live turn-by-turn navigation and shows how far you '
+                'will walk once you park. If that lot fills up on the way, '
+                'your route updates automatically.',
+                style: body,
+              ),
+            ),
+            const SizedBox(height: 14),
+            const FadeSlideIn(
+              index: 4,
+              child: Text(
+                'Keep your vehicles and contact details in one place, save '
+                'the campuses you visit, and see every lot at a glance: '
+                'green has plenty of space, amber is filling up and red is '
+                'almost full.',
+                style: body,
               ),
             ),
           ],
