@@ -2840,7 +2840,14 @@ class _FauMapScreenState extends State<FauMapScreen> {
 
   void _startCompassTracking() {
     _compassSub = FlutterCompass.events?.listen((event) {
-      if (!mounted || _isSimulating) return;
+      // While the position is dev-controlled (Simulate Run/Walk, tap-move,
+      // teleport) the direction comes from that movement. The device compass
+      // must not steer it: on a computer it often reports 0° (north), which
+      // fought the walk's direction and made the arrow/camera flip back and
+      // forth.
+      if (!mounted || _isSimulating || _isWalkSim || _devLocationOverride) {
+        return;
+      }
       if (DateTime.now().difference(_lastGpsHeadingAt) <
           const Duration(seconds: 3)) {
         return; // GPS course wins while driving
