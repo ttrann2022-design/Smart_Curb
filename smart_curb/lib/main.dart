@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_compass/flutter_compass.dart';
 import 'package:geolocator/geolocator.dart' as geo;
+import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:maplibre_gl/maplibre_gl.dart';
 
@@ -25,23 +26,49 @@ void main() async {
 }
 
 // ==========================================
-// THEME (dark only)
+// THEME (dark only) — mirrors admin-dashboard/src/theme.js
 // ==========================================
 
-const Color kAccent = Color(0xFFC6F24A);
-const Color kBg = Color(0xFF0F0F0D);
-const Color kBar = Color(0xFF090908);
-const Color kCard = Color(0xFF171714);
-const Color kDivider = Color(0xFF2B2B25);
-const Color kText = Color(0xFFF2F1EA);
-const Color kTextMuted = Color(0xFF8E8C82);
-const Color kOnAccent = Color(0xFF12110F);
-const Color kAmber = Color(0xFFF5A623);
-const Color kRed = Color(0xFFF2694C);
+const Color kAccent = Color(0xFFC6F24A); // c.accent
+const Color kBg = Color(0xFF0F0F0D); // c.bg
+const Color kBar = Color(0xFF090908); // c.side
+const Color kCard = Color(0xFF171714); // c.panel
+const Color kCardAlt = Color(0xFF1D1D19); // c.card
+const Color kDivider = Color(0xFF2B2B25); // c.line
+const Color kText = Color(0xFFF2F1EA); // c.text
+const Color kTextMuted = Color(0xFF8E8C82); // c.dim
+const Color kOnAccent = Color(0xFF12110F); // c.onAccent
+const Color kOpen = Color(0xFF8BD44A); // c.open
+const Color kAmber = Color(0xFFE0A63C); // c.warn
+const Color kRed = Color(0xFFF2694C); // c.busy
+const Color kNavBg = Color(0xFF232B15); // c.navBg
+const Color kNavText = Color(0xFFA5A399); // c.navText
 const Color kDev = Colors.cyanAccent;
+
+/// Dashboard corner radius (5–6px everywhere).
+const double kRadius = 6;
 
 /// TODO: replace with your real support address.
 const String kSupportEmail = 'support@example.com';
+
+/// IBM Plex Mono, the dashboard's heading/number font (`mono` in theme.js).
+TextStyle mono({
+  double? fontSize,
+  FontWeight fontWeight = FontWeight.w600,
+  Color color = kText,
+  double? letterSpacing,
+}) =>
+    GoogleFonts.ibmPlexMono(
+      fontSize: fontSize,
+      fontWeight: fontWeight,
+      color: color,
+      letterSpacing: letterSpacing,
+    );
+
+final RoundedRectangleBorder _panelShape = RoundedRectangleBorder(
+  borderRadius: BorderRadius.circular(kRadius),
+  side: const BorderSide(color: kDivider),
+);
 
 final ThemeData appTheme = ThemeData(
   useMaterial3: true,
@@ -50,32 +77,97 @@ final ThemeData appTheme = ThemeData(
   scaffoldBackgroundColor: kBg,
   cardColor: kCard,
   dividerColor: kDivider,
-  dialogTheme: const DialogThemeData(backgroundColor: kCard),
-  appBarTheme: const AppBarTheme(
-    backgroundColor: kBar,
+  // Archivo is the dashboard's body font.
+  textTheme: GoogleFonts.archivoTextTheme(ThemeData.dark().textTheme)
+      .apply(bodyColor: kText, displayColor: kText),
+  dividerTheme: const DividerThemeData(color: kDivider, thickness: 1),
+  dialogTheme: DialogThemeData(backgroundColor: kCard, shape: _panelShape),
+  bottomSheetTheme: const BottomSheetThemeData(backgroundColor: kCard),
+  popupMenuTheme: PopupMenuThemeData(color: kCard, shape: _panelShape),
+  snackBarTheme: SnackBarThemeData(
+    backgroundColor: kCardAlt,
+    contentTextStyle: GoogleFonts.archivo(color: kText, fontSize: 13),
+    behavior: SnackBarBehavior.floating,
+    shape: _panelShape,
+  ),
+  // Page header bar: panel background with a 1px bottom rule.
+  appBarTheme: AppBarTheme(
+    backgroundColor: kCard,
     elevation: 0,
     scrolledUnderElevation: 0,
-    iconTheme: IconThemeData(color: kText),
-    titleTextStyle: TextStyle(
-      color: kText,
-      fontSize: 18,
-      fontWeight: FontWeight.w700,
-      letterSpacing: 0.5,
-    ),
+    shape: const Border(bottom: BorderSide(color: kDivider)),
+    iconTheme: const IconThemeData(color: kText),
+    titleTextStyle: mono(fontSize: 17),
   ),
   colorScheme: const ColorScheme.dark(
     primary: kAccent,
     onPrimary: kOnAccent,
+    secondary: kAccent,
+    onSecondary: kOnAccent,
     surface: kCard,
     onSurface: kText,
     onSurfaceVariant: kTextMuted,
     outline: kDivider,
+    error: kRed,
   ),
-  bottomNavigationBarTheme: const BottomNavigationBarThemeData(
+  elevatedButtonTheme: ElevatedButtonThemeData(
+    style: ElevatedButton.styleFrom(
+      backgroundColor: kAccent,
+      foregroundColor: kOnAccent,
+      elevation: 0,
+      textStyle: GoogleFonts.archivo(fontSize: 14, fontWeight: FontWeight.w600),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(kRadius),
+      ),
+    ),
+  ),
+  outlinedButtonTheme: OutlinedButtonThemeData(
+    style: OutlinedButton.styleFrom(
+      foregroundColor: kText,
+      backgroundColor: kBg,
+      side: const BorderSide(color: kDivider),
+      textStyle: GoogleFonts.archivo(fontSize: 14, fontWeight: FontWeight.w600),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(kRadius),
+      ),
+    ),
+  ),
+  textButtonTheme: TextButtonThemeData(
+    style: TextButton.styleFrom(
+      foregroundColor: kAccent,
+      textStyle: GoogleFonts.archivo(fontSize: 13, fontWeight: FontWeight.w600),
+    ),
+  ),
+  switchTheme: SwitchThemeData(
+    thumbColor: WidgetStateProperty.resolveWith(
+      (s) => s.contains(WidgetState.selected) ? kOnAccent : kTextMuted,
+    ),
+    trackColor: WidgetStateProperty.resolveWith(
+      (s) => s.contains(WidgetState.selected) ? kAccent : kBg,
+    ),
+    trackOutlineColor: const WidgetStatePropertyAll(kDivider),
+  ),
+  // Bottom nav = dashboard sidebar: active item gets the navBg pill.
+  navigationBarTheme: NavigationBarThemeData(
     backgroundColor: kBar,
-    selectedItemColor: kAccent,
-    unselectedItemColor: Color(0xFF6E7C8F),
-    type: BottomNavigationBarType.fixed,
+    indicatorColor: kNavBg,
+    indicatorShape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(kRadius),
+    ),
+    surfaceTintColor: Colors.transparent,
+    iconTheme: WidgetStateProperty.resolveWith(
+      (s) => IconThemeData(
+        color: s.contains(WidgetState.selected) ? kAccent : kNavText,
+      ),
+    ),
+    labelTextStyle: WidgetStateProperty.resolveWith(
+      (s) => GoogleFonts.archivo(
+        fontSize: 12,
+        fontWeight:
+            s.contains(WidgetState.selected) ? FontWeight.w600 : FontWeight.w500,
+        color: s.contains(WidgetState.selected) ? kAccent : kNavText,
+      ),
+    ),
   ),
 );
 
@@ -165,22 +257,25 @@ class _LoginPageState extends State<LoginPage> {
             padding: const EdgeInsets.symmetric(horizontal: 32.0),
             child: Column(
               children: [
-                Image.asset(
-                  'assets/logo.png',
-                  height: 140,
-                  fit: BoxFit.contain,
-                  errorBuilder: (_, __, ___) =>
-                      const Icon(Icons.radar, size: 100, color: kAccent),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(14),
+                  child: Image.asset(
+                    'assets/logo.png',
+                    height: 140,
+                    fit: BoxFit.contain,
+                    errorBuilder: (_, __, ___) =>
+                        const Icon(Icons.radar, size: 100, color: kAccent),
+                  ),
                 ),
                 const SizedBox(height: 20),
-                const _BrandTitle(fontSize: 28),
-                const SizedBox(height: 8),
+                const _BrandTitle(fontSize: 26),
+                const SizedBox(height: 6),
                 const Text(
                   'SMART PARKING',
                   style: TextStyle(
                     color: kTextMuted,
-                    fontSize: 12,
-                    letterSpacing: 2,
+                    fontSize: 10,
+                    letterSpacing: 1.2,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -210,13 +305,7 @@ class _LoginPageState extends State<LoginPage> {
                     context,
                     MaterialPageRoute(builder: (_) => const RegisterPage()),
                   ),
-                  child: const Text(
-                    "Don't have an account? Register",
-                    style: TextStyle(
-                      color: kAccent,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
+                  child: const Text("Don't have an account? Register"),
                 ),
               ],
             ),
@@ -235,11 +324,7 @@ class _BrandTitle extends StatelessWidget {
   Widget build(BuildContext context) {
     return RichText(
       text: TextSpan(
-        style: TextStyle(
-          fontSize: fontSize,
-          fontWeight: FontWeight.bold,
-          letterSpacing: 1.5,
-        ),
+        style: mono(fontSize: fontSize, letterSpacing: 1.5),
         children: const [
           TextSpan(text: 'SMART ', style: TextStyle(color: kText)),
           TextSpan(text: 'CURB', style: TextStyle(color: kAccent)),
@@ -309,14 +394,7 @@ class _RegisterPageState extends State<RegisterPage> {
               children: [
                 const Icon(Icons.person_add_alt_1, size: 70, color: kAccent),
                 const SizedBox(height: 16),
-                const Text(
-                  'Join Smart Curb',
-                  style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                    color: kText,
-                  ),
-                ),
+                Text('Join Smart Curb', style: mono(fontSize: 24)),
                 const SizedBox(height: 32),
                 AppTextField(
                   controller: _emailCtrl,
@@ -347,13 +425,7 @@ class _RegisterPageState extends State<RegisterPage> {
                 const SizedBox(height: 16),
                 TextButton(
                   onPressed: () => Navigator.pop(context),
-                  child: const Text(
-                    'Already have an account? Back to Login',
-                    style: TextStyle(
-                      color: kAccent,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
+                  child: const Text('Already have an account? Back to Login'),
                 ),
               ],
             ),
@@ -393,10 +465,6 @@ class _UserSpaceState extends State<UserSpace> {
         actions: [
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert, color: kAccent),
-            color: kCard,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
             offset: const Offset(0, 50),
             onSelected: (val) {
               final page = (val == 'settings')
@@ -419,17 +487,24 @@ class _UserSpaceState extends State<UserSpace> {
           _ProfileTab(),
         ],
       ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _currentIndex,
-        onTap: (index) => setState(() => _currentIndex = index),
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.directions_car),
-            label: 'Vehicle',
-          ),
-          BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
-        ],
+      bottomNavigationBar: DecoratedBox(
+        decoration: const BoxDecoration(
+          border: Border(top: BorderSide(color: kDivider)),
+        ),
+        child: NavigationBar(
+          selectedIndex: _currentIndex,
+          onDestinationSelected: (index) =>
+              setState(() => _currentIndex = index),
+          height: 68,
+          destinations: const [
+            NavigationDestination(icon: Icon(Icons.home), label: 'Home'),
+            NavigationDestination(
+              icon: Icon(Icons.directions_car),
+              label: 'Vehicle',
+            ),
+            NavigationDestination(icon: Icon(Icons.person), label: 'Profile'),
+          ],
+        ),
       ),
     );
   }
@@ -457,19 +532,14 @@ Widget buildCampusLogo(String shortName) {
     width: 52,
     height: 52,
     decoration: BoxDecoration(
-      color: const Color(0xFF003366),
-      borderRadius: BorderRadius.circular(10),
-      border: Border.all(color: const Color(0xFFCC0000), width: 1.5),
+      color: kCardAlt,
+      borderRadius: BorderRadius.circular(kRadius),
+      border: Border.all(color: kDivider),
     ),
     alignment: Alignment.center,
     child: Text(
       shortName,
-      style: const TextStyle(
-        color: Colors.white,
-        fontSize: 16,
-        fontWeight: FontWeight.w900,
-        letterSpacing: 1,
-      ),
+      style: mono(fontSize: 15, color: kAccent, letterSpacing: 0.8),
     ),
   );
 }
@@ -508,113 +578,29 @@ class _HomeTabState extends State<_HomeTab> {
     });
   }
 
+  final _searchCtrl = TextEditingController();
+  String _query = '';
+
+  /// Ids of locations already on the home page (kept in sync by the stream).
+  Set<String> _addedIds = const {};
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
   void _showAddSpaceDialog() {
+    final notAdded = [
+      for (final c in _availableCampuses)
+        if (!_addedIds.contains(c['id'])) c,
+    ];
     showDialog(
       context: context,
       barrierDismissible: true,
-      builder: (dialogCtx) => Dialog(
-        backgroundColor: kCard,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
-        child: Container(
-          width: double.infinity,
-          constraints: const BoxConstraints(maxWidth: 550, maxHeight: 600),
-          padding: const EdgeInsets.all(20.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.close),
-                    color: kText,
-                    tooltip: 'Close',
-                    onPressed: () => Navigator.of(dialogCtx).pop(),
-                  ),
-                  const Text(
-                    'Select Location',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: kText,
-                    ),
-                  ),
-                  const SizedBox(width: 48),
-                ],
-              ),
-              const Divider(height: 24),
-              Expanded(
-                child: ListView.builder(
-                  itemCount: _availableCampuses.length,
-                  itemBuilder: (context, index) {
-                    final campus = _availableCampuses[index];
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 12.0),
-                      padding: const EdgeInsets.all(16.0),
-                      decoration: BoxDecoration(
-                        color: kBg,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: kDivider),
-                      ),
-                      child: Row(
-                        children: [
-                          buildCampusLogo(campus['shortName']!),
-                          const SizedBox(width: 14),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  campus['fullName']!,
-                                  style: const TextStyle(
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.bold,
-                                    color: kText,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  campus['address']!,
-                                  style: const TextStyle(
-                                    fontSize: 12,
-                                    color: kTextMuted,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          ElevatedButton(
-                            onPressed: () {
-                              Navigator.of(dialogCtx).pop();
-                              _addCampus(campus);
-                            },
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: kAccent,
-                              foregroundColor: kOnAccent,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 10,
-                              ),
-                            ),
-                            child: const Text(
-                              'Add',
-                              style: TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        ),
+      builder: (_) => _SelectLocationDialog(
+        campuses: notAdded,
+        onAdd: _addCampus,
       ),
     );
   }
@@ -635,6 +621,7 @@ class _HomeTabState extends State<_HomeTab> {
 
         final rawData = snapshot.data?.snapshot.value;
         if (rawData is! Map) {
+          _addedIds = const {};
           return AnimatedAddCard(
             title: 'No Locations Found',
             subtitle: 'Tap to add a new location',
@@ -642,37 +629,39 @@ class _HomeTabState extends State<_HomeTab> {
           );
         }
 
-        final locationEntries = rawData.entries.toList();
-
-        return ListView(
-          padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0),
-          children: [
-            for (final entry in locationEntries)
-              if (entry.value is Map)
-                _buildLocationCard(
-                  uid,
-                  entry.key.toString(),
+        final locations = <String, Map<String, dynamic>>{
+          for (final entry in rawData.entries)
+            if (entry.value is Map)
+              entry.key.toString():
                   Map<String, dynamic>.from(entry.value as Map),
-                ),
-            const SizedBox(height: 8),
-            OutlinedButton(
-              onPressed: _showAddSpaceDialog,
-              style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                side: const BorderSide(color: kAccent, width: 1.5),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-              child: const Text(
-                'Add more locations',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: kAccent,
-                ),
-              ),
+        };
+        _addedIds = locations.keys.toSet();
+        final visible = locations.entries
+            .where((e) => matchesLocationQuery(e.value, _query))
+            .toList();
+
+        return _ListWithBottomAction(
+          actionTitle: 'Add more locations',
+          actionIcon: Icons.add_location_alt_outlined,
+          onAction: _showAddSpaceDialog,
+          children: [
+            AppTextField(
+              controller: _searchCtrl,
+              hintText: 'Search your locations',
+              icon: Icons.search,
+              onChanged: (v) => setState(() => _query = v),
             ),
+            const SizedBox(height: 16),
+            for (final e in visible) _buildLocationCard(uid, e.key, e.value),
+            if (visible.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 24),
+                child: Text(
+                  'No saved locations match "${_query.trim()}".',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: kTextMuted, fontSize: 13),
+                ),
+              ),
           ],
         );
       },
@@ -688,17 +677,17 @@ class _HomeTabState extends State<_HomeTab> {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12.0),
       child: InkWell(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(kRadius),
         onTap: () => Navigator.push(
           context,
           MaterialPageRoute(builder: (_) => const FauMapScreen()),
         ),
         child: Container(
-          padding: const EdgeInsets.all(20.0),
+          padding: const EdgeInsets.all(16.0),
           decoration: BoxDecoration(
             color: kCard,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: kDivider, width: 1.5),
+            borderRadius: BorderRadius.circular(kRadius),
+            border: Border.all(color: kDivider),
           ),
           child: Row(
             children: [
@@ -711,22 +700,22 @@ class _HomeTabState extends State<_HomeTab> {
                     Text(
                       fullName,
                       style: const TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.bold,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
                         color: kText,
                       ),
                     ),
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 4),
                     Text(
                       address,
-                      style: const TextStyle(fontSize: 13, color: kTextMuted),
+                      style: const TextStyle(fontSize: 12.5, color: kTextMuted),
                     ),
                   ],
                 ),
               ),
               IconButton(
                 icon: const Icon(Icons.delete_outline, size: 20),
-                color: Colors.redAccent.withValues(alpha: 0.7),
+                color: kRed,
                 tooltip: 'Remove Place',
                 onPressed: () => FirebaseDatabase.instance
                     .ref('drivers/$uid/locations/$locKey')
@@ -735,6 +724,148 @@ class _HomeTabState extends State<_HomeTab> {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Case-insensitive match on a location's short name, full name or address.
+/// An empty query matches everything.
+bool matchesLocationQuery(Map<String, dynamic> loc, String query) {
+  final q = query.trim().toLowerCase();
+  if (q.isEmpty) return true;
+  return ['shortName', 'fullName', 'address']
+      .any((k) => (loc[k]?.toString().toLowerCase() ?? '').contains(q));
+}
+
+class _SelectLocationDialog extends StatefulWidget {
+  /// Campuses not yet on the user's home page.
+  final List<Map<String, String>> campuses;
+  final void Function(Map<String, String> campus) onAdd;
+
+  const _SelectLocationDialog({required this.campuses, required this.onAdd});
+
+  @override
+  State<_SelectLocationDialog> createState() => _SelectLocationDialogState();
+}
+
+class _SelectLocationDialogState extends State<_SelectLocationDialog> {
+  final _searchCtrl = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final results = widget.campuses
+        .where((c) => matchesLocationQuery(c, _query))
+        .toList();
+
+    final String? emptyText = widget.campuses.isEmpty
+        ? 'All available locations are already on your home page.'
+        : (results.isEmpty ? 'No locations match "${_query.trim()}".' : null);
+
+    return Dialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+      child: Container(
+        width: double.infinity,
+        constraints: const BoxConstraints(maxWidth: 550, maxHeight: 600),
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  color: kText,
+                  tooltip: 'Close',
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+                Text('Select Location', style: mono(fontSize: 16)),
+                const SizedBox(width: 48),
+              ],
+            ),
+            const Divider(height: 24),
+            AppTextField(
+              controller: _searchCtrl,
+              hintText: 'Search locations',
+              icon: Icons.search,
+              onChanged: (v) => setState(() => _query = v),
+            ),
+            const SizedBox(height: 16),
+            Expanded(
+              child: emptyText != null
+                  ? Padding(
+                      padding: const EdgeInsets.only(top: 24),
+                      child: Text(
+                        emptyText,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: kTextMuted, fontSize: 13),
+                      ),
+                    )
+                  : ListView.builder(
+                      itemCount: results.length,
+                      itemBuilder: (context, index) =>
+                          _buildCampusRow(results[index]),
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCampusRow(Map<String, String> campus) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12.0),
+      padding: const EdgeInsets.all(16.0),
+      decoration: BoxDecoration(
+        color: kBg,
+        borderRadius: BorderRadius.circular(kRadius),
+        border: Border.all(color: kDivider),
+      ),
+      child: Row(
+        children: [
+          buildCampusLogo(campus['shortName']!),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  campus['fullName']!,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: kText,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  campus['address']!,
+                  style: const TextStyle(fontSize: 12, color: kTextMuted),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              widget.onAdd(campus);
+            },
+            style: ElevatedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            ),
+            child: const Text('Add'),
+          ),
+        ],
       ),
     );
   }
@@ -1138,31 +1269,6 @@ Map<String, dynamic> _pointFeature(LatLng p, Map<String, dynamic> props) => {
       'geometry': {'type': 'Point', 'coordinates': _coord(p)},
     };
 
-/// Square polygon around [c] (used for the 3D lot pillars and destination beacon).
-Map<String, dynamic> _squareFeature(
-  LatLng c,
-  double halfMeters,
-  Map<String, dynamic> props,
-) {
-  final dLat = halfMeters / 111320.0;
-  final dLng = halfMeters / (111320.0 * math.cos(c.latitude * math.pi / 180.0));
-  final ring = [
-    [c.longitude - dLng, c.latitude - dLat],
-    [c.longitude + dLng, c.latitude - dLat],
-    [c.longitude + dLng, c.latitude + dLat],
-    [c.longitude - dLng, c.latitude + dLat],
-    [c.longitude - dLng, c.latitude - dLat],
-  ];
-  return {
-    'type': 'Feature',
-    'properties': props,
-    'geometry': {
-      'type': 'Polygon',
-      'coordinates': [ring],
-    },
-  };
-}
-
 String _hex(Color c) =>
     '#${(c.toARGB32() & 0xFFFFFF).toRadixString(16).padLeft(6, '0')}';
 
@@ -1245,8 +1351,17 @@ class _FauMapScreenState extends State<FauMapScreen> {
   // ---- camera tuning ----
   static const double _overviewZoom = 16.0;
   static const double _overviewTilt = 50.0;
-  static const double _navZoom = 18.0;
-  static const double _navTilt = 60.0;
+  // Turn-by-turn camera, tuned to feel like Apple / Google Maps: course-up,
+  // close-in street-level zoom, arrow in the lower part of the screen.
+  // (Max map zoom is 20, see minMaxZoomPreference.)
+  static const double _navZoom3D = 19.5;
+  static const double _navZoom2D = 18.0;
+  static const double _navTilt = 55.0;
+
+  /// Arrow sits this far down the map (0 = top, 1 = bottom).
+  static const double _navPuckY = 0.72;
+
+  double get _navZoom => _is3D ? _navZoom3D : _navZoom2D;
 
   // ---- routing tuning ----
   static const double _offRouteMeters = 35.0;
@@ -1272,8 +1387,6 @@ class _FauMapScreenState extends State<FauMapScreen> {
 
   // ---- map source / layer ids ----
   static const String _srcRoute = 'sc-route';
-  static const String _srcPillars = 'sc-lot-pillars';
-  static const String _srcBeacon = 'sc-beacon';
   static const String _srcLots = 'sc-lots';
   static const String _srcBuildings = 'sc-buildings';
   static const String _srcPuck = 'sc-puck';
@@ -1316,18 +1429,105 @@ class _FauMapScreenState extends State<FauMapScreen> {
   bool _is3D = true;
   late final _SourceSync _sync = _SourceSync(_sendSource);
   Offset? _pointerDownAt;
-  DateTime _lastCamAt = DateTime.fromMillisecondsSinceEpoch(0);
   double _camBearing = 0;
+
+  /// Height of the map area (below the app bar), set by the LayoutBuilder.
+  double _mapHeight = 0;
 
   // ---- subscriptions ----
   StreamSubscription<geo.Position>? _positionSub;
   StreamSubscription<DatabaseEvent>? _parkingSub;
   StreamSubscription<CompassEvent>? _compassSub;
   Timer? _simTimer;
+
+  // ---- smooth arrow + camera (live GPS and Simulate Run) ----
+  // Positions arrive about once a second (GPS) or every 0.5 s (simulation).
+  // The arrow glides from where it is to each new position over about the
+  // time between positions. In focus mode the camera makes ONE linear ease per
+  // position with the same timing, so arrow and camera stay locked together
+  // while the map only gets about one camera command a second. (Moving the
+  // camera every frame cancelled the user's drag and wheel-zoom gestures.)
+  static const Duration _glideFrame = Duration(milliseconds: 33); // ~30 fps
+  static const double _glideSnapMeters = 100; // bigger jumps don't animate
+  Timer? _glideTimer;
+  LatLng? _shownPos; // where the arrow is drawn; null = draw at _userPos
+  LatLng? _glideFrom;
+  LatLng? _glideTo;
+  DateTime _glideStart = DateTime.fromMillisecondsSinceEpoch(0);
+  Duration _glideDuration = Duration.zero;
+  DateTime _lastFixAt = DateTime.fromMillisecondsSinceEpoch(0);
+  int _glideFrameCount = 0;
+
+  // ---- detecting the user moving the map in focus mode ----
+  // The app always knows where its own camera should be: the target of an
+  // instant move, or a point along a linear ease. If the map reports
+  // anything else, the user dragged, zoomed, rotated or tilted it, so focus
+  // mode turns off and the camera stays exactly where it is.
+  /// Deliberate animations (focus-mode intro, 2D/3D switch) pause the check.
+  DateTime _camAnimUntil = DateTime.fromMillisecondsSinceEpoch(0);
+  LatLng? _cmdTarget; // where the latest camera command ends up
+  double _cmdBearing = 0;
+  // The command before that: a camera report can arrive just after the next
+  // command was sent, so matching it also counts as "ours".
+  LatLng? _prevCmdTarget;
+  double _prevCmdBearing = 0;
+  // Start of the current linear ease (null = instant move, no ease).
+  LatLng? _easeFrom;
+  double _easeFromBearing = 0;
+  DateTime _easeStart = DateTime.fromMillisecondsSinceEpoch(0);
+  Duration _easeDuration = Duration.zero;
+
+  /// The "arrow low on screen" padding stays on after focus mode ends, so the
+  /// view doesn't jump; it is removed right before the next app animation.
+  bool _navPaddingOn = false;
+
+  void _setCameraCommand(
+    LatLng target,
+    double bearing, {
+    LatLng? easeFrom,
+    double easeFromBearing = 0,
+    Duration easeDuration = Duration.zero,
+  }) {
+    _prevCmdTarget = _cmdTarget;
+    _prevCmdBearing = _cmdBearing;
+    _cmdTarget = target;
+    _cmdBearing = bearing;
+    _easeFrom = easeFrom;
+    _easeFromBearing = easeFromBearing;
+    _easeStart = DateTime.now();
+    _easeDuration = easeDuration;
+  }
+
+  /// 0..1 progress of the current ease (1 when there is none).
+  double get _easeT {
+    if (_easeFrom == null || _easeDuration == Duration.zero) return 1;
+    final elapsed = DateTime.now().difference(_easeStart).inMilliseconds;
+    return (elapsed / _easeDuration.inMilliseconds).clamp(0.0, 1.0);
+  }
+
+  /// Where the app's camera should be right now.
+  LatLng? _expectedCamTarget() {
+    final cmd = _cmdTarget;
+    final from = _easeFrom;
+    if (cmd == null || from == null) return cmd;
+    return Geo.lerp(from, cmd, _easeT);
+  }
+
+  double _expectedCamBearing() {
+    if (_easeFrom == null) return _cmdBearing;
+    final d = Geo.shortestAngle(_easeFromBearing, _cmdBearing);
+    return (_easeFromBearing + d * _easeT) % 360;
+  }
+
   int _simTickCount = 0;
 
   /// Dev mode: last tapped coordinate (notifier = no full rebuild).
   final ValueNotifier<LatLng?> _devTap = ValueNotifier(null);
+
+  // ---- search box ----
+  final TextEditingController _searchCtrl = TextEditingController();
+  final FocusNode _searchFocus = FocusNode();
+  String _searchQuery = '';
 
   // ---- location ----
   LatLng? _userPos;
@@ -1368,6 +1568,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
   @override
   void initState() {
     super.initState();
+    _searchFocus.addListener(_onSearchFocusChanged);
     _startLiveLocationTracking();
     _startCompassTracking();
     _listenToFirebaseParking();
@@ -1376,10 +1577,13 @@ class _FauMapScreenState extends State<FauMapScreen> {
   @override
   void dispose() {
     _simTimer?.cancel();
+    _glideTimer?.cancel();
     _positionSub?.cancel();
     _compassSub?.cancel();
     _parkingSub?.cancel();
     _devTap.dispose();
+    _searchFocus.dispose();
+    _searchCtrl.dispose();
     _styleReady = false;
     _map = null; // the MapLibreMap widget disposes its own controller
     super.dispose();
@@ -1522,8 +1726,6 @@ class _FauMapScreenState extends State<FauMapScreen> {
     // ---- our GeoJSON sources (start empty, filled by _pushAll) ----
     for (final id in [
       _srcRoute,
-      _srcPillars,
-      _srcBeacon,
       _srcLots,
       _srcBuildings,
       _srcPuck,
@@ -1565,35 +1767,6 @@ class _FauMapScreenState extends State<FauMapScreen> {
       ),
     );
 
-    // ---- 3D lot pillars (height = free spots) & destination beacon ----
-    await safe(
-      'lot pillars',
-      () => m.addFillExtrusionLayer(
-        _srcPillars,
-        'sc-lot-pillars',
-        const FillExtrusionLayerProperties(
-          fillExtrusionColor: ['get', 'color'],
-          fillExtrusionHeight: ['get', 'height'],
-          fillExtrusionBase: 0,
-          fillExtrusionOpacity: 0.85,
-        ),
-        enableInteraction: false,
-      ),
-    );
-    await safe(
-      'beacon',
-      () => m.addFillExtrusionLayer(
-        _srcBeacon,
-        'sc-beacon',
-        FillExtrusionLayerProperties(
-          fillExtrusionColor: _hex(kDev),
-          fillExtrusionHeight: ['get', 'height'],
-          fillExtrusionBase: 0,
-          fillExtrusionOpacity: 0.8,
-        ),
-        enableInteraction: false,
-      ),
-    );
 
     // ---- building markers ----
     const isSelected = ['==', ['get', 'selected'], true];
@@ -1632,7 +1805,24 @@ class _FauMapScreenState extends State<FauMapScreen> {
       ),
     );
 
-    // ---- lot labels ----
+    // ---- lot markers: status-coloured dot with the label underneath ----
+    // Dot and label share the lot's live status colour (green / amber / red).
+    // The recommended lot gets a bigger dot with an accent ring.
+    const isBestLot = ['==', ['get', 'best'], true];
+    await safe(
+      'lot dots',
+      () => m.addCircleLayer(
+        _srcLots,
+        'sc-lots-dot',
+        CircleLayerProperties(
+          circleRadius: ['case', isBestLot, 8, 6],
+          circleColor: ['get', 'color'],
+          circleStrokeColor: ['case', isBestLot, _hex(kAccent), '#000000'],
+          circleStrokeWidth: ['case', isBestLot, 3, 2],
+        ),
+        enableInteraction: false,
+      ),
+    );
     await safe(
       'lot labels',
       () => m.addSymbolLayer(
@@ -1641,11 +1831,13 @@ class _FauMapScreenState extends State<FauMapScreen> {
         const SymbolLayerProperties(
           textField: ['get', 'label'],
           textFont: _fonts,
-          textSize: ['case', ['==', ['get', 'best'], true], 13, 11],
+          textSize: ['case', isBestLot, 13, 11],
           textColor: ['get', 'color'],
           textHaloColor: '#000000',
           textHaloWidth: 1.8,
           textJustify: 'center',
+          textAnchor: 'top',
+          textOffset: [0, 0.9],
           textAllowOverlap: true,
           textIgnorePlacement: true,
         ),
@@ -1709,29 +1901,18 @@ class _FauMapScreenState extends State<FauMapScreen> {
   void _pushLots() {
     final bestId = _walkResult?.lotId;
     final labels = <Map<String, dynamic>>[];
-    final pillars = <Map<String, dynamic>>[];
 
     _liveLots.forEach((id, lot) {
-      final pos = lot['position'] as LatLng;
       final isBest = id == bestId;
-      final color = _hex(isBest ? kAccent : lot['color'] as Color);
-      final cap = lot['capacity'] as int;
-      final free = math.max(0, cap - (lot['occupied'] as int));
-      final height = cap == 0 ? 3.0 : (6.0 + free * 3.0).clamp(6.0, 60.0);
-
-      labels.add(_pointFeature(pos, {
+      labels.add(_pointFeature(lot['position'] as LatLng, {
         'label': '${lot['name']}\n${lot['status']}',
-        'color': color,
+        // Live status colour from _parseLots (green / amber / red).
+        'color': _hex(lot['color'] as Color),
         'best': isBest,
-      }));
-      pillars.add(_squareFeature(pos, isBest ? 9 : 7, {
-        'color': color,
-        'height': height,
       }));
     });
 
     _sync.push(_srcLots, _fc(labels));
-    _sync.push(_srcPillars, _fc(pillars));
   }
 
   void _pushBuildings() {
@@ -1745,15 +1926,6 @@ class _FauMapScreenState extends State<FauMapScreen> {
             'selected': b.id == selectedId,
           }),
       ]),
-    );
-    final sel = _selectedBuilding;
-    _sync.push(
-      _srcBeacon,
-      _fc(sel == null
-          ? const <Map<String, dynamic>>[]
-          : [
-              _squareFeature(sel.position, 4, {'height': 45.0}),
-            ]),
     );
   }
 
@@ -1776,7 +1948,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
   }
 
   void _pushPuck() {
-    final p = _userPos;
+    final p = _shownPos ?? _userPos;
     _sync.push(
       _srcPuck,
       _fc(p == null
@@ -1794,73 +1966,135 @@ class _FauMapScreenState extends State<FauMapScreen> {
   void _animateTo(CameraPosition p, Duration d) {
     final m = _map;
     if (m == null) return;
+    // Outside focus mode, drop the leftover "arrow low" padding first; the
+    // animation that follows hides the shift.
+    if (!_navTracking) _clearNavPadding();
+    // Don't mistake our own animation for the user moving the map, and keep
+    // focus-mode camera updates from cutting it off.
+    _camAnimUntil = DateTime.now().add(d + const Duration(milliseconds: 150));
+    _setCameraCommand(p.target, p.bearing);
     _guard(() => m.animateCamera(CameraUpdate.newCameraPosition(p), duration: d));
   }
 
-  /// Follow-camera for navigation. Linear easing chains smoothly between
-  /// successive calls; calls are throttled so the channel never floods.
-  void _follow(LatLng pos, double bearing, Duration d, {bool force = false}) {
-    final m = _map;
-    if (m == null || !_navTracking) return;
-    final now = DateTime.now();
-    if (!force &&
-        now.difference(_lastCamAt) < const Duration(milliseconds: 150)) {
-      return;
-    }
-    _lastCamAt = now;
-    _guard(() => m.easeCamera(
-          CameraUpdate.newCameraPosition(CameraPosition(
-            target: pos,
-            zoom: _navZoom,
-            bearing: bearing,
-            tilt: _is3D ? _navTilt : 0,
-          )),
-          duration: d,
-          interpolation: CameraAnimationInterpolation.linear,
-        ));
+  /// Called for every camera change. In focus mode, a camera that isn't where
+  /// the app put it means the user dragged, zoomed, rotated or tilted the map,
+  /// so focus mode switches off and leaves the camera where they put it.
+  void _onCameraMove(CameraPosition cam) {
+    if (!_navTracking) return;
+    if (DateTime.now().isBefore(_camAnimUntil)) return;
+    final expected = _expectedCamTarget();
+    if (expected == null) return;
+
+    bool near(LatLng? target, double bearing) =>
+        target != null &&
+        Geo.meters(cam.target, target) <= 2.0 &&
+        Geo.shortestAngle(cam.bearing, bearing).abs() <= 4;
+
+    // The app never changes zoom or tilt in focus mode outside the paused
+    // animations, so any change at all there is the user (catches the very
+    // first frame of a mouse-wheel zoom).
+    final zoomOrTilt = (cam.zoom - _navZoom).abs() > 0.01 ||
+        (cam.tilt - (_is3D ? _navTilt : 0)).abs() > 0.5;
+    final positionOk = near(expected, _expectedCamBearing()) ||
+        near(_cmdTarget, _cmdBearing) ||
+        near(_prevCmdTarget, _prevCmdBearing);
+    if (zoomOrTilt || !positionOk) _setNavTracking(false, userGesture: true);
   }
 
-  void _setNavTracking(bool on, {bool recenter = true}) {
-    final pos = _userPos;
+  /// Direction the nav camera should face: exactly where the car's arrow
+  /// points (the road segment it is on, or the GPS/compass heading off-route),
+  /// so the arrow always points straight up and the camera turns only as
+  /// much as the car does.
+  double _navCameraBearing() => _puckBearing();
+
+  /// Shifts the map's focal point down so the arrow sits at [_navPuckY].
+  /// Applied instantly (not animated): an animated padding change is
+  /// cancelled by the camera move that follows it, which is why the arrow
+  /// used to stay in the middle of the screen.
+  Future<void> _applyNavPadding(MapLibreMapController m) async {
+    final h = _mapHeight > 0 ? _mapHeight : MediaQuery.of(context).size.height;
+    // Centre of the padded viewport = (top + h) / 2 = h * _navPuckY.
+    final top = h * (2 * _navPuckY - 1);
+    _navPaddingOn = true;
+    try {
+      await m.setPadding(top: top);
+    } catch (e) {
+      debugPrint('[map] $e');
+    }
+  }
+
+  /// Removes the focus-mode padding (no-op if it is already off).
+  void _clearNavPadding() {
     final m = _map;
+    if (m == null || !_navPaddingOn) return;
+    _navPaddingOn = false;
+    _guard(() => m.setPadding());
+  }
+
+  /// Turns focus mode on or off.
+  ///
+  /// Turning it off never moves the camera: it stays at the same place, zoom
+  /// and angle and simply stops following the arrow. [userGesture] means the
+  /// user is dragging/zooming right now, so the app must not touch the camera
+  /// at all (any camera call would cancel their gesture). Otherwise an ease
+  /// that is still running is stopped where it is.
+  Future<void> _setNavTracking(bool on, {bool userGesture = false}) async {
+    final pos = _shownPos ?? _userPos;
+    final m = _map;
+    if (_navTracking == on) return;
     setState(() => _navTracking = on);
     if (m == null) return;
 
-    if (on && pos != null) {
-      _camBearing = _heading;
-      // Push the focal point down so you see more road ahead.
-      final h = MediaQuery.of(context).size.height;
-      _guard(() => m.setPadding(top: h * 0.35, animated: true));
-      _animateTo(
-        CameraPosition(
-          target: pos,
-          zoom: _navZoom,
-          bearing: _heading,
-          tilt: _is3D ? _navTilt : 0,
-        ),
-        const Duration(milliseconds: 800),
-      );
-    } else {
-      _guard(() => m.setPadding(animated: true));
-      if (recenter && pos != null) {
-        _animateTo(
-          CameraPosition(
-            target: pos,
-            zoom: 16.5,
-            bearing: 0,
-            tilt: _is3D ? _overviewTilt : 0,
-          ),
-          const Duration(milliseconds: 800),
-        );
+    if (!on) {
+      final cam = m.cameraPosition;
+      if (!userGesture && _easeT < 1 && cam != null) {
+        // Freeze the camera exactly where it is now.
+        _guard(() => m.moveCamera(CameraUpdate.newCameraPosition(cam)));
       }
+      _easeFrom = null;
+      return;
     }
+
+    if (pos == null) return;
+    final bearing = _navCameraBearing();
+    _camBearing = bearing;
+    // The padding shift below also reports a camera move; ignore it.
+    _camAnimUntil = DateTime.now().add(const Duration(seconds: 1));
+    _cmdTarget = null;
+    _prevCmdTarget = null;
+    _easeFrom = null;
+    await _applyNavPadding(m);
+    if (!mounted || !_navTracking) return;
+    _animateTo(
+      CameraPosition(
+        target: pos,
+        zoom: _navZoom,
+        bearing: bearing,
+        tilt: _is3D ? _navTilt : 0,
+      ),
+      const Duration(milliseconds: 800),
+    );
   }
 
   void _toggle3D() {
     final m = _map;
     setState(() => _is3D = !_is3D);
     if (m == null) return;
-    final tilt = !_is3D ? 0.0 : (_navTracking ? _navTilt : _overviewTilt);
+    final pos = _userPos;
+    if (_navTracking && pos != null) {
+      // Navigating: switch zoom and tilt together, keep facing the route.
+      _animateTo(
+        CameraPosition(
+          target: pos,
+          zoom: _navZoom,
+          bearing: _camBearing,
+          tilt: _is3D ? _navTilt : 0,
+        ),
+        const Duration(milliseconds: 700),
+      );
+      return;
+    }
+    final tilt = _is3D ? _overviewTilt : 0.0;
     _guard(() => m.animateCamera(
           CameraUpdate.tiltTo(tilt),
           duration: const Duration(milliseconds: 700),
@@ -1869,7 +2103,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
 
   void _resetView() {
     _clearDestination();
-    if (_navTracking) _setNavTracking(false, recenter: false);
+    if (_navTracking) _setNavTracking(false);
     _animateTo(
       CameraPosition(
         target: _fauCenter,
@@ -1900,7 +2134,9 @@ class _FauMapScreenState extends State<FauMapScreen> {
       setState(() => _heading = h);
       _pushPuck();
       if (_navTracking && _isOnCampus) {
-        _follow(_userPos!, h, const Duration(milliseconds: 300));
+        // On a route the camera stays course-up; the compass only steers it
+        // when there is no route to follow.
+        _refreshNavCamera(const Duration(milliseconds: 300));
       }
     });
   }
@@ -1979,20 +2215,144 @@ class _FauMapScreenState extends State<FauMapScreen> {
       progress = _updateRouteProgress(loc);
     });
 
-    _pushPuck();
-    _pushRoute();
-
     if (wasTracking && !onCampus) {
-      _setNavTracking(false, recenter: false);
-    } else if (_navTracking) {
-      _follow(loc, _heading, const Duration(milliseconds: 1000));
+      _setNavTracking(false);
     }
+    _startGlide(loc); // moves the arrow (and nav camera) smoothly to the fix
 
     if (progress == _Progress.arrived) _onArrived();
     if (progress == _Progress.offRoute &&
         p.accuracy <= _maxGpsAccuracyForReroute) {
       _maybeReroute();
     }
+  }
+
+  /// Starts (or retargets) the arrow glide toward a new position (a GPS fix,
+  /// or the next simulated position). In focus mode the camera eases along
+  /// with it over the same time.
+  void _startGlide(LatLng target) {
+    final now = DateTime.now();
+    final from = _shownPos ?? _userPos;
+    final sinceLastFix = now.difference(_lastFixAt);
+    _lastFixAt = now;
+
+    // First fix, or a jump too big to be driving: just place the arrow.
+    if (from == null || Geo.meters(from, target) > _glideSnapMeters) {
+      _stopGlide();
+      _pushPuck();
+      _pushRoute();
+      if (_navTracking) _jumpNavCamera(target);
+      return;
+    }
+
+    _glideFrom = from;
+    _glideTo = target;
+    _glideStart = now;
+    // Glide for about as long as fixes are arriving, so the arrow is still
+    // moving when the next one lands instead of stopping and restarting.
+    final ms = sinceLastFix.inMilliseconds.clamp(300, 1500);
+    _glideDuration = Duration(milliseconds: ms);
+    _glideTimer ??= Timer.periodic(_glideFrame, (_) => _glideStep());
+    if (_navTracking) _easeNavCamera(target, _glideDuration);
+  }
+
+  void _glideStep() {
+    final from = _glideFrom;
+    final to = _glideTo;
+    if (!mounted || from == null || to == null) {
+      _stopGlide();
+      return;
+    }
+    final elapsed = DateTime.now().difference(_glideStart).inMilliseconds;
+    final t = (elapsed / _glideDuration.inMilliseconds).clamp(0.0, 1.0);
+    final pos = Geo.lerp(from, to, t);
+    _shownPos = pos;
+    _glideFrameCount++;
+
+    // Keep the route line attached to the arrow instead of the latest fix.
+    if (_displayRoute.length >= 2) {
+      _displayRoute = [pos, ..._displayRoute.skip(1)];
+      if (_glideFrameCount % 3 == 0 || t >= 1) _pushRoute(); // ~10 Hz
+    }
+    _pushPuck(); // the camera is already easing along on its own
+
+    if (t >= 1) {
+      _glideTimer?.cancel();
+      _glideTimer = null;
+    }
+  }
+
+  /// Cancels any glide and draws the arrow at the real position again.
+  void _stopGlide() {
+    _glideTimer?.cancel();
+    _glideTimer = null;
+    _glideFrom = null;
+    _glideTo = null;
+    _shownPos = null;
+  }
+
+  CameraPosition _navCamera(LatLng target, double bearing) => CameraPosition(
+        target: target,
+        zoom: _navZoom,
+        bearing: bearing,
+        tilt: _is3D ? _navTilt : 0,
+      );
+
+  /// Focus mode: ease the camera linearly to [target] over [d], facing the
+  /// car's direction. One call per position; the map animates it smoothly.
+  void _easeNavCamera(LatLng target, Duration d) {
+    final m = _map;
+    if (m == null || !_navTracking) return;
+    // Let a deliberate animation (intro, 2D/3D) finish first.
+    if (DateTime.now().isBefore(_camAnimUntil)) return;
+    final fromTarget = _expectedCamTarget() ?? target;
+    final fromBearing = _expectedCamBearing();
+    final bearing = _navCameraBearing();
+    _camBearing = bearing;
+    _setCameraCommand(
+      target,
+      bearing,
+      easeFrom: fromTarget,
+      easeFromBearing: fromBearing,
+      easeDuration: d,
+    );
+    _guard(() => m.easeCamera(
+          CameraUpdate.newCameraPosition(_navCamera(target, bearing)),
+          duration: d,
+          interpolation: CameraAnimationInterpolation.linear,
+        ));
+  }
+
+  /// Focus mode: move the camera instantly (used after a big position jump).
+  void _jumpNavCamera(LatLng target) {
+    final m = _map;
+    if (m == null || !_navTracking) return;
+    if (DateTime.now().isBefore(_camAnimUntil)) return;
+    final bearing = _navCameraBearing();
+    _camBearing = bearing;
+    _setCameraCommand(target, bearing);
+    _guard(() => m.moveCamera(
+          CameraUpdate.newCameraPosition(_navCamera(target, bearing)),
+        ));
+  }
+
+  /// Focus mode: re-aim the camera when the direction changes without a new
+  /// position (compass turn, new route). If the arrow is mid-glide, the
+  /// camera keeps travelling with it to the glide's end on the same timing.
+  void _refreshNavCamera(Duration whenStill) {
+    final glideTo = _glideTo;
+    if (_glideTimer != null && glideTo != null) {
+      final left = _glideDuration - DateTime.now().difference(_glideStart);
+      _easeNavCamera(
+        glideTo,
+        left > const Duration(milliseconds: 50)
+            ? left
+            : const Duration(milliseconds: 50),
+      );
+      return;
+    }
+    final pos = _shownPos ?? _userPos;
+    if (pos != null) _easeNavCamera(pos, whenStill);
   }
 
   Future<void> _resyncRealGps() async {
@@ -2066,15 +2426,16 @@ class _FauMapScreenState extends State<FauMapScreen> {
       final total = capacity[lotId] ?? 0;
       final occ = occupied[lotId] ?? 0;
       final ratio = total > 0 ? occ / total : 0.0;
+      // Same thresholds as the dashboard's lot bars (Overview.jsx).
       final Color color;
       if (total == 0) {
-        color = Colors.grey;
-      } else if (ratio < 0.60) {
-        color = kAccent;
-      } else if (ratio < 0.90) {
+        color = kTextMuted;
+      } else if (ratio >= 0.90) {
+        color = kRed;
+      } else if (ratio >= 0.70) {
         color = kAmber;
       } else {
-        color = kRed;
+        color = kOpen;
       }
 
       result[lotId] = {
@@ -2180,6 +2541,13 @@ class _FauMapScreenState extends State<FauMapScreen> {
     });
     _pushRoute();
     _pushPuck();
+
+    // Already navigating: turn the camera to face the new route right away.
+    final pos = _userPos;
+    if (_navTracking && pos != null) {
+      setState(() => _updateRouteProgress(pos));
+      _refreshNavCamera(const Duration(milliseconds: 600));
+    }
   }
 
   void _maybeReroute() {
@@ -2255,6 +2623,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
 
   void _onBuildingSelected(FauBuilding building) {
     _stopSimulation();
+    _searchCtrl.text = building.name; // also covers picks made by map tap
     setState(() {
       _selectedBuilding = building;
       _routeLotId = null;
@@ -2270,6 +2639,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
 
     final m = _map;
     if (m != null && !_navTracking) {
+      _clearNavPadding();
       _guard(() => m.animateCamera(
             CameraUpdate.newLatLngZoom(building.position, 17.0),
             duration: const Duration(milliseconds: 900),
@@ -2280,6 +2650,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
   void _clearDestination() {
     _stopSimulation();
     _routeRequestId++; // cancel any in-flight route request
+    _searchCtrl.clear();
     setState(() {
       _selectedBuilding = null;
       _walkResult = null;
@@ -2333,6 +2704,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
 
   void _teleportToCampus() {
     _stopSimulation();
+    _stopGlide();
     var target = _campusEntrance;
     for (final p in _fullRoute) {
       if (_inCampus(p)) {
@@ -2348,6 +2720,8 @@ class _FauMapScreenState extends State<FauMapScreen> {
     _pushPuck();
     final m = _map;
     if (m != null) {
+      if (_navTracking) _setNavTracking(false);
+      _clearNavPadding();
       _guard(() => m.animateCamera(
             CameraUpdate.newLatLngZoom(target, 17.5),
             duration: const Duration(milliseconds: 1200),
@@ -2367,8 +2741,8 @@ class _FauMapScreenState extends State<FauMapScreen> {
         _project(_userPos ?? _fullRoute.first, 0, _fullRoute.length - 2);
     final onRoute = proj.dist <= _offRouteMeters;
 
-    _camBearing = _heading;
     _simTickCount = 0;
+    _stopGlide();
     setState(() {
       _isSimulating = true;
       _devLocationOverride = true;
@@ -2404,6 +2778,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
 
     if (seg >= route.length - 1) {
       _stopSimulation();
+      _stopGlide(); // put the arrow exactly on the end of the route
       setState(() {
         _userPos = route.last;
         _arrived = true;
@@ -2420,26 +2795,23 @@ class _FauMapScreenState extends State<FauMapScreen> {
     final bearing = Geo.bearing(cur, route[seg + 1]);
     _simTickCount++;
 
-    // Per-tick state is updated WITHOUT setState: the puck moves on the GPU
-    // via its GeoJSON source; Flutter widgets only refresh a few times a second.
+    // Per-tick state is updated WITHOUT setState; Flutter widgets only
+    // refresh a few times a second.
     _userPos = cur;
     _routeSeg = seg;
     _heading = bearing;
     _distToRoute = 0;
     _displayRoute = [cur, ...route.sublist(seg + 1)];
     _routeRemaining = Geo.meters(cur, route[seg + 1]) + _routeSuffix[seg + 1];
-    _pushPuck();
 
     if (_simTickCount % 5 == 0) {
-      _pushRoute(); // 4 Hz is plenty for the trimmed line
       setState(() => _gpsStatus = 'Simulating 20 mph (${bearing.round()}°)');
     }
 
-    if (_navTracking && _simTickCount % 4 == 0) {
-      _camBearing =
-          (_camBearing + Geo.shortestAngle(_camBearing, bearing) * 0.35) % 360;
-      _follow(cur, _camBearing, const Duration(milliseconds: 220), force: true);
-    }
+    // Feed the simulated car through the same glide as live GPS (a "fix"
+    // every 0.5 s): the arrow, the route line and the focus-mode camera all
+    // move exactly as they do when driving for real.
+    if (_simTickCount % 10 == 1) _startGlide(cur);
   }
 
   void _stopSimulation() {
@@ -2477,149 +2849,37 @@ class _FauMapScreenState extends State<FauMapScreen> {
     return _heading;
   }
 
-  void _showBuildingSelector() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: kCard,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text(
-                      'Select Building',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: kText,
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.close, color: kTextMuted),
-                      onPressed: () => Navigator.pop(ctx),
-                    ),
-                  ],
-                ),
-                const Divider(color: kDivider),
-                Expanded(
-                  child: ListView.separated(
-                    itemCount: _campusBuildings.length,
-                    separatorBuilder: (_, __) =>
-                        const Divider(color: kDivider, height: 1),
-                    itemBuilder: (context, index) {
-                      final bldg = _campusBuildings[index];
-                      final best = CampusPathfinder.findBestAvailableRoute(
-                        buildingPos: bldg.position,
-                        lots: _liveLots,
-                      );
-                      final lot = best != null ? _liveLots[best.lotId] : null;
-                      final free = lot == null
-                          ? 0
-                          : (lot['capacity'] as int) - (lot['occupied'] as int);
+  // ---- destination search ----
 
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(
-                            vertical: 8, horizontal: 4),
-                        child: Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 4,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Colors.white10,
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(
-                                bldg.code,
-                                style: const TextStyle(
-                                  color: kAccent,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    bldg.name,
-                                    style: const TextStyle(
-                                      color: kText,
-                                      fontWeight: FontWeight.w600,
-                                      fontSize: 14,
-                                    ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    lot != null
-                                        ? 'Best lot: ${lot['name']} ($free free, ${formatDistance(best!.totalDistanceMeters)} walk)'
-                                        : (_liveLots.isEmpty
-                                            ? 'Loading parking data...'
-                                            : 'All nearby lots full'),
-                                    style: const TextStyle(
-                                      color: kTextMuted,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            ElevatedButton.icon(
-                              onPressed: () {
-                                Navigator.pop(ctx);
-                                _onBuildingSelected(bldg);
-                              },
-                              icon: const Icon(Icons.navigation,
-                                  size: 14, color: Colors.black),
-                              label: const Text(
-                                'Go to',
-                                style: TextStyle(
-                                  color: Colors.black,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 12,
-                                ),
-                              ),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: kAccent,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 6,
-                                ),
-                                minimumSize: Size.zero,
-                                tapTargetSize:
-                                    MaterialTapTargetSize.shrinkWrap,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
+  static const int _maxSuggestions = 5;
+
+  /// Suggestions shown while the box is empty, reshuffled on each focus.
+  List<FauBuilding> _randomPicks = const [];
+
+  void _onSearchFocusChanged() {
+    if (!mounted) return;
+    setState(() {
+      if (_searchFocus.hasFocus) {
+        _randomPicks = (List<FauBuilding>.of(_campusBuildings)..shuffle())
+            .take(_maxSuggestions)
+            .toList();
+        // Show fresh suggestions; typing replaces the selected name.
+        _searchQuery = '';
+        _searchCtrl.selection = TextSelection(
+          baseOffset: 0,
+          extentOffset: _searchCtrl.text.length,
         );
-      },
-    );
+      } else {
+        // Closing the list puts the current destination's name back.
+        _searchCtrl.text = _selectedBuilding?.name ?? '';
+        _searchQuery = '';
+      }
+    });
+  }
+
+  void _pickSuggestion(FauBuilding building) {
+    _onBuildingSelected(building); // first, so unfocus shows the new name
+    _searchFocus.unfocus();
   }
 
   @override
@@ -2633,19 +2893,16 @@ class _FauMapScreenState extends State<FauMapScreen> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'FAU Campus Map',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
+            const Text('FAU Campus Map'),
             Text(
               navActive
                   ? 'Navigation Mode Active (${_heading.round()}°)'
                   : (_devMode ? 'Dev Mode Active' : 'Boca Raton Main Campus'),
-              style: TextStyle(
-                fontSize: 12,
+              style: GoogleFonts.archivo(
+                fontSize: 12.5,
                 color: navActive ? kAccent : (_devMode ? kDev : kTextMuted),
                 fontWeight: (navActive || _devMode)
-                    ? FontWeight.bold
+                    ? FontWeight.w600
                     : FontWeight.normal,
               ),
             ),
@@ -2680,12 +2937,12 @@ class _FauMapScreenState extends State<FauMapScreen> {
                       height: 18,
                       child: CircularProgressIndicator(
                         strokeWidth: 2,
-                        color: Colors.white,
+                        color: kText,
                       ),
                     )
                   : Icon(
                       _navTracking ? Icons.navigation : Icons.my_location,
-                      color: _navTracking ? kAccent : Colors.white,
+                      color: _navTracking ? kAccent : kText,
                     ),
               tooltip: _navTracking
                   ? 'Disable Navigation Focus'
@@ -2703,13 +2960,21 @@ class _FauMapScreenState extends State<FauMapScreen> {
       ),
       body: Stack(
         children: [
-          Positioned.fill(child: _buildMap()),
-          _buildSearchHeader(),
+          Positioned.fill(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                _mapHeight = constraints.maxHeight;
+                return _buildMap();
+              },
+            ),
+          ),
           if (_devMode) _buildDevTapBadge(),
           if (_devMode && _selectedBuilding != null)
             _buildDevControls(onCampus, bottomInset),
           _buildAttribution(bottomInset),
           _buildGuidanceCard(onCampus, bottomInset),
+          // Last, so the suggestion list draws above the other overlays.
+          _buildSearchHeader(),
         ],
       ),
     );
@@ -2717,16 +2982,20 @@ class _FauMapScreenState extends State<FauMapScreen> {
 
   Widget _buildMap() {
     // Listener sees raw touches before the native map does, so a drag
-    // cancels follow-mode just like Google Maps.
+    // cancels follow-mode just like Google Maps. (Mouse-wheel zoom and web,
+    // where the map gets the events first, are caught by _onCameraMove.)
     return Listener(
-      onPointerDown: (e) => _pointerDownAt = e.position,
+      onPointerDown: (e) {
+        _pointerDownAt = e.position;
+        _searchFocus.unfocus(); // touching the map closes the suggestions
+      },
       onPointerMove: (e) {
         final start = _pointerDownAt;
         if (_navTracking &&
             start != null &&
             (e.position - start).distance > 12) {
           _pointerDownAt = null;
-          _setNavTracking(false, recenter: false);
+          _setNavTracking(false, userGesture: true);
         }
       },
       onPointerUp: (_) => _pointerDownAt = null,
@@ -2746,64 +3015,182 @@ class _FauMapScreenState extends State<FauMapScreen> {
         rotateGesturesEnabled: true,
         tiltGesturesEnabled: true,
         myLocationEnabled: false,
-        trackCameraPosition: false,
+        trackCameraPosition: true, // needed for onCameraMove
+        onCameraMove: _onCameraMove,
       ),
     );
   }
 
+  /// Google-style search: focusing shows up to [_maxSuggestions] buildings
+  /// (random picks while the box is empty, matches once you type).
   Widget _buildSearchHeader() {
     final selected = _selectedBuilding;
+    final focused = _searchFocus.hasFocus;
+    final hasText = _searchCtrl.text.isNotEmpty;
+
+    final List<FauBuilding> suggestions;
+    if (_searchQuery.trim().isEmpty) {
+      suggestions = _randomPicks;
+    } else {
+      final q = _searchQuery.trim().toLowerCase();
+      suggestions = _campusBuildings
+          .where((b) =>
+              b.code.toLowerCase().contains(q) ||
+              b.name.toLowerCase().contains(q))
+          .take(_maxSuggestions)
+          .toList();
+    }
+
+    const shadow = [
+      // Light shadow only so the panel separates from the bright map.
+      BoxShadow(color: Colors.black38, blurRadius: 6, offset: Offset(0, 2)),
+    ];
+
     return Positioned(
       top: 16,
       left: 16,
       right: 16,
-      child: GestureDetector(
-        onTap: _showBuildingSelector,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          decoration: BoxDecoration(
-            color: kCard,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: selected != null ? kAccent : Colors.white24,
-              width: 1.5,
+      // On web/desktop a TextField unfocuses on any mouse-down outside it,
+      // which removed the list before a suggestion's tap could land. The tap
+      // region makes the list count as part of the field.
+      child: TextFieldTapRegion(
+        child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            decoration: BoxDecoration(
+              color: kCard,
+              borderRadius: BorderRadius.circular(kRadius),
+              border: Border.all(
+                color: (focused || selected != null) ? kAccent : kDivider,
+              ),
+              boxShadow: shadow,
             ),
-            boxShadow: const [
-              BoxShadow(
-                color: Colors.black54,
-                blurRadius: 8,
-                offset: Offset(0, 3),
+            child: TextField(
+              controller: _searchCtrl,
+              focusNode: _searchFocus,
+              cursorColor: kAccent,
+              textAlignVertical: TextAlignVertical.center,
+              textInputAction: TextInputAction.search,
+              style: const TextStyle(
+                color: kText,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
               ),
-            ],
+              onChanged: (v) => setState(() => _searchQuery = v),
+              onSubmitted: (_) {
+                if (suggestions.isNotEmpty) _pickSuggestion(suggestions.first);
+              },
+              decoration: InputDecoration(
+                border: InputBorder.none,
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(vertical: 15),
+                hintText: 'Search for destination...',
+                hintStyle: const TextStyle(color: kTextMuted, fontSize: 14),
+                prefixIcon: Icon(
+                  Icons.search,
+                  color: (focused || selected != null) ? kAccent : kTextMuted,
+                ),
+                suffixIcon: (hasText || selected != null)
+                    ? IconButton(
+                        icon: const Icon(Icons.cancel, size: 20),
+                        color: kTextMuted,
+                        tooltip: 'Clear',
+                        onPressed: () {
+                          _searchCtrl.clear();
+                          setState(() => _searchQuery = '');
+                          if (selected != null) _clearDestination();
+                        },
+                      )
+                    : null,
+              ),
+            ),
           ),
-          child: Row(
-            children: [
-              Icon(
-                Icons.search,
-                color: selected != null ? kAccent : Colors.white70,
+          if (focused)
+            Container(
+              margin: const EdgeInsets.only(top: 6),
+              decoration: BoxDecoration(
+                color: kCard,
+                borderRadius: BorderRadius.circular(kRadius),
+                border: Border.all(color: kDivider),
+                boxShadow: shadow,
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  selected != null
-                      ? 'Destination: ${selected.name}'
-                      : 'Search for destination...',
-                  style: TextStyle(
-                    color: selected != null ? Colors.white : Colors.white60,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 14,
+              clipBehavior: Clip.antiAlias,
+              child: suggestions.isEmpty
+                  ? Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Text(
+                        'No buildings match "${_searchQuery.trim()}".',
+                        style: const TextStyle(color: kTextMuted, fontSize: 13),
+                      ),
+                    )
+                  : Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        for (var i = 0; i < suggestions.length; i++) ...[
+                          if (i > 0) const Divider(height: 1),
+                          _buildSuggestionRow(suggestions[i]),
+                        ],
+                      ],
+                    ),
+            ),
+        ],
+      ),
+      ),
+    );
+  }
+
+  Widget _buildSuggestionRow(FauBuilding bldg) {
+    final best = CampusPathfinder.findBestAvailableRoute(
+      buildingPos: bldg.position,
+      lots: _liveLots,
+    );
+    final lot = best != null ? _liveLots[best.lotId] : null;
+    final free =
+        lot == null ? 0 : (lot['capacity'] as int) - (lot['occupied'] as int);
+
+    return InkWell(
+      onTap: () => _pickSuggestion(bldg),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: kNavBg,
+                borderRadius: BorderRadius.circular(kRadius),
+              ),
+              child: Text(bldg.code, style: mono(fontSize: 11.5, color: kAccent)),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    bldg.name,
+                    style: const TextStyle(
+                      color: kText,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  overflow: TextOverflow.ellipsis,
-                ),
+                  const SizedBox(height: 2),
+                  Text(
+                    lot != null
+                        ? 'Best lot: ${lot['name']} ($free free, ${formatDistance(best!.totalDistanceMeters)} walk)'
+                        : (_liveLots.isEmpty
+                            ? 'Loading parking data...'
+                            : 'All nearby lots full'),
+                    style: const TextStyle(color: kTextMuted, fontSize: 12),
+                  ),
+                ],
               ),
-              if (selected != null)
-                GestureDetector(
-                  onTap: _clearDestination,
-                  child:
-                      const Icon(Icons.cancel, color: Colors.white54, size: 20),
-                ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -2886,12 +3273,9 @@ class _FauMapScreenState extends State<FauMapScreen> {
               label: const Text('Travel to FAU'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: kDev,
-                foregroundColor: Colors.black,
+                foregroundColor: kOnAccent,
                 padding:
                     const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
               ),
             ),
           if (canSimulate || _isSimulating)
@@ -2901,14 +3285,10 @@ class _FauMapScreenState extends State<FauMapScreen> {
                   size: 20),
               label: Text(_isSimulating ? 'Stop (20 mph)' : 'Simulate Run'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: _isSimulating ? Colors.redAccent : kAccent,
-                foregroundColor: Colors.black,
+                backgroundColor: _isSimulating ? kRed : kAccent,
+                foregroundColor: kOnAccent,
                 padding:
                     const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                elevation: 6,
               ),
             ),
         ],
@@ -2978,16 +3358,13 @@ class _FauMapScreenState extends State<FauMapScreen> {
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           color: kCard,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: building != null ? kAccent : kDivider,
-            width: 1.5,
-          ),
+          borderRadius: BorderRadius.circular(kRadius),
+          border: Border.all(color: building != null ? kAccent : kDivider),
           boxShadow: const [
             BoxShadow(
-              color: Colors.black54,
-              blurRadius: 10,
-              offset: Offset(0, 4),
+              color: Colors.black38,
+              blurRadius: 6,
+              offset: Offset(0, 2),
             ),
           ],
         ),
@@ -3004,16 +3381,11 @@ class _FauMapScreenState extends State<FauMapScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: kText,
-                    ),
-                  ),
+                  Text(title, style: mono(fontSize: 14)),
+                  const SizedBox(height: 2),
                   Text(
                     subtitle,
-                    style: const TextStyle(fontSize: 12, color: kTextMuted),
+                    style: const TextStyle(fontSize: 12.5, color: kTextMuted),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ],
@@ -3055,8 +3427,6 @@ class _VehicleTabState extends State<_VehicleTab> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: kCard,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
           children: [
             const Icon(Icons.directions_car, color: kAccent),
@@ -3064,7 +3434,7 @@ class _VehicleTabState extends State<_VehicleTab> {
             Expanded(
               child: Text(
                 '${data['model'] ?? 'Vehicle'}',
-                style: const TextStyle(color: kText),
+                style: mono(fontSize: 17),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
@@ -3094,17 +3464,11 @@ class _VehicleTabState extends State<_VehicleTab> {
                     .remove();
               }
             },
-            child: const Text(
-              'Delete Vehicle',
-              style: TextStyle(color: Colors.redAccent),
-            ),
+            style: TextButton.styleFrom(foregroundColor: kRed),
+            child: const Text('Delete Vehicle'),
           ),
           ElevatedButton(
             onPressed: () => Navigator.of(ctx).pop(),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: kAccent,
-              foregroundColor: Colors.black,
-            ),
             child: const Text('Close'),
           ),
         ],
@@ -3123,7 +3487,7 @@ class _VehicleTabState extends State<_VehicleTab> {
           return Center(
             child: Text(
               'Error: ${snapshot.error}',
-              style: const TextStyle(color: Colors.redAccent),
+              style: const TextStyle(color: kRed),
             ),
           );
         }
@@ -3140,8 +3504,10 @@ class _VehicleTabState extends State<_VehicleTab> {
           );
         }
 
-        return ListView(
-          padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0),
+        return _ListWithBottomAction(
+          actionTitle: 'Add more vehicle',
+          actionIcon: Icons.add,
+          onAction: _openAddVehicleDialog,
           children: [
             for (final entry in rawData.entries)
               if (entry.value is Map)
@@ -3149,70 +3515,110 @@ class _VehicleTabState extends State<_VehicleTab> {
                   entry.key.toString(),
                   Map<String, dynamic>.from(entry.value as Map),
                 ),
-            const SizedBox(height: 8),
-            OutlinedButton(
-              onPressed: _openAddVehicleDialog,
-              style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                side: const BorderSide(color: kAccent, width: 1.5),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-              child: const Text(
-                'Add more vehicle',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: kAccent,
-                ),
-              ),
-            ),
           ],
         );
       },
     );
   }
 
+  /// Same layout as the profile cards: avatar + title row, then detail rows.
   Widget _buildVehicleCard(String key, Map<String, dynamic> data) {
+    String field(String k) {
+      final v = data[k]?.toString().trim() ?? '';
+      return v.isEmpty ? 'N/A' : v;
+    }
+
+    final manufacturer = data['manufacturer']?.toString().trim() ?? '';
+    final model = data['model']?.toString().trim() ?? '';
+    final title = [manufacturer, model].where((s) => s.isNotEmpty).join(' ');
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 12.0),
       child: InkWell(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(kRadius),
         onTap: () => _showVehicleDetails(data, key),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+          padding: const EdgeInsets.all(18),
           decoration: BoxDecoration(
             color: kCard,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: kDivider, width: 2),
+            borderRadius: BorderRadius.circular(kRadius),
+            border: Border.all(color: kDivider),
           ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          child: Column(
             children: [
-              Flexible(
-                child: Text(
-                  data['model']?.toString() ?? 'Unknown Model',
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: kText,
+              Row(
+                children: [
+                  const CircleAvatar(
+                    radius: 30,
+                    backgroundColor: kNavBg,
+                    child: Icon(Icons.directions_car, size: 32, color: kAccent),
                   ),
-                ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title.isEmpty ? 'Unknown Vehicle' : title,
+                          style: mono(fontSize: 17),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          field('plate'),
+                          style: mono(
+                            fontSize: 13,
+                            color: kAccent,
+                            letterSpacing: 0.8,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(width: 12),
-              Text(
-                data['plate']?.toString() ?? 'No Plate',
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: kAccent,
-                ),
-              ),
+              const Divider(height: 28),
+              DetailInfoRow(label: 'Model', value: field('model')),
+              DetailInfoRow(label: 'Manufacturer', value: field('manufacturer')),
+              DetailInfoRow(label: 'Year', value: field('year')),
+              DetailInfoRow(label: 'Color', value: field('color')),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Scrolling list of cards followed directly by a full-width primary button.
+/// Shared by the Home, Vehicle and Profile tabs.
+class _ListWithBottomAction extends StatelessWidget {
+  final List<Widget> children;
+  final String actionTitle;
+  final IconData actionIcon;
+  final VoidCallback onAction;
+
+  const _ListWithBottomAction({
+    required this.children,
+    required this.actionTitle,
+    required this.actionIcon,
+    required this.onAction,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: ListView(
+        padding: const EdgeInsets.all(20.0),
+        children: [
+          ...children,
+          const SizedBox(height: 4),
+          PrimaryButton(
+            title: actionTitle,
+            icon: actionIcon,
+            onPressed: onAction,
+          ),
+        ],
       ),
     );
   }
@@ -3269,25 +3675,16 @@ class _VehicleFormDialogState extends State<_VehicleFormDialog> {
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      backgroundColor: kCard,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
       child: SingleChildScrollView(
-        padding: const EdgeInsets.all(24.0),
+        padding: const EdgeInsets.all(20.0),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text(
-                  'Add New Vehicle',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: kText,
-                  ),
-                ),
+                Text('Add New Vehicle', style: mono(fontSize: 17)),
                 IconButton(
                   icon: const Icon(Icons.close),
                   onPressed: () => Navigator.of(context).pop(),
@@ -3354,32 +3751,19 @@ class _DialogButtons extends StatelessWidget {
           child: OutlinedButton(
             onPressed: () => Navigator.of(context).pop(),
             style: OutlinedButton.styleFrom(
-              foregroundColor: kText,
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              side: const BorderSide(color: kDivider),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
+              minimumSize: const Size.fromHeight(40),
             ),
             child: const Text('Cancel'),
           ),
         ),
-        const SizedBox(width: 16),
+        const SizedBox(width: 12),
         Expanded(
           child: ElevatedButton(
             onPressed: onConfirm,
             style: ElevatedButton.styleFrom(
-              backgroundColor: kAccent,
-              foregroundColor: Colors.black,
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
+              minimumSize: const Size.fromHeight(40),
             ),
-            child: const Text(
-              'Confirm',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
+            child: const Text('Confirm'),
           ),
         ),
       ],
@@ -3446,25 +3830,23 @@ class _ProfileTabState extends State<_ProfileTab> {
         final fullAddress =
             '$line1\n${data['city']}, ${data['state']} $zip\n${data['country']}';
 
-        return SafeArea(
-          child: Column(
-            children: [
-              Expanded(
-                child: ListView(
-                  padding: const EdgeInsets.all(20.0),
-                  children: [
+        return _ListWithBottomAction(
+          actionTitle: 'Edit Information',
+          actionIcon: Icons.edit_outlined,
+          onAction: () => _openContactDialog(data: data),
+          children: [
                     Container(
-                      padding: const EdgeInsets.all(20),
+                      padding: const EdgeInsets.all(18),
                       decoration: BoxDecoration(
                         color: kCard,
-                        borderRadius: BorderRadius.circular(16),
+                        borderRadius: BorderRadius.circular(kRadius),
                         border: Border.all(color: kDivider),
                       ),
                       child: Row(
                         children: [
                           const CircleAvatar(
                             radius: 34,
-                            backgroundColor: kBg,
+                            backgroundColor: kNavBg,
                             child: Icon(Icons.person, size: 38, color: kAccent),
                           ),
                           const SizedBox(width: 16),
@@ -3472,14 +3854,7 @@ class _ProfileTabState extends State<_ProfileTab> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(
-                                  fullName,
-                                  style: const TextStyle(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.bold,
-                                    color: kText,
-                                  ),
-                                ),
+                                Text(fullName, style: mono(fontSize: 18)),
                                 const SizedBox(height: 4),
                                 Text(
                                   user.email ?? '',
@@ -3496,10 +3871,10 @@ class _ProfileTabState extends State<_ProfileTab> {
                     ),
                     const SizedBox(height: 16),
                     Container(
-                      padding: const EdgeInsets.all(20),
+                      padding: const EdgeInsets.all(18),
                       decoration: BoxDecoration(
                         color: kCard,
-                        borderRadius: BorderRadius.circular(16),
+                        borderRadius: BorderRadius.circular(kRadius),
                         border: Border.all(color: kDivider),
                       ),
                       child: Column(
@@ -3518,20 +3893,8 @@ class _ProfileTabState extends State<_ProfileTab> {
                         ],
                       ),
                     ),
-                  ],
-                ),
-              ),
-              Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
-                child: PrimaryButton(
-                  title: 'Edit Information',
-                  icon: Icons.edit_outlined,
-                  onPressed: () => _openContactDialog(data: data),
-                ),
-              ),
-            ],
-          ),
+                    const SizedBox(height: 12),
+          ],
         );
       },
     );
@@ -3640,13 +4003,11 @@ class _ContactInfoDialogState extends State<_ContactInfoDialog> {
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      backgroundColor: kCard,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 500),
         child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24.0),
+          padding: const EdgeInsets.all(20.0),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -3657,11 +4018,7 @@ class _ContactInfoDialogState extends State<_ContactInfoDialog> {
                     widget.existingData == null
                         ? 'Add Contact Info'
                         : 'Edit Contact Info',
-                    style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: kText,
-                    ),
+                    style: mono(fontSize: 17),
                   ),
                   IconButton(
                     icon: const Icon(Icons.close),
@@ -3704,10 +4061,10 @@ class _ContactInfoDialogState extends State<_ContactInfoDialog> {
               ),
               const SizedBox(height: 12),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
                 decoration: BoxDecoration(
                   color: kCard,
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(kRadius),
                   border: Border.all(color: kDivider),
                 ),
                 child: DropdownButtonHideUnderline(
@@ -3716,13 +4073,17 @@ class _ContactInfoDialogState extends State<_ContactInfoDialog> {
                     isExpanded: true,
                     hint: const Row(
                       children: [
-                        Icon(Icons.transgender, color: kAccent),
+                        Icon(Icons.transgender, color: kTextMuted, size: 20),
                         SizedBox(width: 12),
-                        Text('Gender *', style: TextStyle(color: kTextMuted)),
+                        Text(
+                          'Gender *',
+                          style: TextStyle(color: kTextMuted, fontSize: 14),
+                        ),
                       ],
                     ),
                     dropdownColor: kCard,
-                    icon: const Icon(Icons.arrow_drop_down, color: kAccent),
+                    borderRadius: BorderRadius.circular(kRadius),
+                    icon: const Icon(Icons.arrow_drop_down, color: kTextMuted),
                     items: [
                       for (final g in _genders)
                         DropdownMenuItem(value: g, child: Text(g)),
@@ -3804,6 +4165,7 @@ class AppTextField extends StatelessWidget {
   final IconData icon;
   final bool obscureText;
   final TextInputType keyboardType;
+  final ValueChanged<String>? onChanged;
 
   const AppTextField({
     super.key,
@@ -3812,28 +4174,40 @@ class AppTextField extends StatelessWidget {
     required this.icon,
     this.obscureText = false,
     this.keyboardType = TextInputType.text,
+    this.onChanged,
   });
 
   @override
   Widget build(BuildContext context) {
+    // Matches the dashboard inputs: 44px tall, panel fill, 1px line, 6px radius.
+    // Height comes from the padding (14px text + 2×13px ≈ 44px), not a fixed
+    // box, so the text stays vertically centred next to the icon.
     return Container(
       decoration: BoxDecoration(
         color: kCard,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(kRadius),
         border: Border.all(color: kDivider),
       ),
       child: TextField(
         controller: controller,
         obscureText: obscureText,
         keyboardType: keyboardType,
-        style: const TextStyle(color: kText),
+        onChanged: onChanged,
+        cursorColor: kAccent,
+        textAlignVertical: TextAlignVertical.center,
+        style: const TextStyle(color: kText, fontSize: 14),
         decoration: InputDecoration(
           border: InputBorder.none,
+          isDense: true,
           contentPadding:
-              const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
           hintText: hintText,
           hintStyle: const TextStyle(color: kTextMuted, fontSize: 14),
-          prefixIcon: Icon(icon, color: kAccent, size: 20),
+          prefixIcon: Icon(icon, color: kTextMuted, size: 18),
+          // Default prefix box is 48×48, which made the field taller than
+          // its text and pushed the text off-centre.
+          prefixIconConstraints:
+              const BoxConstraints(minWidth: 40, minHeight: 0),
         ),
       ),
     );
@@ -3858,14 +4232,12 @@ class PrimaryButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return SizedBox(
       width: double.infinity,
+      height: 46,
       child: ElevatedButton(
         onPressed: isLoading ? null : onPressed,
         style: ElevatedButton.styleFrom(
-          backgroundColor: kAccent,
-          foregroundColor: kOnAccent,
-          padding: const EdgeInsets.symmetric(vertical: 16),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-          elevation: 0,
+          disabledBackgroundColor: kAccent.withValues(alpha: 0.6),
+          disabledForegroundColor: kOnAccent,
         ),
         child: isLoading
             ? const SizedBox(
@@ -3880,17 +4252,10 @@ class PrimaryButton extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   if (icon != null) ...[
-                    Icon(icon, size: 20),
+                    Icon(icon, size: 18),
                     const SizedBox(width: 8),
                   ],
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 0.5,
-                    ),
-                  ),
+                  Text(title),
                 ],
               ),
       ),
@@ -3911,7 +4276,7 @@ class DetailInfoRow extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: const TextStyle(color: kTextMuted, fontSize: 14)),
+          Text(label, style: const TextStyle(color: kTextMuted, fontSize: 13)),
           const SizedBox(width: 8),
           Flexible(
             child: Text(
@@ -3919,8 +4284,8 @@ class DetailInfoRow extends StatelessWidget {
               textAlign: TextAlign.right,
               style: const TextStyle(
                 color: kText,
-                fontWeight: FontWeight.bold,
-                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                fontSize: 13.5,
               ),
             ),
           ),
@@ -3970,55 +4335,36 @@ class _AnimatedAddCardState extends State<AnimatedAddCard> {
               curve: Curves.easeInOut,
               width: double.infinity,
               height: 220,
+              // Flat panel; on press the border turns accent and an accent
+              // ring flashes, like the dashboard's .sws-hover / .sws-flash.
               decoration: BoxDecoration(
                 color: kCard,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: _isPressed ? kAccent.withValues(alpha: 0.6) : kDivider,
-                  width: 2,
-                ),
-                boxShadow: _isPressed
-                    ? [
-                        BoxShadow(
-                          color: kAccent.withValues(alpha: 0.15),
-                          blurRadius: 20,
-                          spreadRadius: 2,
-                        ),
-                      ]
-                    : null,
+                borderRadius: BorderRadius.circular(kRadius),
+                border: Border.all(color: _isPressed ? kAccent : kDivider),
+                boxShadow: [
+                  BoxShadow(
+                    color: kAccent.withValues(alpha: _isPressed ? 0.35 : 0),
+                    spreadRadius: _isPressed ? 4 : 0,
+                  ),
+                ],
               ),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  AnimatedContainer(
-                    duration: const Duration(milliseconds: 150),
-                    padding: const EdgeInsets.all(16),
+                  Container(
+                    padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
-                      color: kBg,
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: kAccent.withValues(alpha: _isPressed ? 0.4 : 0.1),
-                          blurRadius: _isPressed ? 25 : 15,
-                          spreadRadius: _isPressed ? 8 : 5,
-                        ),
-                      ],
+                      color: kNavBg,
+                      borderRadius: BorderRadius.circular(kRadius),
                     ),
-                    child: const Icon(Icons.add, size: 40, color: kAccent),
+                    child: const Icon(Icons.add, size: 36, color: kAccent),
                   ),
-                  const SizedBox(height: 20),
-                  Text(
-                    widget.title,
-                    style: const TextStyle(
-                      color: kText,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 18),
+                  Text(widget.title, style: mono(fontSize: 16)),
+                  const SizedBox(height: 6),
                   Text(
                     widget.subtitle,
-                    style: const TextStyle(color: kTextMuted, fontSize: 14),
+                    style: const TextStyle(color: kTextMuted, fontSize: 12.5),
                   ),
                 ],
               ),
@@ -4052,11 +4398,10 @@ class _UserSettingsPageState extends State<UserSettingsPage> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: kCard,
-        title: const Text('Contact Us', style: TextStyle(color: kText)),
-        content: const SelectableText(
+        title: Text('Contact Us', style: mono(fontSize: 17)),
+        content: SelectableText(
           kSupportEmail,
-          style: TextStyle(color: kAccent, fontWeight: FontWeight.bold),
+          style: mono(fontSize: 14, color: kAccent),
         ),
         actions: [
           TextButton(
@@ -4067,11 +4412,12 @@ class _UserSettingsPageState extends State<UserSettingsPage> {
                 const SnackBar(content: Text('Email copied to clipboard')),
               );
             },
-            child: const Text('Copy email', style: TextStyle(color: kAccent)),
+            child: const Text('Copy email'),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Close', style: TextStyle(color: kTextMuted)),
+            style: TextButton.styleFrom(foregroundColor: kTextMuted),
+            child: const Text('Close'),
           ),
         ],
       ),
@@ -4098,8 +4444,6 @@ class _UserSettingsPageState extends State<UserSettingsPage> {
                   value: enabled,
                   onChanged:
                       _notifRef == null ? null : (val) => _notifRef!.set(val),
-                  activeColor: kBg,
-                  activeTrackColor: kAccent,
                 ),
               );
             },
@@ -4136,17 +4480,18 @@ class UserAboutPage extends StatelessWidget {
             SizedBox(height: 20),
             Text(
               'Smart Curb is an intelligent IoT parking sensing application designed to monitor space availability and manage vehicles for individual users.',
-              style: TextStyle(color: kTextMuted, height: 1.5, fontSize: 16),
+              style: TextStyle(color: kNavText, height: 1.6, fontSize: 15),
             ),
             SizedBox(height: 30),
             Divider(color: kDivider),
             SizedBox(height: 10),
             Text(
-              'Version: 1.0.0 (Beta)',
+              'VERSION 1.0.0 (BETA)',
               style: TextStyle(
                 color: kAccent,
-                fontWeight: FontWeight.bold,
-                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                fontSize: 10.5,
+                letterSpacing: 0.8,
               ),
             ),
           ],
@@ -4160,11 +4505,15 @@ class UserAboutPage extends StatelessWidget {
 void showErrorSnackBar(BuildContext context, String message) {
   ScaffoldMessenger.of(context).showSnackBar(
     SnackBar(
+      // Dashboard errors are busy-red text, not a red block.
       content: Text(
         message,
-        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        style: GoogleFonts.archivo(
+          color: kRed,
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+        ),
       ),
-      backgroundColor: Colors.redAccent,
     ),
   );
 }
