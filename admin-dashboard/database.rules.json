@@ -8,7 +8,9 @@
   // Test locally (never touches the real database):
   //   firebase --config firebase.emulator.json emulators:start
   //
-  // Publish only after the RECEIVER section below is filled in:
+  // The hardware Receiver writes with the legacy database secret (Ryan confirmed
+  // 2026-10-10). That secret bypasses these rules entirely, so publishing them
+  // does not stop the Receiver. Publish by Oct 22 (test mode ends Oct 27):
   //   firebase deploy --only database --config firebase.emulator.json
   "rules": {
     ".read": false,
@@ -84,14 +86,17 @@
           ".validate": "newData.isString() && newData.val().length <= 16"
         },
 
-        // ===================== RECEIVER SECTION: ADJUST AFTER TALKING TO RYAN =====================
-        // The hardware Receiver may write ONLY these three fields on units/<id>.
-        // Replace the condition below in all three places with however the
-        // Receiver signs in:
+        // ============ RECEIVER SECTION: OPTIONAL, FOR A FUTURE FIREBASE AUTH ACCOUNT ============
+        // Today the Receiver uses the legacy database secret, which skips
+        // every rule in this file (including .validate), so it does NOT need this section.
+        //
+        // As written, the placeholder UID matches no one, so these three .write rules
+        // grant nothing. Leaving them like this is safe to publish.
+        //
+        // When the Receiver moves to a Firebase Auth account, replace the placeholder in
+        // all three places so it can write ONLY these fields on units/<id>:
         //   - Firebase account (email/password):  auth != null && auth.uid === '<receiver uid>'
         //   - Custom token with a claim:          auth != null && auth.token.receiver === true
-        //   - Unauthenticated REST / no sign-in:  true   (anyone could then write these fields)
-        // Until it is filled in, the Receiver is locked out, so do NOT publish before then.
         "occupied": {
           ".write": "auth != null && auth.uid === 'REPLACE_WITH_RECEIVER_UID'",
           ".validate": "newData.isBoolean()"
@@ -104,13 +109,14 @@
           ".write": "auth != null && auth.uid === 'REPLACE_WITH_RECEIVER_UID'",
           ".validate": "newData.isString()"
         }
-        // ==========================================================================================
+        // ===========================================================================================
       }
     },
 
-    // Ryan's Receiver test nodes. Staff can read them; nothing in the dashboard
-    // writes here. If the Receiver still writes to curbs/ or status/, give these
-    // the same condition as the RECEIVER section above.
+    // Ryan's old Receiver test nodes (deleted 2026-10-10). Staff can read them if they
+    // return; nothing in the dashboard writes here. A Receiver using the database secret
+    // can still write here. If it moves to a Firebase Auth account and still needs these,
+    // give them the same condition as the RECEIVER section above.
     "curbs": {
       ".read": "auth != null && root.child('users').child(auth.uid).exists()"
     },
