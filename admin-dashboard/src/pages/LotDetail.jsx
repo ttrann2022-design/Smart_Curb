@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import { ref, onValue, update } from "firebase/database";
-import { database, dataPath } from "../firebase";
+import { database, dataPath, DATA_ROOT } from "../firebase";
 import { c, mono } from "../theme";
 import { useFlash } from "../motion";
+import { useNow, batteryText, cleanText, formatAgo, formatExact } from "../units";
 
 const ledColors = [
   { name: "red", hex: "#E5483A" },
@@ -47,6 +48,7 @@ function LotDetail() {
   const [panelText, setPanelText] = useState("");
   const [status, setStatus] = useState("");
   const { role } = useOutletContext();
+  const now = useNow();
   const canEdit = role === "operator" || role === "manager";
 
   useEffect(() => {
@@ -72,7 +74,7 @@ function LotDetail() {
 
   const pickUnit = (id) => {
     setSelectedUnit(id);
-    setLedColor(units[id]?.ledColor || "blue");
+    setLedColor(cleanText(units[id]?.ledColor) || "blue");
     setPanelText(units[id]?.panelText || "");
     setStatus("");
   };
@@ -81,16 +83,19 @@ function LotDetail() {
     if (!selectedUnit || !canEdit) return;
     try {
       await update(ref(database, dataPath(`units/${selectedUnit}`)), { ledColor, panelText });
-      setStatus("Saved. The curb picks this up on its next sync.");
+      // Real curbs can't receive LED commands yet (Node 2 isn't built), so don't promise it.
+      setStatus(DATA_ROOT
+        ? "Saved to the simulation."
+        : "Saved to the database. LED control isn't connected to the curb hardware yet, so the physical panel won't change.");
     } catch (err) {
       setStatus("Could not save: " + err.message);
     }
   };
 
-  const infoRow = (label, value) => (
+  const infoRow = (label, value, title) => (
     <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5 }}>
       <span style={{ color: c.dim }}>{label}</span>
-      <span style={{ fontWeight: 600 }}>{value}</span>
+      <span title={title} style={{ fontWeight: 600 }}>{value}</span>
     </div>
   );
 
@@ -145,8 +150,9 @@ function LotDetail() {
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {infoRow("Status", !unit.online ? "Offline" : unit.occupied ? "Occupied" : "Open")}
                   {infoRow("Online", unit.online ? "Yes" : "No")}
-                  {infoRow("Battery", `${unit.battery}%`)}
-                  {infoRow("Current LED", unit.ledColor || "not set")}
+                  {infoRow("Battery", batteryText(unit))}
+                  {infoRow("Last change", formatAgo(unit.lastUpdated, now) || "—", formatExact(unit.lastUpdated))}
+                  {infoRow("Current LED", cleanText(unit.ledColor) || "not set")}
                   {infoRow("Current text", unit.panelText || "not set")}
                 </div>
 

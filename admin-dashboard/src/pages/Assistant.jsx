@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ref, onValue } from "firebase/database";
 import { database, dataPath } from "../firebase";
 import { c, mono } from "../theme";
+import { useAlertSettings, batteryText, isLowBattery, cleanText } from "../units";
 
 const suggestions = [
   "Where should I park right now?",
@@ -37,7 +38,7 @@ function findLot(q, stats) {
   });
 }
 
-function answer(raw, lots, units) {
+function answer(raw, lots, units, alerts) {
   const q = raw.toLowerCase().trim();
   const stats = buildStats(lots, units);
   const entries = Object.entries(units);
@@ -49,13 +50,14 @@ function answer(raw, lots, units) {
     const u = units[id];
     if (!u) return `I couldn't find a curb called ${id}.`;
     const status = !u.online ? "offline" : u.occupied ? "occupied" : "open";
-    const led = u.ledColor ? `${u.ledColor}${u.panelText ? `, showing "${u.panelText}"` : ""}` : "not set";
-    return `Curb ${id} is in ${lots[u.lot]?.name || u.lot}.\nStatus: ${status}\nBattery: ${u.battery}%\nLED: ${led}`;
+    const color = cleanText(u.ledColor);
+    const led = color ? `${color}${u.panelText ? `, showing "${u.panelText}"` : ""}` : "not set";
+    return `Curb ${id} is in ${lots[u.lot]?.name || u.lot}.\nStatus: ${status}\nBattery: ${batteryText(u)}\nLED: ${led}`;
   }
 
   if (/(battery|charge|charging|power)/.test(q)) {
-    const low = entries.filter(([, u]) => u.battery < 20).sort(([, a], [, b]) => a.battery - b.battery);
-    if (low.length === 0) return "No curbs are low on battery. Every unit is above 20%.";
+    const low = entries.filter(([, u]) => isLowBattery(u, alerts)).sort(([, a], [, b]) => a.battery - b.battery);
+    if (low.length === 0) return `No curbs are low on battery. Every measured unit is at ${alerts.lowBattery}% or above.`;
     return `${low.length} curb${low.length > 1 ? "s are" : " is"} low on battery:\n` +
       low.map(([id, u]) => `• ${id} in ${lotMain(lots[u.lot]?.name)}: ${u.battery}%`).join("\n");
   }
@@ -69,7 +71,7 @@ function answer(raw, lots, units) {
 
   if (/(attention|problem|issue|alert|wrong|broken)/.test(q)) {
     const off = entries.filter(([, u]) => !u.online);
-    const low = entries.filter(([, u]) => u.online && u.battery < 20);
+    const low = entries.filter(([, u]) => u.online && isLowBattery(u, alerts));
     if (off.length === 0 && low.length === 0) return "Nothing needs attention right now. All curbs are online with healthy batteries.";
     const lines = [
       ...off.map(([id, u]) => `• ${id} in ${lotMain(lots[u.lot]?.name)} is offline`),
@@ -116,6 +118,7 @@ function Assistant() {
   const [thinking, setThinking] = useState(false);
   const data = useRef({ lots: {}, units: {} });
   const endRef = useRef(null);
+  const alerts = useAlertSettings();
 
   useEffect(() => {
     const stopLots = onValue(ref(database, dataPath("lots")), (s) => { data.current.lots = s.val() || {}; });
@@ -134,7 +137,7 @@ function Assistant() {
     setInput("");
     setThinking(true);
     setTimeout(() => {
-      const reply = answer(q, data.current.lots, data.current.units);
+      const reply = answer(q, data.current.lots, data.current.units, alerts);
       setMessages((m) => [...m, { from: "bot", text: reply }]);
       setThinking(false);
     }, 450);

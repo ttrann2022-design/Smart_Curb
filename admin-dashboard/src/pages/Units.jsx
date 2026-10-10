@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ref, onValue } from "firebase/database";
 import { database, dataPath } from "../firebase";
 import { c, mono } from "../theme";
+import { useAlertSettings, useNow, hasBattery, isLowBattery, unitIssues, cleanText, formatAgo, formatExact } from "../units";
 
 const ledHex = { red: "#E5483A", blue: "#3B7DD8", green: "#35A96B", gold: "#E0A63C", white: "#E8E6DE" };
 
@@ -13,7 +14,7 @@ const filters = [
   { id: "open", label: "Open spots" },
 ];
 
-const columns = "110px 1.6fr 1fr 1.4fr 1fr 1.2fr";
+const columns = "100px 1.5fr 1fr 1.3fr 1fr 0.9fr 1.1fr";
 
 function statusOf(u) {
   if (!u.online) return { label: "Offline", color: c.dim };
@@ -21,8 +22,8 @@ function statusOf(u) {
   return { label: "Open", color: c.open };
 }
 
-function batteryColor(b) {
-  if (b < 20) return c.busy;
+function batteryColor(b, alerts) {
+  if (b < alerts.lowBattery) return c.busy;
   if (b < 50) return c.warn;
   return c.open;
 }
@@ -32,6 +33,8 @@ function Units() {
   const [units, setUnits] = useState({});
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
+  const alerts = useAlertSettings();
+  const now = useNow();
 
   useEffect(() => {
     const stopLots = onValue(ref(database, dataPath("lots")), (snap) => setLots(snap.val() || {}));
@@ -43,9 +46,9 @@ function Units() {
   const rows = allUnits
     .filter(([id, u]) => {
       if (search && !id.toLowerCase().includes(search.toLowerCase())) return false;
-      if (filter === "attention") return !u.online || u.battery < 20;
+      if (filter === "attention") return unitIssues(u, alerts, now).length > 0;
       if (filter === "offline") return !u.online;
-      if (filter === "lowbattery") return u.battery < 20;
+      if (filter === "lowbattery") return isLowBattery(u, alerts);
       if (filter === "open") return u.online && !u.occupied;
       return true;
     })
@@ -99,6 +102,7 @@ function Units() {
             <div style={headerCell}>LOT</div>
             <div style={headerCell}>STATUS</div>
             <div style={headerCell}>BATTERY</div>
+            <div style={headerCell}>LAST CHANGE</div>
             <div style={headerCell}>LED</div>
             <div style={headerCell}>PANEL TEXT</div>
           </div>
@@ -109,7 +113,8 @@ function Units() {
 
           {rows.map(([id, u]) => {
             const status = statusOf(u);
-            const battery = u.battery ?? 0;
+            const led = cleanText(u.ledColor);
+            const ago = formatAgo(u.lastUpdated, now);
             return (
               <div key={id} style={{ display: "grid", gridTemplateColumns: columns, gap: 12, alignItems: "center", padding: "12px 18px", borderBottom: `1px solid ${c.line}` }}>
                 <div style={{ fontFamily: mono, fontSize: 13, fontWeight: 700 }}>{id}</div>
@@ -118,17 +123,24 @@ function Units() {
                   <span style={{ width: 8, height: 8, borderRadius: 4, background: status.color, display: "inline-block" }} />
                   {status.label}
                 </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-                  <div style={{ width: 70, height: 6, borderRadius: 3, background: c.line, overflow: "hidden" }}>
-                    <div style={{ width: `${battery}%`, height: 6, background: batteryColor(battery) }} />
+                {hasBattery(u) ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                    <div style={{ width: 70, height: 6, borderRadius: 3, background: c.line, overflow: "hidden" }}>
+                      <div style={{ width: `${u.battery}%`, height: 6, background: batteryColor(u.battery, alerts) }} />
+                    </div>
+                    <span style={{ fontFamily: mono, fontSize: 12.5, color: batteryColor(u.battery, alerts) }}>{u.battery}%</span>
                   </div>
-                  <span style={{ fontFamily: mono, fontSize: 12.5, color: batteryColor(battery) }}>{battery}%</span>
+                ) : (
+                  <span style={{ fontSize: 12.5, color: c.dim }}>Not measured</span>
+                )}
+                <div title={formatExact(u.lastUpdated)} style={{ fontSize: 12.5, color: ago ? c.text : c.dim }}>
+                  {ago || "—"}
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 13 }}>
-                  {u.ledColor ? (
+                  {led ? (
                     <>
-                      <span style={{ width: 12, height: 12, borderRadius: 3, background: ledHex[u.ledColor] || c.dim, display: "inline-block" }} />
-                      {u.ledColor}
+                      <span style={{ width: 12, height: 12, borderRadius: 3, background: ledHex[led] || c.dim, display: "inline-block" }} />
+                      {led}
                     </>
                   ) : (
                     <span style={{ color: c.dim }}>not set</span>

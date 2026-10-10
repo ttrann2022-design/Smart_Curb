@@ -4,6 +4,7 @@ import { database, dataPath } from "../firebase";
 import { c, mono } from "../theme";
 import AnimatedNumber from "../components/AnimatedNumber";
 import { useFlash } from "../motion";
+import { useAlertSettings, useNow, unitIssues, formatAgo } from "../units";
 
 function Tile({ label, value, sub, color }) {
   const flash = useFlash(value);
@@ -39,6 +40,8 @@ function Overview() {
   const [lots, setLots] = useState({});
   const [units, setUnits] = useState({});
   const [loading, setLoading] = useState(true);
+  const alertSettings = useAlertSettings();
+  const now = useNow();
 
   useEffect(() => {
     const stopLots = onValue(ref(database, dataPath("lots")), (snap) => {
@@ -62,7 +65,9 @@ function Overview() {
   const open = unitList.filter((u) => u.online && !u.occupied).length;
   const occupied = unitList.filter((u) => u.online && u.occupied).length;
   const pct = (n) => (total ? Math.round((n / total) * 100) : 0);
-  const alerts = Object.entries(units).filter(([, u]) => !u.online || u.battery < 20);
+  const alerts = Object.entries(units)
+    .map(([id, u]) => [id, u, unitIssues(u, alertSettings, now)[0]])
+    .filter(([, , issue]) => issue);
 
   return (
     <>
@@ -98,15 +103,19 @@ function Overview() {
               <div style={{ padding: "14px 18px", borderBottom: `1px solid ${c.line}`, fontFamily: mono, fontSize: 14, fontWeight: 600 }}>Active alerts</div>
               <div style={{ padding: "12px 18px", display: "flex", flexDirection: "column", gap: 9 }}>
                 {alerts.length === 0 && <div style={{ fontSize: 12.5, color: c.dim }}>All units healthy.</div>}
-                {alerts.map(([id, u]) => {
-                  const offline = !u.online;
+                {alerts.map(([id, u, issue]) => {
+                  const offline = issue === "offline";
                   const lotName = lots[u.lot]?.name || u.lot;
+                  const title = { offline: "Unit offline", stale: "No recent report", lowBattery: "Low battery" }[issue];
+                  const text = {
+                    offline: `Curb ${id} in ${lotName} is not reporting.`,
+                    stale: `Curb ${id} in ${lotName} last reported ${formatAgo(u.lastUpdated, now)}.`,
+                    lowBattery: `Curb ${id} in ${lotName} is at ${u.battery}%.`,
+                  }[issue];
                   return (
                     <div key={id} className="sws-enter" style={{ borderRadius: 5, padding: "11px 12px", background: offline ? "#221410" : "#26200F", border: `1px solid ${offline ? "#4A2A20" : "#4A3A1C"}` }}>
-                      <div style={{ fontSize: 12.5, fontWeight: 700, color: offline ? "#FF8F74" : "#FFC078" }}>{offline ? "Unit offline" : "Low battery"}</div>
-                      <div style={{ fontSize: 12, marginTop: 4 }}>
-                        {offline ? `Curb ${id} in ${lotName} is not reporting.` : `Curb ${id} in ${lotName} is at ${u.battery}%.`}
-                      </div>
+                      <div style={{ fontSize: 12.5, fontWeight: 700, color: offline ? "#FF8F74" : "#FFC078" }}>{title}</div>
+                      <div style={{ fontSize: 12, marginTop: 4 }}>{text}</div>
                     </div>
                   );
                 })}
