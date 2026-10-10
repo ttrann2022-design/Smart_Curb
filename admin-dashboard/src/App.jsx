@@ -10,6 +10,7 @@ import Units from "./pages/Units";
 import Users from "./pages/Users";
 import DemoControls from "./pages/DemoControls";
 import Layout from "./components/Layout";
+import NotFound from "./pages/NotFound";
 
 function App() {
   return (
@@ -27,6 +28,7 @@ function App() {
           <Route path="/users" element={<Users />} />
           {import.meta.env.VITE_DEMO_MODE === "true" && <Route path="/demo" element={<DemoControls />} />}
         </Route>
+        <Route path="*" element={<NotFound />} />
       </Routes>
     </BrowserRouter>
   );

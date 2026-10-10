@@ -26,9 +26,12 @@ function Users() {
 
   useEffect(() => {
     const stopUsers = onValue(ref(database, "users"), (s) => setUsers(s.val() || {}));
-    const stopInvites = onValue(ref(database, "invites"), (s) => setInvites(s.val() || {}));
+    // Only managers can read invites under the security rules.
+    const stopInvites = isManager
+      ? onValue(ref(database, "invites"), (s) => setInvites(s.val() || {}))
+      : () => setInvites({});
     return () => { stopUsers(); stopInvites(); };
-  }, []);
+  }, [isManager]);
 
   const userList = Object.entries(users).sort(([, a], [, b]) => (a.email || "").localeCompare(b.email || ""));
   const inviteList = Object.entries(invites).sort(([, a], [, b]) => (b.invitedAt || 0) - (a.invitedAt || 0));

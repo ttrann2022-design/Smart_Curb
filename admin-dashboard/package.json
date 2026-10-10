@@ -5,9 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
     "dev:demo": "vite --mode demo",
+    "dev:emulator": "vite --mode emulator",
+    "emulators": "firebase --config firebase.emulator.json emulators:start",
+    "build": "vite build",
     "build:demo": "vite build --mode demo",
+    "check:real": "node scripts/check-build.mjs dist real",
+    "check:demo": "node scripts/check-build.mjs dist-demo demo",
     "lint": "eslint .",
     "preview": "vite preview"
   },
