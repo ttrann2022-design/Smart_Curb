@@ -25,5 +25,3 @@ if (USING_EMULATORS) {
 }
 
 export const emailKey = (email) => email.trim().toLowerCase().replace(/\./g, ",");
-export const DATA_ROOT = import.meta.env.VITE_DATA_ROOT || "";
-export const dataPath = (path) => DATA_ROOT + path;

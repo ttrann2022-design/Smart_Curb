@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ref, onValue } from "firebase/database";
-import { database, dataPath } from "../firebase";
+import { database } from "../firebase";
+import { dataPath } from "../dataMode";
 import { c, mono } from "../theme";
 import { useAlertSettings, batteryText, isLowBattery, cleanText } from "../units";
 

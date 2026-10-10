@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ref, onValue } from "firebase/database";
-import { database, dataPath } from "../firebase";
+import { database } from "../firebase";
+import { dataPath } from "../dataMode";
 import { c, mono } from "../theme";
 import AnimatedNumber from "../components/AnimatedNumber";
 import { useFlash } from "../motion";

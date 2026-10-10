@@ -3,6 +3,8 @@ export const c = {
   text: "#F2F1EA", dim: "#8E8C82", accent: "#C6F24A", onAccent: "#12110F",
   open: "#8BD44A", busy: "#F2694C", warn: "#E0A63C",
   navBg: "#232B15", navText: "#A5A399", card: "#1D1D19",
+  // Simulation mode gets its own hue so it can never be mistaken for live data.
+  sim: "#8FB4FF", simBg: "#121A2B", simLine: "#2A3B5E",
 };
 
 export const mono = "'IBM Plex Mono', monospace";

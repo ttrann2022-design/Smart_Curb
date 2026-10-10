@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ref, onValue, query, limitToLast } from "firebase/database";
-import { database, dataPath } from "../firebase";
+import { database } from "../firebase";
+import { dataPath } from "../dataMode";
 import { c, mono } from "../theme";
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];

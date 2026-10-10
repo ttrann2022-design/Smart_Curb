@@ -5,6 +5,10 @@ import { ref, get, set, update, remove, onValue } from "firebase/database";
 import { auth, database, emailKey } from "../firebase";
 import { c, mono } from "../theme";
 import logo from "../assets/smartcurb-logo.jpg";
+import { useDataMode } from "../dataMode";
+import { stopSimulation } from "../demo/simulator";
+import DataModeSwitch from "./DataModeSwitch";
+import SimBanner from "./SimBanner";
 
 const navItems = [
   { label: "Overview", to: "/overview" },
@@ -13,7 +17,8 @@ const navItems = [
   { label: "Assistant", to: "/assistant" },
   { label: "Analytics", to: "/analytics" },
   { label: "Users & roles", to: "/users" },
-  ...(import.meta.env.VITE_DEMO_MODE === "true" ? [{ label: "Demo controls", to: "/demo" }] : []),
+  { label: "Simulation", to: "/simulation", simOnly: true },
+  { label: "Settings", to: "/settings" },
 ];
 
 function Brand({ size = 44 }) {
@@ -34,6 +39,13 @@ function Layout() {
   const [checking, setChecking] = useState(true);
   const [menuOpen, setMenuOpen] = useState(false);
   const navigate = useNavigate();
+  const mode = useDataMode();
+
+  // Leaving Simulation stops a simulation running in this tab, so nothing
+  // keeps changing demo data out of sight.
+  useEffect(() => {
+    if (mode === "live") stopSimulation();
+  }, [mode]);
 
   useEffect(() => {
     let stopRole = () => {};
@@ -100,15 +112,15 @@ function Layout() {
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 2, flexGrow: 1 }}>
-          {navItems.map((item) => (
+          {navItems.filter((item) => !item.simOnly || mode === "sim").map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
               onClick={closeMenu}
               style={({ isActive }) => ({
                 padding: "10px 12px", borderRadius: 5, fontSize: 13.5, textDecoration: "none",
-                background: isActive ? c.navBg : "transparent",
-                color: isActive ? c.accent : c.navText,
+                background: isActive ? (item.simOnly ? c.simBg : c.navBg) : "transparent",
+                color: isActive ? (item.simOnly ? c.sim : c.accent) : item.simOnly ? c.sim : c.navText,
                 fontWeight: isActive ? 600 : 500,
               })}
             >
@@ -117,7 +129,12 @@ function Layout() {
           ))}
         </div>
 
-        <a href="/sign" target="_blank" rel="noreferrer" style={{ marginBottom: 10, padding: "10px 12px", borderRadius: 5, fontSize: 13, fontWeight: 600, color: c.accent, textDecoration: "none", border: `1px dashed ${c.line}` }}>
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1.1, color: c.dim, padding: "0 2px 6px" }}>DATA SOURCE</div>
+          <DataModeSwitch />
+        </div>
+
+        <a href={mode === "sim" ? "/sign?source=sim" : "/sign"} target="_blank" rel="noreferrer" style={{ marginBottom: 10, padding: "10px 12px", borderRadius: 5, fontSize: 13, fontWeight: 600, color: c.accent, textDecoration: "none", border: `1px dashed ${c.line}` }}>
           Open lot sign ↗
         </a>
 
@@ -137,8 +154,9 @@ function Layout() {
           <Brand size={34} />
           <button className="sws-menu-btn" onClick={() => setMenuOpen(true)} aria-label="Open menu">☰</button>
         </div>
+        {mode === "sim" && <SimBanner />}
         <div className="sws-main" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", minWidth: 0, overflowY: "auto" }}>
-          <Outlet context={{ role }} />
+          <Outlet key={mode} context={{ role, mode }} />
         </div>
       </div>
     </div>

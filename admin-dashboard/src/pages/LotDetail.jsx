@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import { ref, onValue, update } from "firebase/database";
-import { database, dataPath, DATA_ROOT } from "../firebase";
+import { database } from "../firebase";
+import { dataPath, getDataMode } from "../dataMode";
 import { c, mono } from "../theme";
 import { useFlash } from "../motion";
 import { useNow, batteryText, cleanText, formatAgo, formatExact } from "../units";
@@ -84,7 +85,7 @@ function LotDetail() {
     try {
       await update(ref(database, dataPath(`units/${selectedUnit}`)), { ledColor, panelText });
       // Real curbs can't receive LED commands yet (Node 2 isn't built), so don't promise it.
-      setStatus(DATA_ROOT
+      setStatus(getDataMode() === "sim"
         ? "Saved to the simulation."
         : "Saved to the database. LED control isn't connected to the curb hardware yet, so the physical panel won't change.");
     } catch (err) {
