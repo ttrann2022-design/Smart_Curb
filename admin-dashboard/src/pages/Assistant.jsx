@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { ref, onValue } from "firebase/database";
 import { database } from "../firebase";
 import { dataPath } from "../dataMode";
-import { c, mono } from "../theme";
+import { c } from "../theme";
+import Icon from "../components/Icon";
+import { PageHeader, Button, Input } from "../components/ui";
 import { useAlertSettings, batteryText, isLowBattery, cleanText } from "../units";
 
 const suggestions = [
@@ -146,50 +148,60 @@ function Assistant() {
 
   return (
     <>
-      <div className="sws-page-head" style={{ height: 68, flexShrink: 0, background: c.panel, borderBottom: `1px solid ${c.line}`, padding: "0 30px", display: "flex", alignItems: "center" }}>
-        <div>
-          <div style={{ fontFamily: mono, fontSize: 19, fontWeight: 600 }}>Assistant</div>
-          <div style={{ fontSize: 12.5, color: c.dim }}>Answers from live data · AI language model integration planned</div>
-        </div>
-      </div>
+      <PageHeader title="Assistant" subtitle="Answers from live data · AI language model integration planned" />
 
-      <div className="sws-page-body" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", padding: "18px 30px 22px", gap: 14 }}>
-        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 12, paddingRight: 4 }}>
+      <div className="sws-page-body" style={{ flex: 1, minHeight: 0, paddingTop: 18, paddingBottom: 22, gap: 14 }}>
+        <div role="log" aria-live="polite" aria-label="Conversation" style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 12, paddingRight: 4 }}>
           {messages.map((m, i) => (
-            <div key={i} style={{ display: "flex", justifyContent: m.from === "user" ? "flex-end" : "flex-start" }}>
+            <div key={i} className="sws-enter" style={{ display: "flex", justifyContent: m.from === "user" ? "flex-end" : "flex-start", gap: 10 }}>
+              {m.from === "bot" && (
+                <div aria-hidden="true" style={{ width: 28, height: 28, borderRadius: 14, background: c.navBg, color: c.accent, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 2 }}>
+                  <Icon name="sparkle" size={14} />
+                </div>
+              )}
               <div style={{
-                maxWidth: 560, padding: "11px 15px", fontSize: 13.5, lineHeight: 1.55, whiteSpace: "pre-line",
+                maxWidth: 560, padding: "11px 15px", fontSize: 13.5, lineHeight: 1.6, whiteSpace: "pre-line",
                 borderRadius: m.from === "user" ? "12px 12px 3px 12px" : "3px 12px 12px 12px",
                 background: m.from === "user" ? c.accent : c.panel,
                 color: m.from === "user" ? c.onAccent : c.text,
                 border: m.from === "user" ? "none" : `1px solid ${c.line}`,
               }}>
+                <span className="sws-sr-only">{m.from === "user" ? "You: " : "Assistant: "}</span>
                 {m.text}
               </div>
             </div>
           ))}
-          {thinking && <div style={{ fontSize: 12.5, color: c.dim }}>Checking live data…</div>}
+          {thinking && (
+            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+              <div aria-hidden="true" style={{ width: 28, height: 28, borderRadius: 14, background: c.navBg, color: c.accent, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <Icon name="sparkle" size={14} />
+              </div>
+              <div className="sws-typing" role="status" aria-label="Checking live data" style={{ display: "flex", gap: 4, padding: "12px 14px", borderRadius: "3px 12px 12px 12px", background: c.panel, border: `1px solid ${c.line}` }}>
+                <span /><span /><span />
+              </div>
+            </div>
+          )}
           <div ref={endRef} />
         </div>
 
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <div className="sws-chips" aria-label="Suggested questions">
           {suggestions.map((s) => (
-            <button key={s} onClick={() => ask(s)} style={{ height: 32, padding: "0 12px", borderRadius: 16, border: `1px solid ${c.line}`, background: c.panel, color: c.text, fontSize: 12.5, cursor: "pointer" }}>
+            <button key={s} type="button" className="sws-chip" style={{ borderRadius: 16 }} onClick={() => ask(s)} disabled={thinking}>
               {s}
             </button>
           ))}
         </div>
 
         <form onSubmit={(e) => { e.preventDefault(); ask(input); }} style={{ display: "flex", gap: 10 }}>
-          <input
+          <Input
+            size="lg"
+            aria-label="Ask a question"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="Ask about any lot or curb…"
-            style={{ flex: 1, height: 46, padding: "0 14px", borderRadius: 6, border: `1px solid ${c.line}`, background: c.panel, color: c.text, fontSize: 14 }}
+            style={{ flex: 1, background: c.panel }}
           />
-          <button type="submit" style={{ height: 46, padding: "0 22px", borderRadius: 6, border: "none", background: c.accent, color: c.onAccent, fontWeight: 600, fontSize: 14, cursor: "pointer" }}>
-            Ask
-          </button>
+          <Button type="submit" variant="primary" size="lg" icon="send" disabled={!input.trim() || thinking}>Ask</Button>
         </form>
       </div>
     </>

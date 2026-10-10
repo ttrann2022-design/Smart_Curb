@@ -3,10 +3,10 @@ import { ref, onValue, query, limitToLast } from "firebase/database";
 import { database } from "../firebase";
 import { dataPath } from "../dataMode";
 import { c, mono } from "../theme";
+import { PageHeader, Card, StatTile, EmptyState } from "../components/ui";
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const HOURS = ["7a", "8a", "9a", "10a", "11a", "12p", "1p", "2p", "3p", "4p", "5p", "6p", "7p", "8p"];
-const card = { background: c.panel, border: `1px solid ${c.line}`, borderRadius: 6, padding: 18, display: "flex", flexDirection: "column", gap: 14 };
 
 function heat(v) {
   if (v >= 90) return "#C4482B";
@@ -16,18 +16,6 @@ function heat(v) {
   if (v >= 30) return "#283220";
   if (v >= 15) return "#1F2419";
   return "#191915";
-}
-
-function Tile({ label, value, sub }) {
-  return (
-    <div style={{ flex: 1, background: c.panel, border: `1px solid ${c.line}`, borderRadius: 6, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: 0.4, color: c.dim }}>{label}</div>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-        <span style={{ fontFamily: mono, fontSize: 28, fontWeight: 600 }}>{value}</span>
-        {sub && <span style={{ fontSize: 12.5, color: c.dim }}>{sub}</span>}
-      </div>
-    </div>
-  );
 }
 
 function Analytics() {
@@ -67,30 +55,27 @@ function Analytics() {
 
   return (
     <>
-      <div className="sws-page-head" style={{ height: 68, flexShrink: 0, background: c.panel, borderBottom: `1px solid ${c.line}`, padding: "0 30px", display: "flex", alignItems: "center" }}>
-        <div>
-          <div style={{ fontFamily: mono, fontSize: 19, fontWeight: 600 }}>Analytics</div>
-          <div style={{ fontSize: 12.5, color: c.dim }}>Occupancy trends across all lots</div>
-        </div>
-      </div>
+      <PageHeader title="Analytics" subtitle="Occupancy trends across all lots" />
 
-      <div className="sws-page-body" style={{ padding: "22px 30px", display: "flex", flexDirection: "column", gap: 16 }}>
+      <div className="sws-page-body">
         {!hasWeek && live.length === 0 ? (
-          <div style={{ ...card, color: c.dim, fontSize: 13 }}>
-            No history yet. Occupancy is recorded as curbs report in, and charts will appear here once there's data.
-          </div>
+          <Card>
+            <EmptyState icon="analytics" title="No history yet">
+              Occupancy is recorded as curbs report in, and charts will appear here once there's data.
+            </EmptyState>
+          </Card>
         ) : (
           <>
-            <div className="sws-tiles" style={{ display: "flex", gap: 14 }}>
-              <Tile label="AVERAGE OCCUPANCY" value={hasWeek ? `${avg}%` : "—"} sub="past week" />
-              <Tile label="PEAK HOUR" value={peakHour} sub="all week" />
-              <Tile label="BUSIEST DAY" value={busiestDay} />
-              <Tile label="RIGHT NOW" value={latest === null ? "—" : `${latest}%`} sub="full" />
+            <div className="sws-tiles">
+              <StatTile animate={false} label="Average occupancy" value={hasWeek ? `${avg}%` : "—"} sub="past week" />
+              <StatTile animate={false} label="Peak hour" value={peakHour} sub="all week" />
+              <StatTile animate={false} label="Busiest day" value={busiestDay} />
+              <StatTile animate={false} label="Right now" value={latest === null ? "—" : `${latest}%`} sub="full" />
             </div>
 
             {hasWeek && (
-              <div style={card}>
-                <div style={{ fontFamily: mono, fontSize: 14, fontWeight: 600 }}>Average occupancy by day and hour</div>
+              <Card title="Average occupancy by day and hour">
+                <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                 <div className="sws-heatmap" style={{ display: "grid", gridTemplateColumns: "44px repeat(14, minmax(0, 1fr))", gap: 4 }}>
                   <div />
                   {HOURS.map((h) => <div key={h} style={{ fontSize: 10.5, color: c.dim, textAlign: "center" }}>{h}</div>)}
@@ -103,19 +88,16 @@ function Analytics() {
                     )),
                   ])}
                 </div>
-                <div style={{ fontSize: 12.5, color: c.dim }}>
+                <div className="sws-note">
                   Busiest around {peakHour}. Weekends never pass {weekendPeak}% full, so permit-only lots could open to visitors on Saturdays and Sundays.
                 </div>
-              </div>
+                </div>
+              </Card>
             )}
 
-            <div style={card}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                <div style={{ fontFamily: mono, fontSize: 14, fontWeight: 600 }}>Live occupancy</div>
-                <div style={{ fontSize: 12, color: c.dim }}>{live.length} readings</div>
-              </div>
+            <Card title="Live occupancy" meta={`${live.length} readings`}>
               {live.length < 2 ? (
-                <div style={{ fontSize: 12.5, color: c.dim }}>Collecting readings. A new point appears every few seconds while data is coming in.</div>
+                <div className="sws-note">Collecting readings. A new point appears every few seconds while data is coming in.</div>
               ) : (
                 <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }}>
                   {[0, 50, 100].map((v) => (
@@ -131,7 +113,7 @@ function Analytics() {
                   })()}
                 </svg>
               )}
-            </div>
+            </Card>
           </>
         )}
       </div>

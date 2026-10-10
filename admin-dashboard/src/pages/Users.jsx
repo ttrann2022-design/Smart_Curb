@@ -3,6 +3,8 @@ import { useOutletContext } from "react-router-dom";
 import { ref, onValue, update, set, remove } from "firebase/database";
 import { auth, database, emailKey } from "../firebase";
 import { c, mono } from "../theme";
+import Icon from "../components/Icon";
+import { PageHeader, Card, Button, Input, Select, EmptyState } from "../components/ui";
 
 const permLabels = ["View occupancy", "View battery and status", "Change LED zones", "Edit panel text", "View camera footage", "Manage users"];
 
@@ -12,7 +14,7 @@ const roles = [
   { id: "manager", name: "Manager", who: "Facility and security leads", perms: [true, true, true, true, true, true] },
 ];
 
-const inputStyle = { height: 36, padding: "0 10px", borderRadius: 5, border: `1px solid ${c.line}`, background: c.bg, color: c.text, fontSize: 13 };
+const columns = "minmax(200px, 2fr) 150px minmax(170px, 1.2fr)";
 
 function Users() {
   const { role } = useOutletContext();
@@ -80,113 +82,108 @@ function Users() {
     setStatus(`Invite for ${email} revoked.`);
   };
 
-  const columns = "2fr 1fr 1.2fr";
-  const headerCell = { fontSize: 11, fontWeight: 700, letterSpacing: 0.7, color: c.dim };
-
   return (
     <>
-      <div className="sws-page-head" style={{ height: 68, flexShrink: 0, background: c.panel, borderBottom: `1px solid ${c.line}`, padding: "0 30px", display: "flex", alignItems: "center" }}>
-        <div>
-          <div style={{ fontFamily: mono, fontSize: 19, fontWeight: 600 }}>Users & roles</div>
-          <div style={{ fontSize: 12.5, color: c.dim }}>
-            {isManager ? "Invite people and change anyone's access level" : "Only managers can invite people or change access"}
-          </div>
-        </div>
-      </div>
+      <PageHeader
+        title="Users & roles"
+        subtitle={isManager ? "Invite people and change anyone's access level" : "Only managers can invite people or change access"}
+      />
 
-      <div className="sws-page-body" style={{ padding: "22px 30px", display: "flex", flexDirection: "column", gap: 18 }}>
-        <div className="sws-tiles" style={{ display: "flex", gap: 14 }}>
-          {roles.map((r) => (
-            <div key={r.id} style={{ flex: 1, background: r.id === role ? "#1E2313" : c.panel, border: `1px solid ${r.id === role ? c.accent : c.line}`, borderRadius: 6, padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                <div>
-                  <div style={{ fontFamily: mono, fontSize: 15, fontWeight: 600 }}>{r.name}</div>
-                  <div style={{ fontSize: 12, color: c.dim, marginTop: 3 }}>{r.who}</div>
-                </div>
-                <span style={{ fontSize: 11, fontWeight: 700, color: c.accent, background: c.navBg, padding: "4px 9px", borderRadius: 5 }}>
-                  {countFor(r.id)} USERS
-                </span>
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {permLabels.map((p, i) => (
-                  <div key={p} style={{ fontSize: 12, color: r.perms[i] ? c.text : "#5A5A52" }}>
-                    {r.perms[i] ? "✓" : "–"}&nbsp;&nbsp;{p}
+      <div className="sws-page-body">
+        <div className="sws-tiles" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
+          {roles.map((r) => {
+            const mine = r.id === role;
+            return (
+              <div key={r.id} className="sws-card" style={{ background: mine ? "#1B200F" : c.panel, borderColor: mine ? c.accentLine : c.line, padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+                  <div>
+                    <h2 style={{ fontFamily: mono, fontSize: 15, fontWeight: 600, margin: 0 }}>
+                      {r.name}
+                      {mine && <span style={{ fontFamily: "inherit", fontSize: 11, color: c.accent, marginLeft: 8 }}>YOU</span>}
+                    </h2>
+                    <div style={{ fontSize: 12, color: c.dim, marginTop: 3 }}>{r.who}</div>
                   </div>
-                ))}
+                  <span className="sws-badge">{countFor(r.id)} {countFor(r.id) === 1 ? "USER" : "USERS"}</span>
+                </div>
+                <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 7 }}>
+                  {permLabels.map((p, i) => (
+                    <li key={p} style={{ fontSize: 12.5, color: r.perms[i] ? c.text : c.faint, display: "flex", alignItems: "center", gap: 8 }}>
+                      <Icon name={r.perms[i] ? "check" : "close"} size={13} strokeWidth={r.perms[i] ? 2.4 : 1.8} style={{ color: r.perms[i] ? c.open : c.faint }} />
+                      <span className="sws-sr-only">{r.perms[i] ? "Can" : "Cannot"}</span>
+                      {p}
+                    </li>
+                  ))}
+                </ul>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         {isManager && (
-          <div style={{ background: c.panel, border: `1px solid ${c.line}`, borderRadius: 6 }}>
-            <div style={{ padding: "12px 18px", borderBottom: `1px solid ${c.line}`, fontFamily: mono, fontSize: 14, fontWeight: 600 }}>Invite someone</div>
+          <Card title="Invite someone" body={false}>
             <form onSubmit={sendInvite} style={{ padding: "14px 18px", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-              <input type="email" placeholder="their@email.com" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} style={{ ...inputStyle, width: 280 }} required />
-              <select value={inviteRole} onChange={(e) => setInviteRole(e.target.value)} style={{ ...inputStyle, width: 140 }}>
+              <Input type="email" aria-label="Email to invite" placeholder="their@email.com" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} style={{ width: 280, maxWidth: "100%" }} required />
+              <Select aria-label="Role for the invite" value={inviteRole} onChange={(e) => setInviteRole(e.target.value)} style={{ width: 140 }}>
                 <option value="viewer">Viewer</option>
                 <option value="operator">Operator</option>
                 <option value="manager">Manager</option>
-              </select>
-              <button type="submit" style={{ height: 36, padding: "0 16px", borderRadius: 5, border: "none", background: c.accent, color: c.onAccent, fontWeight: 600, fontSize: 13, cursor: "pointer" }}>
-                Send invite
-              </button>
+              </Select>
+              <Button type="submit" variant="primary" icon="send">Send invite</Button>
             </form>
 
             {inviteList.length > 0 && (
               <div style={{ borderTop: `1px solid ${c.line}` }}>
-                <div style={{ padding: "10px 18px", ...headerCell, background: "#1A1A17" }}>PENDING INVITES</div>
+                <div className="sws-trow sws-thead"><div className="sws-th">Pending invites</div></div>
                 {inviteList.map(([key, inv]) => (
-                  <div key={key} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 18px", borderTop: `1px solid ${c.line}` }}>
-                    <div style={{ fontSize: 13 }}>
-                      {inv.email}
-                      <span style={{ fontFamily: mono, fontSize: 11, fontWeight: 600, color: c.accent, marginLeft: 10 }}>{(inv.role || "viewer").toUpperCase()}</span>
+                  <div key={key} className="sws-trow" style={{ gridTemplateColumns: "1fr auto" }}>
+                    <div style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 10, minWidth: 0, flexWrap: "wrap" }}>
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{inv.email}</span>
+                      <span className="sws-badge">{(inv.role || "viewer").toUpperCase()}</span>
                     </div>
-                    <button onClick={() => revokeInvite(key, inv.email)} style={{ background: "transparent", border: "none", color: c.busy, fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>
-                      Revoke
-                    </button>
+                    <Button variant="ghost" size="sm" onClick={() => revokeInvite(key, inv.email)} style={{ color: c.busy }}>Revoke</Button>
                   </div>
                 ))}
               </div>
             )}
-          </div>
+          </Card>
         )}
 
-        <div style={{ background: c.panel, border: `1px solid ${c.line}`, borderRadius: 6, overflow: "hidden" }} className="sws-table">
-          <div style={{ padding: "12px 18px", borderBottom: `1px solid ${c.line}`, display: "flex", justifyContent: "space-between" }}>
-            <span style={{ fontFamily: mono, fontSize: 14, fontWeight: 600 }}>People</span>
-            <span style={{ fontSize: 12, color: c.dim }}>{userList.length} accounts</span>
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: columns, gap: 12, padding: "10px 18px", borderBottom: `1px solid ${c.line}`, background: "#1A1A17" }}>
-            <div style={headerCell}>EMAIL</div>
-            <div style={headerCell}>ROLE</div>
-            <div style={headerCell}>LAST ACTIVE</div>
-          </div>
-
-          {userList.map(([uid, u]) => (
-            <div key={uid} style={{ display: "grid", gridTemplateColumns: columns, gap: 12, alignItems: "center", padding: "12px 18px", borderBottom: `1px solid ${c.line}` }}>
-              <div style={{ fontSize: 13 }}>
-                {u.email}
-                {uid === myUid && <span style={{ color: c.dim, fontSize: 11.5 }}> (you)</span>}
+        <Card title="People" meta={`${userList.length} accounts`} body={false}>
+          <div className="sws-table-scroll">
+            <div role="table" aria-label="People">
+              <div role="row" className="sws-trow sws-thead" style={{ gridTemplateColumns: columns }}>
+                <div role="columnheader" className="sws-th">Email</div>
+                <div role="columnheader" className="sws-th">Role</div>
+                <div role="columnheader" className="sws-th">Last active</div>
               </div>
-              <div>
-                {isManager ? (
-                  <select value={u.role || "viewer"} onChange={(e) => changeRole(uid, e.target.value)} style={{ ...inputStyle, height: 32 }}>
-                    <option value="viewer">Viewer</option>
-                    <option value="operator">Operator</option>
-                    <option value="manager">Manager</option>
-                  </select>
-                ) : (
-                  <span style={{ fontFamily: mono, fontSize: 11.5, fontWeight: 600, color: c.accent }}>{(u.role || "viewer").toUpperCase()}</span>
-                )}
+              <div role="rowgroup" className="sws-tbody">
+                {userList.length === 0 && <EmptyState icon="users" title="No accounts yet" />}
+                {userList.map(([uid, u]) => (
+                  <div key={uid} role="row" className="sws-trow" style={{ gridTemplateColumns: columns }}>
+                    <div role="cell" style={{ fontSize: 13, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {u.email}
+                      {uid === myUid && <span style={{ color: c.dim, fontSize: 11.5 }}> (you)</span>}
+                    </div>
+                    <div role="cell">
+                      {isManager ? (
+                        <Select aria-label={`Role for ${u.email}`} value={u.role || "viewer"} onChange={(e) => changeRole(uid, e.target.value)} style={{ height: 32, fontSize: 13 }}>
+                          <option value="viewer">Viewer</option>
+                          <option value="operator">Operator</option>
+                          <option value="manager">Manager</option>
+                        </Select>
+                      ) : (
+                        <span className="sws-badge">{(u.role || "viewer").toUpperCase()}</span>
+                      )}
+                    </div>
+                    <div role="cell" style={{ fontSize: 12.5, color: c.dim }}>{u.lastActive ? new Date(u.lastActive).toLocaleString() : "—"}</div>
+                  </div>
+                ))}
               </div>
-              <div style={{ fontSize: 12.5, color: c.dim }}>{u.lastActive ? new Date(u.lastActive).toLocaleString() : "—"}</div>
             </div>
-          ))}
-        </div>
+          </div>
+        </Card>
 
-        {status && <div style={{ fontSize: 12.5, color: c.dim }}>{status}</div>}
+        {status && <div role="status" className="sws-note">{status}</div>}
       </div>
     </>
   );
