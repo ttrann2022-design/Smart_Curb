@@ -1,5 +1,22 @@
-import { ref, get, update, onValue, push } from "firebase/database";
-import { database, dataPath, DATA_ROOT } from "../firebase";
+import {
+  ref, get, update, onValue, push, remove, runTransaction, onDisconnect,
+  query, orderByKey, limitToLast, endBefore,
+} from "firebase/database";
+import { auth, database } from "../firebase";
+import { SIM_ROOT } from "../dataMode";
+
+// Everything in this file reads and writes ONLY under SIM_ROOT ("demo/").
+// It deliberately never uses dataPath(), so switching the dashboard to Live
+// can't redirect a running simulation onto real curbs like units/C-095.
+if (SIM_ROOT !== "demo/") throw new Error("Simulation root must be demo/.");
+const simPath = (path) => SIM_ROOT + path;
+
+function writeSim(updates) {
+  Object.keys(updates).forEach((key) => {
+    if (!key.startsWith(SIM_ROOT)) throw new Error(`Refusing to write outside the simulation: ${key}`);
+  });
+  return update(ref(database), updates);
+}
 
 export const DEMO_LOTS = {
   lot06: { name: "Lot 6", count: 20, target: 0.55, led: "green", text: "LOT 6" },
@@ -7,12 +24,14 @@ export const DEMO_LOTS = {
   lot12: { name: "Lot 12", count: 28, target: 0.85, led: "red", text: "LOT 12" },
   lot14: { name: "Lot 14", count: 22, target: 0.95, led: "gold", text: "LOT 14" },
 };
+export const DEMO_CURB_COUNT = Object.values(DEMO_LOTS).reduce((s, l) => s + l.count, 0);
+export const DEMO_LOT_COUNT = Object.keys(DEMO_LOTS).length;
 
-function guard() {
-  if (!DATA_ROOT) {
-    throw new Error("Demo tools only run on the demo branch, where DATA_ROOT points at the demo section.");
-  }
-}
+const TICK_MS = 2000;
+const LIVE_KEEP = 200;
+const LOCK_PATH = simPath("simLock");
+const LOCK_STALE_MS = 15000;
+const SESSION = Math.random().toString(36).slice(2) + Date.now().toString(36);
 
 function lotStats(units) {
   const stats = {};
@@ -29,6 +48,7 @@ function lotStats(units) {
 function buildDemoData() {
   const lots = {};
   const units = {};
+  const now = Date.now();
   let n = 1;
   Object.entries(DEMO_LOTS).forEach(([lotId, lot]) => {
     lots[lotId] = { name: lot.name, units: {} };
@@ -42,6 +62,7 @@ function buildDemoData() {
         online: true,
         ledColor: lot.led,
         panelText: lot.text,
+        lastUpdated: now - Math.floor(Math.random() * 45 * 60000),
       };
       lots[lotId].units[id] = true;
     }
@@ -71,15 +92,14 @@ function buildWeek() {
 }
 
 export async function resetDemoData() {
-  guard();
-  stopSimulation();
+  await stopSimulation();
   const { lots, units } = buildDemoData();
-  await update(ref(database), {
-    [dataPath("lots")]: lots,
-    [dataPath("units")]: units,
-    [dataPath("history")]: { week: buildWeek() },
+  await writeSim({
+    [simPath("lots")]: lots,
+    [simPath("units")]: units,
+    [simPath("history")]: { week: buildWeek() },
   });
-  return `Loaded ${Object.keys(units).length} demo curbs across ${Object.keys(lots).length} lots, plus a week of history.`;
+  return `Loaded ${Object.keys(units).length} simulated curbs across ${Object.keys(lots).length} lots, plus a week of history.`;
 }
 
 function applyChanges(units, changes) {
@@ -95,37 +115,79 @@ function commit(currentUnits, changes) {
   const updates = {};
   Object.entries(changes).forEach(([id, fields]) => {
     Object.entries(fields).forEach(([key, value]) => {
-      updates[dataPath(`units/${id}/${key}`)] = value;
+      updates[simPath(`units/${id}/${key}`)] = value;
     });
   });
   Object.entries(lotStats(next)).forEach(([lotId, s]) => {
-    updates[dataPath(`lots/${lotId}/openSpots`)] = s.openSpots;
-    updates[dataPath(`lots/${lotId}/totalSpots`)] = s.totalSpots;
+    updates[simPath(`lots/${lotId}/openSpots`)] = s.openSpots;
+    updates[simPath(`lots/${lotId}/totalSpots`)] = s.totalSpots;
   });
-  return update(ref(database), updates);
+  return writeSim(updates);
 }
+
+// ---------- Running state, shared across tabs and computers ----------
+// demo/simLock records which browser is running the simulation, so two
+// people pressing Start don't double every write. The lock is released on
+// Stop, removed automatically if the tab closes (onDisconnect), and treated
+// as abandoned if its heartbeat is older than LOCK_STALE_MS.
 
 let timer = null;
 let tickCount = 0;
 let latestUnits = {};
-let stopListening = null;
+let stopUnits = null;
+let lock = null;
+let lockWatch = null;
 const watchers = new Set();
 
+function lockIsFresh(l) {
+  return !!l && Date.now() - (l.heartbeat || 0) < LOCK_STALE_MS;
+}
+
+function state() {
+  const elsewhere = lock && lock.owner !== SESSION && lockIsFresh(lock) ? (lock.email || "another browser") : null;
+  return { running: timer !== null, elsewhere };
+}
+
 function notify() {
-  watchers.forEach((fn) => fn(timer !== null));
+  const s = state();
+  watchers.forEach((fn) => fn(s));
+}
+
+function ensureLockWatch() {
+  if (lockWatch) return;
+  lockWatch = onValue(ref(database, LOCK_PATH), (snap) => {
+    lock = snap.val();
+    // Someone else took over (our heartbeat lapsed): stop quietly here.
+    if (timer && lock && lock.owner !== SESSION) stopLocal();
+    notify();
+  }, () => {});
 }
 
 export function watchSimulation(fn) {
+  ensureLockWatch();
   watchers.add(fn);
-  fn(timer !== null);
+  fn(state());
   return () => { watchers.delete(fn); };
 }
 
-function recordSnapshot() {
+async function recordSnapshot() {
   const online = Object.values(latestUnits).filter((u) => u.online);
   if (online.length === 0) return;
   const pct = Math.round((online.filter((u) => u.occupied).length / online.length) * 100);
-  push(ref(database, dataPath("history/live")), { t: Date.now(), pct });
+  await push(ref(database, simPath("history/live")), { t: Date.now(), pct });
+  if (tickCount % 75 === 0) await pruneLive();
+}
+
+// Keep history/live from growing forever (the driver app downloads all of demo/).
+async function pruneLive() {
+  const liveRef = ref(database, simPath("history/live"));
+  const kept = await get(query(liveRef, orderByKey(), limitToLast(LIVE_KEEP)));
+  const firstKept = Object.keys(kept.val() || {}).sort()[0];
+  if (!firstKept) return;
+  const old = await get(query(liveRef, orderByKey(), endBefore(firstKept)));
+  const updates = {};
+  Object.keys(old.val() || {}).forEach((k) => { updates[simPath(`history/live/${k}`)] = null; });
+  if (Object.keys(updates).length) await writeSim(updates);
 }
 
 function tick() {
@@ -134,6 +196,7 @@ function tick() {
   const pick = () => ids[Math.floor(Math.random() * ids.length)];
   const changes = {};
   const change = (id, fields) => { changes[id] = { ...(changes[id] || {}), ...fields }; };
+  const now = Date.now();
 
   const moves = 2 + Math.floor(Math.random() * 3);
   for (let i = 0; i < moves; i++) {
@@ -141,7 +204,8 @@ function tick() {
     const u = latestUnits[id];
     if (!u || !u.online) continue;
     const target = DEMO_LOTS[u.lot]?.target ?? 0.7;
-    change(id, { occupied: Math.random() < target });
+    const occupied = Math.random() < target;
+    if (occupied !== u.occupied) change(id, { occupied, lastUpdated: now });
   }
 
   const b = pick();
@@ -150,48 +214,71 @@ function tick() {
     change(b, { battery: Math.min(100, Math.max(21, bu.battery + (Math.random() < 0.5 ? -1 : 1))) });
   }
 
-  commit(latestUnits, changes);
+  writeSim({ [simPath("simLock/heartbeat")]: now }).catch(() => {});
+  commit(latestUnits, changes).catch(() => {});
 
   tickCount += 1;
-  if (tickCount % 3 === 0) recordSnapshot();
+  if (tickCount % 3 === 0) recordSnapshot().catch(() => {});
 }
 
-export function startSimulation() {
-  guard();
-  if (timer) return;
-  stopListening = onValue(ref(database, dataPath("units")), (snap) => {
-    latestUnits = snap.val() || {};
-  });
-  timer = setInterval(tick, 2000);
-  notify();
-}
-
-export function stopSimulation() {
+function stopLocal() {
   if (timer) clearInterval(timer);
   timer = null;
-  if (stopListening) stopListening();
-  stopListening = null;
+  if (stopUnits) stopUnits();
+  stopUnits = null;
   notify();
+}
+
+export async function startSimulation() {
+  if (timer) return "Simulation is already running in this tab.";
+  ensureLockWatch();
+  const email = auth.currentUser?.email || "";
+  const result = await runTransaction(ref(database, LOCK_PATH), (cur) => {
+    if (cur && cur.owner !== SESSION && lockIsFresh(cur)) return undefined;
+    return { owner: SESSION, email, heartbeat: Date.now() };
+  });
+  if (!result.committed) {
+    const who = result.snapshot.val()?.email || "another browser";
+    throw new Error(`The simulation is already running in ${who}'s browser. Stop it there first.`);
+  }
+  await onDisconnect(ref(database, LOCK_PATH)).remove();
+
+  stopUnits = onValue(ref(database, simPath("units")), (snap) => {
+    latestUnits = snap.val() || {};
+  });
+  timer = setInterval(tick, TICK_MS);
+  notify();
+  return "Simulation running. Cars arrive and leave every 2 seconds.";
+}
+
+export async function stopSimulation() {
+  const wasRunning = timer !== null;
+  stopLocal();
+  if (wasRunning) {
+    await onDisconnect(ref(database, LOCK_PATH)).cancel().catch(() => {});
+    const snap = await get(ref(database, LOCK_PATH)).catch(() => null);
+    if (snap?.val()?.owner === SESSION) await remove(ref(database, LOCK_PATH));
+  }
+  return "Simulation stopped.";
 }
 
 async function readUnits() {
-  const snap = await get(ref(database, dataPath("units")));
+  const snap = await get(ref(database, simPath("units")));
   return snap.val() || {};
 }
 
 export async function rushHour(lotId) {
-  guard();
   const all = await readUnits();
   const changes = {};
+  const now = Date.now();
   Object.entries(all).forEach(([id, u]) => {
-    if (u.lot === lotId && u.online && Math.random() < 0.9) changes[id] = { occupied: true };
+    if (u.lot === lotId && u.online && !u.occupied && Math.random() < 0.9) changes[id] = { occupied: true, lastUpdated: now };
   });
   await commit(all, changes);
   return `Rush hour: ${Object.keys(changes).length} cars just pulled into ${DEMO_LOTS[lotId].name}.`;
 }
 
 export async function knockCurbOffline() {
-  guard();
   const all = await readUnits();
   const online = Object.keys(all).filter((id) => all[id].online);
   if (online.length === 0) return "Every curb is already offline.";
@@ -201,7 +288,6 @@ export async function knockCurbOffline() {
 }
 
 export async function restoreAllCurbs() {
-  guard();
   const all = await readUnits();
   const changes = {};
   Object.entries(all).forEach(([id, u]) => {

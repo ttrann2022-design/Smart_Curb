@@ -1,15 +1,15 @@
 import { useState } from "react";
 import { createUserWithEmailAndPassword, deleteUser } from "firebase/auth";
 import { ref, get } from "firebase/database";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { auth, database, emailKey } from "../firebase";
 import { c, mono } from "../theme";
-import logo from "../assets/smartcurb-logo.jpg";
-
-const inputStyle = { height: 44, padding: "0 12px", borderRadius: 6, border: `1px solid ${c.line}`, background: c.panel, color: c.text, fontSize: 14 };
+import AuthShell from "../components/AuthShell";
+import { Button, Field, Input, Notice } from "../components/ui";
 
 function Signup() {
-  const [email, setEmail] = useState("");
+  const [params] = useSearchParams();
+  const [email, setEmail] = useState(params.get("email") || "");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState("");
@@ -42,49 +42,50 @@ function Signup() {
 
       navigate("/overview");
     } catch (err) {
-      if (err.code === "auth/email-already-in-use") setError("An account with this email already exists. Try signing in instead.");
-      else if (err.code === "auth/invalid-email") setError("That email address isn't valid.");
-      else setError("Could not create account: " + err.message);
+      const code = err.code || "";
+      if (code.includes("email-already-in-use")) setError("An account with this email already exists. Try signing in instead.");
+      else if (code.includes("invalid-email")) setError("That email address isn't valid.");
+      else if (code.includes("weak-password")) setError("That password is too weak. Try a longer one.");
+      else if (code.includes("network-request-failed")) setError("Can't reach the server. Check your connection and try again.");
+      else setError("Couldn't create your account. Try again in a moment.");
       setBusy(false);
     }
   };
 
+  const ready = email.trim() && password && confirm && !busy;
+
   return (
-    <div style={{ height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: c.bg }}>
-      <form onSubmit={handleSignUp} style={{ width: 400, background: c.panel, border: `1px solid ${c.line}`, borderRadius: 8, padding: 32, display: "flex", flexDirection: "column", gap: 14 }}>
-        <div style={{ display: "flex", justifyContent: "center", marginBottom: 4 }}>
-          <img
-            src={logo}
-            alt="Smart Curb"
-            style={{ width: 110, height: 110, borderRadius: 12, objectFit: "cover" }}
-          />
+    <AuthShell>
+      <form onSubmit={handleSignUp} className="sws-auth-form" style={{ width: 380, display: "flex", flexDirection: "column", gap: 16 }} noValidate>
+        <div>
+          <h2 style={{ fontFamily: mono, fontSize: 24, margin: "0 0 6px" }}>Create your account</h2>
+          <div style={{ fontSize: 13.5, color: c.dim, lineHeight: 1.5 }}>
+            Use the email a manager invited. Your access level was set when they invited you.
+          </div>
         </div>
 
-        <h2 style={{ fontFamily: mono, margin: 0 }}>Create your account</h2>
-        <div style={{ fontSize: 13, color: c.dim, lineHeight: 1.5 }}>
-          Use the email a manager invited. Your access level was set when they invited you.
-        </div>
+        {error && <Notice tone="busy" role="alert">{error}</Notice>}
 
-        {error && <div style={{ color: c.busy, fontSize: 13 }}>{error}</div>}
+        <Field label="Invited email">
+          <Input size="lg" type="email" autoComplete="username" inputMode="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus={!email} />
+        </Field>
+        <Field label="Password" hint="At least 6 characters.">
+          <Input size="lg" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} required autoFocus={!!email} />
+        </Field>
+        <Field label="Confirm password">
+          <Input size="lg" type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} required aria-invalid={confirm && confirm !== password ? true : undefined} />
+        </Field>
 
-        <input type="email" placeholder="Invited email" value={email} onChange={(e) => setEmail(e.target.value)} style={inputStyle} required />
-        <input type="password" placeholder="Password (6+ characters)" value={password} onChange={(e) => setPassword(e.target.value)} style={inputStyle} required />
-        <input type="password" placeholder="Confirm password" value={confirm} onChange={(e) => setConfirm(e.target.value)} style={inputStyle} required />
-
-        <button
-          type="submit"
-          disabled={busy}
-          style={{ height: 46, borderRadius: 6, border: "none", fontWeight: 600, fontSize: 14, background: busy ? c.line : c.accent, color: busy ? c.dim : c.onAccent, cursor: busy ? "wait" : "pointer" }}
-        >
+        <Button type="submit" variant="primary" size="lg" block busy={busy} disabled={!ready}>
           {busy ? "Creating account…" : "Create account"}
-        </button>
+        </Button>
 
-        <div style={{ fontSize: 13, color: c.dim, textAlign: "center" }}>
+        <div style={{ fontSize: 13, color: c.dim, textAlign: "center", marginTop: 4 }}>
           Already have an account?{" "}
           <Link to="/" style={{ color: c.accent, fontWeight: 600, textDecoration: "none" }}>Sign in</Link>
         </div>
       </form>
-    </div>
+    </AuthShell>
   );
 }
 

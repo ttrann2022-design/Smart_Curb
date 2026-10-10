@@ -1,30 +1,55 @@
-import { useState } from "react";
-import { signInWithEmailAndPassword, sendPasswordResetEmail } from "firebase/auth";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { onAuthStateChanged, signInWithEmailAndPassword, sendPasswordResetEmail } from "firebase/auth";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { auth } from "../firebase";
 import { c, mono } from "../theme";
-import logo from "../assets/smartcurb-logo.jpg";
+import AuthShell from "../components/AuthShell";
+import { Button, Field, Input, Notice } from "../components/ui";
 
-const inputStyle = { height: 44, padding: "0 12px", borderRadius: 6, border: `1px solid ${c.line}`, background: c.panel, color: c.text, fontSize: 14 };
+function signInError(code = "") {
+  if (code.includes("invalid-credential") || code.includes("wrong-password") || code.includes("user-not-found") || code.includes("invalid-email")) {
+    return "That email and password don't match an account.";
+  }
+  if (code.includes("too-many-requests")) return "Too many attempts. Wait a few minutes, or reset your password.";
+  if (code.includes("network-request-failed")) return "Can't reach the server. Check your connection and try again.";
+  if (code.includes("user-disabled")) return "This account has been disabled. Ask a manager for help.";
+  return "Couldn't sign in. Try again in a moment.";
+}
 
 function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
-  const [params] = useSearchParams();
+  const [busy, setBusy] = useState(false);
+  const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const noAccess = params.get("noaccess") === "1";
+  const next = location.state?.from && location.state.from !== "/" ? location.state.from : "/overview";
+
+  // Already signed in (and not just bounced for lack of access): go straight in.
+  useEffect(() => {
+    if (noAccess) return undefined;
+    return onAuthStateChanged(auth, (user) => { if (user) navigate(next, { replace: true }); });
+  }, [noAccess, navigate, next]);
+
+  const clearNoAccess = () => {
+    if (noAccess) setParams({}, { replace: true });
+  };
 
   const handleSignIn = async (e) => {
     e.preventDefault();
     setError("");
     setInfo("");
+    clearNoAccess();
+    setBusy(true);
     try {
       await signInWithEmailAndPassword(auth, email.trim(), password);
-      navigate("/overview");
-    } catch {
-      setError("Invalid email or password.");
+      navigate(next, { replace: true });
+    } catch (err) {
+      setError(signInError(err.code));
+      setBusy(false);
     }
   };
 
@@ -32,72 +57,54 @@ function Login() {
     setError("");
     setInfo("");
     if (!email.trim()) {
-      setError("Type your email above first, then click Forgot password.");
+      setError("Type your email above first, then choose Forgot password.");
       return;
     }
     try {
       await sendPasswordResetEmail(auth, email.trim());
       setInfo("If that email has an account, a reset link is on its way. Check your spam folder too.");
     } catch (err) {
-      setError("Could not send reset email: " + err.message);
+      setError(err.code?.includes("invalid-email") ? "That email address isn't valid." : "Couldn't send the reset email. Try again in a moment.");
     }
   };
 
   return (
-    <div style={{ display: "flex", height: "100vh" }}>
-      <div style={{ flex: 1, background: c.side, padding: 56, display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 14 }}>
-          <img
-            src={logo}
-            alt="Smart Curb"
-            style={{ width: 150, height: 150, borderRadius: 14, objectFit: "cover" }}
-          />
-          <div>
-            <div style={{ fontFamily: mono, fontSize: 14, fontWeight: 600 }}>SMART WHEEL STOP</div>
-            <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: 1.2, color: c.dim }}>ADMIN CONSOLE</div>
-          </div>
-        </div>
+    <AuthShell>
+      <form onSubmit={handleSignIn} className="sws-auth-form" style={{ width: 380, display: "flex", flexDirection: "column", gap: 16 }} noValidate>
         <div>
-          <h1 style={{ fontFamily: mono, fontSize: 34, lineHeight: 1.2, margin: "0 0 14px" }}>Every parking space, on one screen.</h1>
-          <p style={{ color: c.navText, fontSize: 15, lineHeight: 1.6, margin: 0, maxWidth: 440 }}>
-            Built for campuses, stadiums, airports, hospitals, and anywhere else with more cars than places to put them.
-          </p>
+          <h2 style={{ fontFamily: mono, fontSize: 24, margin: "0 0 6px" }}>Sign in</h2>
+          <div style={{ fontSize: 13.5, color: c.dim }}>Use the work email your manager invited.</div>
         </div>
-        <div style={{ fontSize: 12, color: c.dim }}>Smart Curb · Parking management platform</div>
-      </div>
 
-      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", background: c.bg }}>
-        <form onSubmit={handleSignIn} style={{ width: 380, display: "flex", flexDirection: "column", gap: 14 }}>
-          <h2 style={{ fontFamily: mono, margin: "0 0 4px" }}>Sign in</h2>
+        {noAccess && (
+          <Notice tone="warn" title="No access yet">Your account isn't on the invite list. Ask a manager to invite you, then create your account.</Notice>
+        )}
+        {error && <Notice tone="busy" role="alert">{error}</Notice>}
+        {info && <Notice tone="ok" role="status">{info}</Notice>}
 
-          {noAccess && (
-            <div style={{ fontSize: 13, color: "#FFC078", background: "#26200F", border: "1px solid #4A3A1C", borderRadius: 6, padding: "10px 12px" }}>
-              Your account doesn't have access yet. Ask a manager to invite you.
-            </div>
-          )}
-          {error && <div style={{ color: c.busy, fontSize: 13 }}>{error}</div>}
-          {info && <div style={{ color: c.open, fontSize: 13 }}>{info}</div>}
+        <Field label="Work email">
+          <Input size="lg" type="email" autoComplete="username" inputMode="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus />
+        </Field>
+        <Field label="Password">
+          <Input size="lg" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+        </Field>
 
-          <input type="email" placeholder="Work email" value={email} onChange={(e) => setEmail(e.target.value)} style={inputStyle} required />
-          <input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} style={inputStyle} required />
-
-          <div style={{ display: "flex", justifyContent: "flex-end" }}>
-            <button type="button" onClick={handleReset} style={{ background: "transparent", border: "none", color: c.accent, fontSize: 13, fontWeight: 600, cursor: "pointer", padding: 0 }}>
-              Forgot password?
-            </button>
-          </div>
-
-          <button type="submit" style={{ height: 46, borderRadius: 6, background: c.accent, color: c.onAccent, fontWeight: 600, fontSize: 14, border: "none", cursor: "pointer" }}>
-            Sign in
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: -6 }}>
+          <button type="button" onClick={handleReset} className="sws-btn sws-btn-link" style={{ fontSize: 13 }}>
+            Forgot password?
           </button>
+        </div>
 
-          <div style={{ fontSize: 13, color: c.dim, textAlign: "center", marginTop: 6 }}>
-            Been invited?{" "}
-            <Link to="/signup" style={{ color: c.accent, fontWeight: 600, textDecoration: "none" }}>Create your account</Link>
-          </div>
-        </form>
-      </div>
-    </div>
+        <Button type="submit" variant="primary" size="lg" block busy={busy} disabled={busy || !email.trim() || !password}>
+          {busy ? "Signing in…" : "Sign in"}
+        </Button>
+
+        <div style={{ fontSize: 13, color: c.dim, textAlign: "center", marginTop: 4 }}>
+          Been invited?{" "}
+          <Link to="/signup" style={{ color: c.accent, fontWeight: 600, textDecoration: "none" }}>Create your account</Link>
+        </div>
+      </form>
+    </AuthShell>
   );
 }
 
