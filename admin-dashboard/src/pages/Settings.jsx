@@ -6,6 +6,7 @@ import { auth, database } from "../firebase";
 import { c, mono } from "../theme";
 import { DEFAULT_ALERTS, useAlertSettings } from "../units";
 import { stopSimulation } from "../demo/simulator";
+import { DEMO_BUILD } from "../dataMode";
 import DataModeSwitch from "../components/DataModeSwitch";
 import { PageHeader, Card, Button, Field, Input, StatusText, Notice } from "../components/ui";
 
@@ -171,15 +172,24 @@ function Settings() {
           </div>
         </Card>
 
-        <Card
-          title="Data source"
-          delay={60}
-          subtitle="Live shows the real curbs, including C-095 from the hardware Receiver. Simulation shows a separate set of simulated curbs for demos and testing. Switching only changes what this browser shows; it never moves or changes any data."
-        >
-          <div style={{ maxWidth: 360 }}>
-            <DataModeSwitch size="lg" />
-          </div>
-        </Card>
+        {DEMO_BUILD ? (
+          // The demo build is locked to simulated data, so there's no switch to explain.
+          <Card title="Data source" delay={60}>
+            <Notice tone="sim" title="Demo site: simulated data only">
+              This site never shows or changes real curbs.
+            </Notice>
+          </Card>
+        ) : (
+          <Card
+            title="Data source"
+            delay={60}
+            subtitle="Live shows the real curbs, including C-095 from the hardware Receiver. Simulation shows a separate set of simulated curbs for demos and testing. Switching only changes what this browser shows; it never moves or changes any data."
+          >
+            <div style={{ maxWidth: 360 }}>
+              <DataModeSwitch size="lg" />
+            </div>
+          </Card>
+        )}
 
         <Card title="Alert thresholds" delay={120} subtitle="Shared by everyone. These decide what shows up under Needs attention and Active alerts.">
           <AlertsForm key={JSON.stringify(alerts)} saved={alerts} canEdit={role === "manager"} />
