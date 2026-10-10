@@ -1,110 +1,117 @@
 import { useEffect, useState } from "react";
-import { c, mono } from "../theme";
+import { useOutletContext } from "react-router-dom";
+import { c } from "../theme";
+import { setDataMode } from "../dataMode";
 import {
   resetDemoData, startSimulation, stopSimulation, watchSimulation,
-  rushHour, knockCurbOffline, restoreAllCurbs,
+  rushHour, knockCurbOffline, restoreAllCurbs, DEMO_CURB_COUNT, DEMO_LOT_COUNT,
 } from "../demo/simulator";
-
-const card = { background: c.panel, border: `1px solid ${c.line}`, borderRadius: 6, padding: 18, display: "flex", flexDirection: "column", gap: 12 };
-const title = { fontFamily: mono, fontSize: 14, fontWeight: 600 };
-const note = { fontSize: 12.5, color: c.dim, lineHeight: 1.5 };
-
-function Btn({ children, onClick, primary, danger, disabled }) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      style={{
-        height: 40, padding: "0 16px", borderRadius: 5, fontSize: 13, fontWeight: 600,
-        cursor: disabled ? "wait" : "pointer",
-        border: primary ? "none" : `1px solid ${danger ? c.busy : c.line}`,
-        background: primary ? c.accent : c.bg,
-        color: primary ? c.onAccent : danger ? c.busy : c.text,
-        opacity: disabled ? 0.6 : 1,
-      }}
-    >
-      {children}
-    </button>
-  );
-}
+import { PageHeader, Card, Button, Notice, StatusText } from "../components/ui";
 
 function DemoControls() {
-  const [running, setRunning] = useState(false);
+  const { role, mode } = useOutletContext();
+  const [sim, setSim] = useState({ running: false, elsewhere: null });
   const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState("");
+  const [status, setStatus] = useState(null);
+  const [confirmReset, setConfirmReset] = useState(false);
+  const canRun = role === "operator" || role === "manager";
 
-  useEffect(() => watchSimulation(setRunning), []);
+  useEffect(() => watchSimulation(setSim), []);
 
   const run = async (fn) => {
     setBusy(true);
-    setStatus("");
+    setStatus(null);
     try {
       const msg = await fn();
-      if (msg) setStatus(msg);
+      if (msg) setStatus({ ok: true, text: msg });
     } catch (err) {
-      setStatus("Error: " + err.message);
+      setStatus({ ok: false, text: err.message });
     }
     setBusy(false);
   };
 
-  const handleReset = () => {
-    if (!window.confirm("Replace all demo data with a fresh set of curbs?")) return;
-    run(resetDemoData);
-  };
+  const head = <PageHeader title="Simulation" subtitle="Simulated curbs live in their own area of the database. Real curbs are never touched." />;
 
-  const handleToggle = () => {
-    try {
-      if (running) {
-        stopSimulation();
-        setStatus("Simulation stopped.");
-      } else {
-        startSimulation();
-        setStatus("Simulation running. Cars arrive and leave every 2 seconds.");
-      }
-    } catch (err) {
-      setStatus("Error: " + err.message);
-    }
-  };
+  if (mode !== "sim") {
+    return (
+      <>
+        {head}
+        <div className="sws-page-body sws-narrow">
+          <Card title="You're viewing live data">
+            <div style={{ display: "flex", flexDirection: "column", gap: 14, alignItems: "flex-start" }}>
+              <div className="sws-note">Switch to Simulation to see and control simulated curbs. Live data, including C-095, stays exactly as the hardware reports it.</div>
+              <Button variant="sim" icon="simulation" onClick={() => setDataMode("sim")}>Switch to Simulation</Button>
+            </div>
+          </Card>
+        </div>
+      </>
+    );
+  }
+
+  const runningLabel = sim.running ? "RUNNING HERE" : sim.elsewhere ? "RUNNING ELSEWHERE" : "STOPPED";
+  const live = sim.running || sim.elsewhere;
 
   return (
     <>
-      <div className="sws-page-head" style={{ height: 68, flexShrink: 0, background: c.panel, borderBottom: `1px solid ${c.line}`, padding: "0 30px", display: "flex", alignItems: "center" }}>
-        <div>
-          <div style={{ fontFamily: mono, fontSize: 19, fontWeight: 600 }}>Demo controls</div>
-          <div style={{ fontSize: 12.5, color: c.dim }}>Everything here writes to the demo section of the database. Real data is never touched.</div>
-        </div>
-      </div>
+      {head}
+      <div className="sws-page-body sws-narrow">
+        {!canRun && (
+          <Notice tone="sim" icon="lock">Viewers can watch the simulation. Operators and managers can control it.</Notice>
+        )}
 
-      <div className="sws-page-body" style={{ padding: "22px 30px", display: "flex", flexDirection: "column", gap: 16, maxWidth: 820 }}>
-        <div style={card}>
-          <div style={title}>1. Demo data</div>
-          <div style={note}>Creates 94 curbs across 4 lots, with one offline curb and two low batteries so the alerts panel has something to show. Run this right before presenting to start from a clean slate.</div>
-          <div><Btn onClick={handleReset} disabled={busy}>Load fresh demo data</Btn></div>
-        </div>
-
-        <div style={card}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div style={title}>2. Live simulation</div>
-            <span style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12, fontWeight: 600, color: running ? c.open : c.dim }}>
-              <span style={{ width: 8, height: 8, borderRadius: 4, background: running ? c.open : c.dim, display: "inline-block" }} />
-              {running ? "RUNNING" : "STOPPED"}
+        <Card
+          title="Live simulation"
+          delay={0}
+          actions={
+            <span style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 11.5, fontWeight: 700, letterSpacing: 0.6, color: live ? c.sim : c.dim }}>
+              <span className={live ? "sws-live-dot" : ""} style={{ width: 8, height: 8, borderRadius: 4, margin: 0, background: live ? c.sim : c.dim, display: "inline-block" }} />
+              {runningLabel}
             </span>
+          }
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, alignItems: "flex-start" }}>
+            <div className="sws-note">
+              Cars arrive and leave every 2 seconds and every screen updates live. Only one browser can run it at a time.
+              It stops if this tab is closed or refreshed, or if you switch to live data.
+            </div>
+            {sim.elsewhere && !sim.running && (
+              <Notice tone="sim">Running in {sim.elsewhere}'s browser. Stop it there to run it here.</Notice>
+            )}
+            {sim.running ? (
+              <Button onClick={() => run(stopSimulation)} disabled={busy || !canRun}>Stop simulation</Button>
+            ) : (
+              <Button variant="sim" icon="simulation" onClick={() => run(startSimulation)} disabled={busy || !canRun || !!sim.elsewhere}>Start simulation</Button>
+            )}
           </div>
-          <div style={note}>Cars arrive and leave every 2 seconds. Keeps running while you click between pages, but stops if this browser tab is refreshed or closed. Only start it on one computer.</div>
-          <div><Btn primary={!running} onClick={handleToggle}>{running ? "Stop simulation" : "Start simulation"}</Btn></div>
-        </div>
+        </Card>
 
-        <div style={card}>
-          <div style={title}>3. Scenarios</div>
-          <div style={note}>One-click events to show specific features during the presentation.</div>
+        <Card title="Scenarios" subtitle="One-click events for showing specific features in a presentation." delay={60}>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <Btn onClick={() => run(() => rushHour("lot06"))} disabled={busy}>Rush hour in Lot 6</Btn>
-            <Btn danger onClick={() => run(knockCurbOffline)} disabled={busy}>Take a curb offline</Btn>
-            <Btn onClick={() => run(restoreAllCurbs)} disabled={busy}>Bring all curbs online</Btn>
+            <Button onClick={() => run(() => rushHour("lot06"))} disabled={busy || !canRun}>Rush hour in Lot 6</Button>
+            <Button variant="danger" onClick={() => run(knockCurbOffline)} disabled={busy || !canRun}>Take a curb offline</Button>
+            <Button onClick={() => run(restoreAllCurbs)} disabled={busy || !canRun}>Bring all curbs online</Button>
           </div>
-        </div>
+        </Card>
 
-        {status && <div style={{ fontSize: 13, color: status.startsWith("Error") ? c.busy : c.open }}>{status}</div>}
+        <Card title="Reset simulated data" delay={120}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div className="sws-note">
+              Replaces every simulated curb with a fresh set: {DEMO_CURB_COUNT} curbs across {DEMO_LOT_COUNT} lots, one offline curb and two low batteries
+              so the alerts have something to show, plus a week of history. Run it right before presenting.
+            </div>
+            {confirmReset ? (
+              <div role="alertdialog" aria-label="Confirm reset" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: 12, borderRadius: 6, background: c.busyBg, border: `1px solid ${c.busyLine}` }}>
+                <span style={{ fontSize: 13, color: c.busyText, flex: "1 1 220px" }}>Replace all simulated data? This can't be undone.</span>
+                <Button variant="danger" onClick={() => { setConfirmReset(false); run(resetDemoData); }} disabled={busy} autoFocus>Yes, reset</Button>
+                <Button onClick={() => setConfirmReset(false)}>Cancel</Button>
+              </div>
+            ) : (
+              <div><Button onClick={() => setConfirmReset(true)} disabled={busy || !canRun}>Load fresh simulated data</Button></div>
+            )}
+          </div>
+        </Card>
+
+        <StatusText msg={status} />
       </div>
     </>
   );

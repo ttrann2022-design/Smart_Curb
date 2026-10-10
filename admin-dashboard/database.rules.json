@@ -1,0 +1,141 @@
+{
+  // Smart Wheel Stop: Realtime Database security rules (DRAFT, NOT PUBLISHED)
+  //
+  // "Staff" means a dashboard account: a record exists at users/<uid>.
+  // Driver-app accounts are signed in too, but are NOT staff.
+  // The Firebase console ignores these rules, so seeding data by hand still works.
+  //
+  // Test locally (never touches the real database):
+  //   firebase --config firebase.emulator.json emulators:start
+  //
+  // Publish only after the RECEIVER section below is filled in:
+  //   firebase deploy --only database --config firebase.emulator.json
+  "rules": {
+    ".read": false,
+    ".write": false,
+
+    "users": {
+      ".read": "auth != null && root.child('users').child(auth.uid).exists()",
+      "$uid": {
+        // Everyone can read their own record (needed before it exists, at first sign-in).
+        ".read": "auth != null && $uid === auth.uid",
+        // Create your own record once, only if a manager invited your email,
+        // with exactly the role on the invite (viewer if the invite has none).
+        ".write": "auth != null && $uid === auth.uid && !data.exists() && newData.child('email').val() === auth.token.email && root.child('invites').child(auth.token.email.toLowerCase().replace('.', ',')).exists() && (newData.child('role').val() === root.child('invites').child(auth.token.email.toLowerCase().replace('.', ',')).child('role').val() || (!root.child('invites').child(auth.token.email.toLowerCase().replace('.', ',')).child('role').exists() && newData.child('role').val() === 'viewer'))",
+        "role": {
+          // Only managers change roles after the account exists.
+          ".write": "auth != null && data.exists() && root.child('users').child(auth.uid).child('role').val() === 'manager'",
+          ".validate": "newData.isString() && newData.val().matches(/^(viewer|operator|manager)$/)"
+        },
+        "lastActive": {
+          ".write": "auth != null && $uid === auth.uid && data.parent().exists()",
+          ".validate": "newData.isNumber() && newData.val() <= now"
+        },
+        "email": { ".validate": "newData.isString()" },
+        "createdAt": { ".validate": "newData.isNumber() && newData.val() <= now" },
+        "$other": { ".validate": false }
+      }
+    },
+
+    "invites": {
+      ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'manager'",
+      "$key": {
+        // Managers create and revoke invites. The invited person can read their
+        // own invite and delete it once their account record is created.
+        ".read": "auth != null && $key === auth.token.email.toLowerCase().replace('.', ',')",
+        ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'manager' || ($key === auth.token.email.toLowerCase().replace('.', ',') && !newData.exists() && root.child('users').child(auth.uid).exists()))",
+        ".validate": "!newData.exists() || newData.hasChildren(['email', 'role'])",
+        "email": { ".validate": "newData.isString()" },
+        "role": { ".validate": "newData.isString() && newData.val().matches(/^(viewer|operator|manager)$/)" },
+        "invitedBy": { ".validate": "newData.isString()" },
+        "invitedAt": { ".validate": "newData.isNumber()" },
+        "$other": { ".validate": false }
+      }
+    },
+
+    // Shared dashboard settings (alert thresholds). Staff read, managers write.
+    "settings": {
+      ".read": "auth != null && root.child('users').child(auth.uid).exists()",
+      ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'manager'",
+      "alerts": {
+        "lowBattery": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100" },
+        "staleEnabled": { ".validate": "newData.isBoolean()" },
+        "staleMinutes": { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 10080" },
+        "$other": { ".validate": false }
+      },
+      "$other": { ".validate": false }
+    },
+
+    // Public read: the lot entrance sign runs signed-out on a TV.
+    "lots": {
+      ".read": true
+    },
+
+    "units": {
+      ".read": true,
+      "$unitId": {
+        // Operators and managers set the LED zone and panel text.
+        "ledColor": {
+          ".write": "auth != null && root.child('users').child(auth.uid).child('role').val().matches(/^(operator|manager)$/)",
+          ".validate": "newData.isString() && newData.val().matches(/^(red|blue|green|gold|white)$/)"
+        },
+        "panelText": {
+          ".write": "auth != null && root.child('users').child(auth.uid).child('role').val().matches(/^(operator|manager)$/)",
+          ".validate": "newData.isString() && newData.val().length <= 16"
+        },
+
+        // ===================== RECEIVER SECTION: ADJUST AFTER TALKING TO RYAN =====================
+        // The hardware Receiver may write ONLY these three fields on units/<id>.
+        // Replace the condition below in all three places with however the
+        // Receiver signs in:
+        //   - Firebase account (email/password):  auth != null && auth.uid === '<receiver uid>'
+        //   - Custom token with a claim:          auth != null && auth.token.receiver === true
+        //   - Unauthenticated REST / no sign-in:  true   (anyone could then write these fields)
+        // Until it is filled in, the Receiver is locked out, so do NOT publish before then.
+        "occupied": {
+          ".write": "auth != null && auth.uid === 'REPLACE_WITH_RECEIVER_UID'",
+          ".validate": "newData.isBoolean()"
+        },
+        "lastUpdated": {
+          ".write": "auth != null && auth.uid === 'REPLACE_WITH_RECEIVER_UID'",
+          ".validate": "newData.isNumber()"
+        },
+        "lastSnapshot": {
+          ".write": "auth != null && auth.uid === 'REPLACE_WITH_RECEIVER_UID'",
+          ".validate": "newData.isString()"
+        }
+        // ==========================================================================================
+      }
+    },
+
+    // Ryan's Receiver test nodes. Staff can read them; nothing in the dashboard
+    // writes here. If the Receiver still writes to curbs/ or status/, give these
+    // the same condition as the RECEIVER section above.
+    "curbs": {
+      ".read": "auth != null && root.child('users').child(auth.uid).exists()"
+    },
+    "status": {
+      ".read": "auth != null && root.child('users').child(auth.uid).exists()"
+    },
+
+    // Occupancy history for Analytics (nothing writes the real one yet).
+    "history": {
+      ".read": "auth != null && root.child('users').child(auth.uid).exists()"
+    },
+
+    // Driver-app accounts: each driver reads and writes only their own data.
+    "drivers": {
+      "$uid": {
+        ".read": "auth != null && $uid === auth.uid",
+        ".write": "auth != null && $uid === auth.uid"
+      }
+    },
+
+    // Simulation and demo data. Public read (demo sign, driver app);
+    // only dashboard staff can write. Real curbs never live here.
+    "demo": {
+      ".read": true,
+      ".write": "auth != null && root.child('users').child(auth.uid).exists()"
+    }
+  }
+}

@@ -1,20 +1,36 @@
 import { useEffect, useRef, useState } from "react";
 import { ref, onValue } from "firebase/database";
-import { database, dataPath } from "../firebase";
-import { c, mono } from "../theme";
+import { database } from "../firebase";
+import { dataPath } from "../dataMode";
+import { c } from "../theme";
+import Icon from "../components/Icon";
+import { PageHeader, Button, Input } from "../components/ui";
+import { useAlertSettings, batteryText, isLowBattery, cleanText } from "../units";
 
-const suggestions = [
-  "Where should I park right now?",
-  "Which lot is the busiest?",
-  "How many spots are open in Lot 20?",
-  "Any curbs with low battery?",
-  "What needs attention?",
-];
+// Examples use a lot and a curb that actually exist, so every suggestion gets a real answer.
+function suggestionsFor(lotNames, unitIds) {
+  return [
+    "Where should I park right now?",
+    "Which lot is the busiest?",
+    lotNames[0] ? `How many spots are open in ${lotNames[0]}?` : "How many spots are open?",
+    unitIds[0] ? `What's the status of ${unitIds[0]}?` : "Any curbs with low battery?",
+    "What needs attention?",
+  ];
+}
 
-const HELP = "I can answer questions like:\n• Where should I park right now?\n• Which lot is the busiest?\n• How many spots are open in Lot 12?\n• Which curbs have low battery?\n• Which curbs are offline?\n• What's the status of C-012?\n• What needs attention?";
+function helpText(lots, units) {
+  const lot = lotMain(Object.values(lots)[0]?.name) || "Lot 12";
+  const unit = Object.keys(units).sort()[0] || "C-012";
+  return `I can answer questions like:\n• Where should I park right now?\n• Which lot is the busiest?\n• How many spots are open in ${lot}?\n• Which curbs have low battery?\n• Which curbs are offline?\n• What's the status of ${unit}?\n• What needs attention?`;
+}
 
 function lotMain(name) {
   return (name || "").split(" — ")[0];
+}
+
+// Short lot name for a curb, even when its lot field doesn't match a real lot.
+function lotOf(lots, u) {
+  return lotMain(lots[u.lot]?.name) || "an unassigned lot";
 }
 
 function buildStats(lots, units) {
@@ -37,7 +53,7 @@ function findLot(q, stats) {
   });
 }
 
-function answer(raw, lots, units) {
+function answer(raw, lots, units, alerts) {
   const q = raw.toLowerCase().trim();
   const stats = buildStats(lots, units);
   const entries = Object.entries(units);
@@ -49,31 +65,32 @@ function answer(raw, lots, units) {
     const u = units[id];
     if (!u) return `I couldn't find a curb called ${id}.`;
     const status = !u.online ? "offline" : u.occupied ? "occupied" : "open";
-    const led = u.ledColor ? `${u.ledColor}${u.panelText ? `, showing "${u.panelText}"` : ""}` : "not set";
-    return `Curb ${id} is in ${lots[u.lot]?.name || u.lot}.\nStatus: ${status}\nBattery: ${u.battery}%\nLED: ${led}`;
+    const color = cleanText(u.ledColor);
+    const led = color ? `${color}${u.panelText ? `, showing "${u.panelText}"` : ""}` : "not set";
+    return `Curb ${id} is in ${lots[u.lot]?.name || "an unassigned lot"}.\nStatus: ${status}\nBattery: ${batteryText(u)}\nLED: ${led}`;
   }
 
   if (/(battery|charge|charging|power)/.test(q)) {
-    const low = entries.filter(([, u]) => u.battery < 20).sort(([, a], [, b]) => a.battery - b.battery);
-    if (low.length === 0) return "No curbs are low on battery. Every unit is above 20%.";
+    const low = entries.filter(([, u]) => isLowBattery(u, alerts)).sort(([, a], [, b]) => a.battery - b.battery);
+    if (low.length === 0) return `No curbs are low on battery. Every measured unit is at ${alerts.lowBattery}% or above.`;
     return `${low.length} curb${low.length > 1 ? "s are" : " is"} low on battery:\n` +
-      low.map(([id, u]) => `• ${id} in ${lotMain(lots[u.lot]?.name)}: ${u.battery}%`).join("\n");
+      low.map(([id, u]) => `• ${id} in ${lotOf(lots, u)}: ${u.battery}%`).join("\n");
   }
 
   if (/(offline|not reporting|disconnected|down)/.test(q)) {
     const off = entries.filter(([, u]) => !u.online);
     if (off.length === 0) return "Every curb is online and reporting.";
     return `${off.length} curb${off.length > 1 ? "s are" : " is"} offline:\n` +
-      off.map(([id, u]) => `• ${id} in ${lotMain(lots[u.lot]?.name)}`).join("\n");
+      off.map(([id, u]) => `• ${id} in ${lotOf(lots, u)}`).join("\n");
   }
 
   if (/(attention|problem|issue|alert|wrong|broken)/.test(q)) {
     const off = entries.filter(([, u]) => !u.online);
-    const low = entries.filter(([, u]) => u.online && u.battery < 20);
+    const low = entries.filter(([, u]) => u.online && isLowBattery(u, alerts));
     if (off.length === 0 && low.length === 0) return "Nothing needs attention right now. All curbs are online with healthy batteries.";
     const lines = [
-      ...off.map(([id, u]) => `• ${id} in ${lotMain(lots[u.lot]?.name)} is offline`),
-      ...low.map(([id, u]) => `• ${id} in ${lotMain(lots[u.lot]?.name)} is at ${u.battery}% battery`),
+      ...off.map(([id, u]) => `• ${id} in ${lotOf(lots, u)} is offline`),
+      ...low.map(([id, u]) => `• ${id} in ${lotOf(lots, u)} is at ${u.battery}% battery`),
     ];
     return `${lines.length} thing${lines.length > 1 ? "s need" : " needs"} attention:\n` + lines.join("\n");
   }
@@ -103,9 +120,9 @@ function answer(raw, lots, units) {
       stats.map((s) => `• ${s.short}: ${s.open} open`).join("\n");
   }
 
-  if (/(help|what can you|hello|hi\b|hey)/.test(q)) return HELP;
+  if (/(help|what can you|hello|hi\b|hey)/.test(q)) return helpText(lots, units);
 
-  return "I'm not sure how to answer that yet.\n\n" + HELP;
+  return "I'm not sure how to answer that yet.\n\n" + helpText(lots, units);
 }
 
 function Assistant() {
@@ -116,10 +133,18 @@ function Assistant() {
   const [thinking, setThinking] = useState(false);
   const data = useRef({ lots: {}, units: {} });
   const endRef = useRef(null);
+  const alerts = useAlertSettings();
+  const [examples, setExamples] = useState({ lots: [], units: [] });
 
   useEffect(() => {
-    const stopLots = onValue(ref(database, dataPath("lots")), (s) => { data.current.lots = s.val() || {}; });
-    const stopUnits = onValue(ref(database, dataPath("units")), (s) => { data.current.units = s.val() || {}; });
+    const stopLots = onValue(ref(database, dataPath("lots")), (s) => {
+      data.current.lots = s.val() || {};
+      setExamples((e) => ({ ...e, lots: Object.values(data.current.lots).map((l) => lotMain(l.name)).filter(Boolean) }));
+    });
+    const stopUnits = onValue(ref(database, dataPath("units")), (s) => {
+      data.current.units = s.val() || {};
+      setExamples((e) => ({ ...e, units: Object.keys(data.current.units).sort() }));
+    });
     return () => { stopLots(); stopUnits(); };
   }, []);
 
@@ -134,7 +159,7 @@ function Assistant() {
     setInput("");
     setThinking(true);
     setTimeout(() => {
-      const reply = answer(q, data.current.lots, data.current.units);
+      const reply = answer(q, data.current.lots, data.current.units, alerts);
       setMessages((m) => [...m, { from: "bot", text: reply }]);
       setThinking(false);
     }, 450);
@@ -142,50 +167,60 @@ function Assistant() {
 
   return (
     <>
-      <div className="sws-page-head" style={{ height: 68, flexShrink: 0, background: c.panel, borderBottom: `1px solid ${c.line}`, padding: "0 30px", display: "flex", alignItems: "center" }}>
-        <div>
-          <div style={{ fontFamily: mono, fontSize: 19, fontWeight: 600 }}>Assistant</div>
-          <div style={{ fontSize: 12.5, color: c.dim }}>Answers from live data · AI language model integration planned</div>
-        </div>
-      </div>
+      <PageHeader title="Assistant" subtitle="Answers from live data · AI language model integration planned" />
 
-      <div className="sws-page-body" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", padding: "18px 30px 22px", gap: 14 }}>
-        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 12, paddingRight: 4 }}>
+      <div className="sws-page-body" style={{ flex: 1, minHeight: 0, paddingTop: 18, paddingBottom: 22, gap: 14 }}>
+        <div role="log" aria-live="polite" aria-label="Conversation" style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 12, paddingRight: 4 }}>
           {messages.map((m, i) => (
-            <div key={i} style={{ display: "flex", justifyContent: m.from === "user" ? "flex-end" : "flex-start" }}>
+            <div key={i} className="sws-enter" style={{ display: "flex", justifyContent: m.from === "user" ? "flex-end" : "flex-start", gap: 10 }}>
+              {m.from === "bot" && (
+                <div aria-hidden="true" style={{ width: 28, height: 28, borderRadius: 14, background: c.navBg, color: c.accent, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 2 }}>
+                  <Icon name="sparkle" size={14} />
+                </div>
+              )}
               <div style={{
-                maxWidth: 560, padding: "11px 15px", fontSize: 13.5, lineHeight: 1.55, whiteSpace: "pre-line",
+                maxWidth: 560, padding: "11px 15px", fontSize: 13.5, lineHeight: 1.6, whiteSpace: "pre-line",
                 borderRadius: m.from === "user" ? "12px 12px 3px 12px" : "3px 12px 12px 12px",
                 background: m.from === "user" ? c.accent : c.panel,
                 color: m.from === "user" ? c.onAccent : c.text,
                 border: m.from === "user" ? "none" : `1px solid ${c.line}`,
               }}>
+                <span className="sws-sr-only">{m.from === "user" ? "You: " : "Assistant: "}</span>
                 {m.text}
               </div>
             </div>
           ))}
-          {thinking && <div style={{ fontSize: 12.5, color: c.dim }}>Checking live data…</div>}
+          {thinking && (
+            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+              <div aria-hidden="true" style={{ width: 28, height: 28, borderRadius: 14, background: c.navBg, color: c.accent, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <Icon name="sparkle" size={14} />
+              </div>
+              <div className="sws-typing" role="status" aria-label="Checking live data" style={{ display: "flex", gap: 4, padding: "12px 14px", borderRadius: "3px 12px 12px 12px", background: c.panel, border: `1px solid ${c.line}` }}>
+                <span /><span /><span />
+              </div>
+            </div>
+          )}
           <div ref={endRef} />
         </div>
 
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {suggestions.map((s) => (
-            <button key={s} onClick={() => ask(s)} style={{ height: 32, padding: "0 12px", borderRadius: 16, border: `1px solid ${c.line}`, background: c.panel, color: c.text, fontSize: 12.5, cursor: "pointer" }}>
+        <div className="sws-chips" aria-label="Suggested questions">
+          {suggestionsFor(examples.lots, examples.units).map((s) => (
+            <button key={s} type="button" className="sws-chip" style={{ borderRadius: 16 }} onClick={() => ask(s)} disabled={thinking}>
               {s}
             </button>
           ))}
         </div>
 
         <form onSubmit={(e) => { e.preventDefault(); ask(input); }} style={{ display: "flex", gap: 10 }}>
-          <input
+          <Input
+            size="lg"
+            aria-label="Ask a question"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="Ask about any lot or curb…"
-            style={{ flex: 1, height: 46, padding: "0 14px", borderRadius: 6, border: `1px solid ${c.line}`, background: c.panel, color: c.text, fontSize: 14 }}
+            style={{ flex: 1, background: c.panel }}
           />
-          <button type="submit" style={{ height: 46, padding: "0 22px", borderRadius: 6, border: "none", background: c.accent, color: c.onAccent, fontWeight: 600, fontSize: 14, cursor: "pointer" }}>
-            Ask
-          </button>
+          <Button type="submit" variant="primary" size="lg" icon="send" disabled={!input.trim() || thinking}>Ask</Button>
         </form>
       </div>
     </>

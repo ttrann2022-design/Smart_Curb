@@ -63,8 +63,10 @@ flowchart LR
 | **Assistant** | Answers plain-language questions like *"where should I park?"* from live data |
 | **Analytics** | Occupancy heatmap by day and hour, plus a live occupancy trend |
 | **Users & roles** | Viewer, Operator, and Manager access, with invite-only sign-up |
+| **Simulation** | Start, stop, and script the traffic simulator (shown in Simulation mode) |
+| **Settings** | Change password, pick Live or Simulation data, set alert thresholds |
 
-It updates in real time, works on phones and tablets, and has a demo mode with a built-in traffic simulator.
+It updates in real time, works on phones and tablets, and has a built-in traffic simulator that never touches real curbs.
 
 ### Driver app · `smart_curb/`
 
@@ -93,10 +95,11 @@ Smart_Curb/
 │   ├── src/pages/          One file per page
 │   ├── src/components/     Shared layout and animated numbers
 │   ├── src/demo/           Demo data and traffic simulator
+│   ├── scripts/            Deploy safety check
+│   ├── database.rules.json Firebase security rules (draft, not published)
 │   └── .env.demo           Settings for demo mode
 ├── smart_curb/             Flutter driver app
 ├── run_parking_test.py     A* parking algorithm test
-├── database.rules.json     Firebase security rules (draft)
 └── README.md
 ```
 
@@ -117,9 +120,11 @@ Open http://localhost:5173. Sign-up is invite-only: a Manager invites you from *
 | Command | What it does |
 |---|---|
 | `npm run dev` | Run locally with real data |
-| `npm run dev:demo` | Run locally with demo data and Demo controls |
-| `npm run build` | Build the real site |
-| `npm run build:demo` | Build the demo site |
+| `npm run dev:demo` | Run locally as the demo site (simulated data only) |
+| `npm run emulators` | Start local Auth + Database emulators with the draft rules (needs Java 21+) |
+| `npm run dev:emulator` | Run locally against the emulators instead of the real database |
+| `npm run build` | Build the real site into `dist/` |
+| `npm run build:demo` | Build the demo site into `dist-demo/` |
 
 ### Driver app
 
@@ -138,16 +143,18 @@ On Windows, Flutter needs **Developer Mode** turned on (Settings → System → 
 From `admin-dashboard`, with the [Firebase CLI](https://firebase.google.com/docs/cli) installed:
 
 ```bash
-# Real site
+# Real site (deploys dist/)
 npm run build
 firebase deploy --only hosting
 
-# Demo site
+# Demo site (deploys dist-demo/)
 npm run build:demo
-firebase hosting:channel:deploy demo --expires 30d
+firebase --config firebase.demo.json hosting:channel:deploy demo --expires 30d
 ```
 
-Always check which build you just ran before deploying. Deploying a demo build to the real site puts demo data and Demo controls in front of real users.
+Real and demo builds go to different folders, and every build writes a `build-info.json`. Before any hosting deploy, `scripts/check-build.mjs` runs automatically and **blocks the deploy** if the folder holds the wrong kind of build (or no build at all). You can run the same check yourself with `npm run check:real` or `npm run check:demo`.
+
+The security rules are not part of `firebase.json`, so `firebase deploy` can't publish them by accident. See *Security rules* below.
 
 ## Data model
 
@@ -178,17 +185,28 @@ A few rules keep everything in sync:
 - Lot IDs are zero-padded (`lot06`, `lot07`) so they sort in the right order.
 - Whoever changes a curb also updates that lot's `openSpots` and `totalSpots` **in the same write**, so the counts can never disagree with the curbs.
 
-## Demo mode
+## Live and Simulation data
 
-`npm run dev:demo` and the live demo link read and write only the `demo/` section of the database, so a demo can never touch real data. The **Demo controls** page provides:
+We have one real curb, so the dashboard can also show a full set of simulated curbs. The **Data source** switch (sidebar and Settings) picks what this browser shows:
+
+- **Live** reads `units/` and `lots/`, where the hardware Receiver writes C-095.
+- **Simulation** reads `demo/`. A blue banner stays on every page while it's on.
+
+The simulator only ever writes under `demo/`, and refuses any write outside it, so it can't touch C-095 even if someone switches to Live while it runs (switching to Live also stops it). Only one browser can run the simulation at a time. The demo site (`npm run build:demo`) is locked to Simulation. The lot sign shows simulated data only when opened with `/sign?source=sim`.
+
+The **Simulation** page provides:
 
 | Control | What it does |
 |---|---|
-| **Load fresh demo data** | Creates 94 curbs across Lots 6, 7, 12, and 14, plus a week of occupancy history |
-| **Start simulation** | Cars arrive and leave every two seconds, and every screen updates live |
+| **Start / Stop simulation** | Cars arrive and leave every two seconds, and every screen updates live |
 | **Rush hour in Lot 6** | Fills Lot 6 almost instantly |
 | **Take a curb offline** | Knocks a random curb offline to trigger an alert |
 | **Bring all curbs online** | Restores every offline curb |
+| **Load fresh simulated data** | Creates 94 curbs across Lots 6, 7, 12, and 14, plus a week of occupancy history |
+
+## Security rules
+
+`admin-dashboard/database.rules.json` is a **draft that has not been published**. It limits each role to what it should do, keeps driver accounts out of staff data, and only lets the Receiver write `occupied`, `lastUpdated`, and `lastSnapshot` on `units/`. The Receiver section has a placeholder that must be filled in once we know how the Receiver signs in; publishing before then would lock the Receiver out. Test changes locally with `npm run emulators`.
 
 ## Roles
 
@@ -206,8 +224,10 @@ A few rules keep everything in sync:
 
 ## Roadmap
 
-- [ ] Publish the Firebase security rules
+- [ ] Fill in the Receiver section and publish the Firebase security rules (test mode ends Oct 27)
+- [ ] Receiver heartbeat, then turn on the stale-curb alert in Settings
 - [ ] LoRa gateway writing live curb readings and lot counts
+- [ ] LED control (Node 2) so dashboard LED changes reach the curb
 - [ ] Exact GPS position for every curb, for spot-level navigation
 - [ ] Separate data for each customer facility
 - [ ] AI language model behind the Assistant

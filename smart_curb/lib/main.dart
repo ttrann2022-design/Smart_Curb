@@ -1,101 +1,209 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
-import 'package:http/http.dart' as http;
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_database/firebase_database.dart';
+import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_database/firebase_database.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:flutter_compass/flutter_compass.dart';
+import 'package:geolocator/geolocator.dart' as geo;
+import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
+import 'package:maplibre_gl/maplibre_gl.dart';
+import 'package:pointer_interceptor/pointer_interceptor.dart';
+
 import 'firebase_options.dart';
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+  await CampusPathfinder.load(); // campus walking network for A*
   runApp(const MyApp());
 }
 
 // ==========================================
-// THEME CONFIGURATION
+// THEME (dark only) — mirrors admin-dashboard/src/theme.js
 // ==========================================
 
-final ValueNotifier<ThemeMode> themeNotifier = ValueNotifier(ThemeMode.dark);
+const Color kAccent = Color(0xFFC6F24A); // c.accent
+const Color kBg = Color(0xFF0F0F0D); // c.bg
+const Color kBar = Color(0xFF090908); // c.side
+const Color kCard = Color(0xFF171714); // c.panel
+const Color kCardAlt = Color(0xFF1D1D19); // c.card
+const Color kDivider = Color(0xFF2B2B25); // c.line
+const Color kText = Color(0xFFF2F1EA); // c.text
+const Color kTextMuted = Color(0xFF8E8C82); // c.dim
+const Color kOnAccent = Color(0xFF12110F); // c.onAccent
+const Color kOpen = Color(0xFF8BD44A); // c.open
+const Color kAmber = Color(0xFFE0A63C); // c.warn
+const Color kRed = Color(0xFFF2694C); // c.busy
+const Color kNavBg = Color(0xFF232B15); // c.navBg
+const Color kNavText = Color(0xFFA5A399); // c.navText
+const Color kDev = Colors.cyanAccent;
+const Color kDevBlue = Color(0xFF3D8BFF); // dev "Click to move" toggle
 
-const Color accentVoltGreenDark = Color(0xFFC6F24A);
-const Color accentVoltGreenLight = Color(0xFF6B8A08);
+/// Dashboard corner radius (5–6px everywhere).
+const double kRadius = 6;
 
-final ThemeData darkTheme = ThemeData(
+/// TODO: replace with your real support address.
+const String kSupportEmail = 'support@example.com';
+
+/// IBM Plex Mono, the dashboard's heading/number font (`mono` in theme.js).
+TextStyle mono({
+  double? fontSize,
+  FontWeight fontWeight = FontWeight.w600,
+  Color color = kText,
+  double? letterSpacing,
+}) =>
+    GoogleFonts.ibmPlexMono(
+      fontSize: fontSize,
+      fontWeight: fontWeight,
+      color: color,
+      letterSpacing: letterSpacing,
+    );
+
+final RoundedRectangleBorder _panelShape = RoundedRectangleBorder(
+  borderRadius: BorderRadius.circular(kRadius),
+  side: const BorderSide(color: kDivider),
+);
+
+final ThemeData appTheme = ThemeData(
+  useMaterial3: true,
   brightness: Brightness.dark,
-  primaryColor: accentVoltGreenDark,
-  scaffoldBackgroundColor: const Color(0xFF0F0F0D),
-  cardColor: const Color(0xFF171714),
-  dividerColor: const Color(0xFF2B2B25),
-  dialogBackgroundColor: const Color(0xFF171714),
-  appBarTheme: const AppBarTheme(
-    backgroundColor: Color(0xFF090908),
-    elevation: 0,
-    iconTheme: IconThemeData(color: Color(0xFFF2F1EA)),
-    titleTextStyle: TextStyle(
-      color: Color(0xFFF2F1EA),
-      fontSize: 18,
-      fontWeight: FontWeight.w700,
-      letterSpacing: 0.5,
+  primaryColor: kAccent,
+  scaffoldBackgroundColor: kBg,
+  cardColor: kCard,
+  dividerColor: kDivider,
+  // Archivo is the dashboard's body font.
+  textTheme: GoogleFonts.archivoTextTheme(ThemeData.dark().textTheme)
+      .apply(bodyColor: kText, displayColor: kText),
+  dividerTheme: const DividerThemeData(color: kDivider, thickness: 1),
+  // Slim, rounded scrollbar in the dashboard's colours.
+  scrollbarTheme: ScrollbarThemeData(
+    thickness: const WidgetStatePropertyAll(4),
+    radius: const Radius.circular(4),
+    thumbColor: WidgetStateProperty.resolveWith(
+      (s) => s.contains(WidgetState.dragged) || s.contains(WidgetState.hovered)
+          ? kAccent.withValues(alpha: 0.8)
+          : kTextMuted.withValues(alpha: 0.45),
     ),
+    crossAxisMargin: 2,
+  ),
+  // Modern page transitions: new pages fade in while sliding forward
+  // (iOS/macOS keep the native slide so swipe-back still works).
+  pageTransitionsTheme: const PageTransitionsTheme(
+    builders: {
+      TargetPlatform.android: FadeForwardsPageTransitionsBuilder(),
+      TargetPlatform.fuchsia: FadeForwardsPageTransitionsBuilder(),
+      TargetPlatform.windows: FadeForwardsPageTransitionsBuilder(),
+      TargetPlatform.linux: FadeForwardsPageTransitionsBuilder(),
+      TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+      TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
+    },
+  ),
+  dialogTheme: DialogThemeData(backgroundColor: kCard, shape: _panelShape),
+  bottomSheetTheme: const BottomSheetThemeData(backgroundColor: kCard),
+  popupMenuTheme: PopupMenuThemeData(color: kCard, shape: _panelShape),
+  snackBarTheme: SnackBarThemeData(
+    backgroundColor: kCardAlt,
+    contentTextStyle: GoogleFonts.archivo(color: kText, fontSize: 13),
+    behavior: SnackBarBehavior.floating,
+    shape: _panelShape,
+  ),
+  // Page header bar: panel background with a 1px bottom rule.
+  appBarTheme: AppBarTheme(
+    backgroundColor: kCard,
+    elevation: 0,
+    scrolledUnderElevation: 0,
+    shape: const Border(bottom: BorderSide(color: kDivider)),
+    iconTheme: const IconThemeData(color: kText),
+    titleTextStyle: mono(fontSize: 17),
   ),
   colorScheme: const ColorScheme.dark(
-    primary: accentVoltGreenDark,
-    surface: Color(0xFF171714),
-    onSurface: Color(0xFFF2F1EA),
-    onSurfaceVariant: Color(0xFF8E8C82),
-    outline: Color(0xFF2B2B25),
+    primary: kAccent,
+    onPrimary: kOnAccent,
+    secondary: kAccent,
+    onSecondary: kOnAccent,
+    surface: kCard,
+    onSurface: kText,
+    onSurfaceVariant: kTextMuted,
+    outline: kDivider,
+    error: kRed,
   ),
-  bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-    backgroundColor: Color(0xFF090908),
-    selectedItemColor: accentVoltGreenDark,
-    unselectedItemColor: Color(0xFF6E7C8F),
-    type: BottomNavigationBarType.fixed,
-  ),
-  useMaterial3: true,
-);
-
-final ThemeData lightTheme = ThemeData(
-  brightness: Brightness.light,
-  primaryColor: accentVoltGreenLight,
-  scaffoldBackgroundColor: const Color(0xFFF7F6F2),
-  cardColor: const Color(0xFFFFFFFF),
-  dividerColor: const Color(0xFFE5E3DC),
-  dialogBackgroundColor: const Color(0xFFFFFFFF),
-  appBarTheme: const AppBarTheme(
-    backgroundColor: Color(0xFFFFFFFF),
-    elevation: 0,
-    iconTheme: IconThemeData(color: Color(0xFF171714)),
-    titleTextStyle: TextStyle(
-      color: Color(0xFF171714),
-      fontSize: 18,
-      fontWeight: FontWeight.w700,
-      letterSpacing: 0.5,
+  elevatedButtonTheme: ElevatedButtonThemeData(
+    style: ElevatedButton.styleFrom(
+      backgroundColor: kAccent,
+      foregroundColor: kOnAccent,
+      elevation: 0,
+      textStyle: GoogleFonts.archivo(fontSize: 14, fontWeight: FontWeight.w600),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(kRadius),
+      ),
     ),
   ),
-  colorScheme: const ColorScheme.light(
-    primary: accentVoltGreenLight,
-    surface: Color(0xFFFFFFFF),
-    onSurface: Color(0xFF171714),
-    onSurfaceVariant: Color(0xFF706E66),
-    outline: Color(0xFFE5E3DC),
+  outlinedButtonTheme: OutlinedButtonThemeData(
+    style: OutlinedButton.styleFrom(
+      foregroundColor: kText,
+      backgroundColor: kBg,
+      side: const BorderSide(color: kDivider),
+      textStyle: GoogleFonts.archivo(fontSize: 14, fontWeight: FontWeight.w600),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(kRadius),
+      ),
+    ),
   ),
-  bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-    backgroundColor: Color(0xFFFFFFFF),
-    selectedItemColor: accentVoltGreenLight,
-    unselectedItemColor: Color(0xFF9E9C94),
-    type: BottomNavigationBarType.fixed,
+  textButtonTheme: TextButtonThemeData(
+    style: TextButton.styleFrom(
+      foregroundColor: kAccent,
+      textStyle: GoogleFonts.archivo(fontSize: 13, fontWeight: FontWeight.w600),
+    ),
   ),
-  useMaterial3: true,
+  switchTheme: SwitchThemeData(
+    thumbColor: WidgetStateProperty.resolveWith(
+      (s) => s.contains(WidgetState.selected) ? kOnAccent : kTextMuted,
+    ),
+    trackColor: WidgetStateProperty.resolveWith(
+      (s) => s.contains(WidgetState.selected) ? kAccent : kBg,
+    ),
+    trackOutlineColor: const WidgetStatePropertyAll(kDivider),
+  ),
+  // Bottom nav = dashboard sidebar: active item gets the navBg pill.
+  navigationBarTheme: NavigationBarThemeData(
+    backgroundColor: kBar,
+    indicatorColor: kNavBg,
+    indicatorShape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(kRadius),
+    ),
+    surfaceTintColor: Colors.transparent,
+    iconTheme: WidgetStateProperty.resolveWith(
+      (s) => IconThemeData(
+        color: s.contains(WidgetState.selected) ? kAccent : kNavText,
+      ),
+    ),
+    labelTextStyle: WidgetStateProperty.resolveWith(
+      (s) => GoogleFonts.archivo(
+        fontSize: 12,
+        fontWeight:
+            s.contains(WidgetState.selected) ? FontWeight.w600 : FontWeight.w500,
+        color: s.contains(WidgetState.selected) ? kAccent : kNavText,
+      ),
+    ),
+  ),
 );
+
+/// "850 m" / "1.4 km"
+String formatDistance(double meters) {
+  if (meters < 1000) return '${meters.round()} m';
+  return '${(meters / 1000).toStringAsFixed(1)} km';
+}
 
 // ==========================================
 // ROOT APP & AUTH LISTENER
@@ -106,28 +214,22 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<ThemeMode>(
-      valueListenable: themeNotifier,
-      builder: (context, currentMode, _) {
-        return MaterialApp(
-          title: 'Smart Curb App',
-          debugShowCheckedModeBanner: false,
-          theme: lightTheme,
-          darkTheme: darkTheme,
-          themeMode: currentMode,
-          home: StreamBuilder<User?>(
-            stream: FirebaseAuth.instance.authStateChanges(),
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Scaffold(
-                  body: Center(child: CircularProgressIndicator()),
-                );
-              }
-              return snapshot.hasData ? const UserSpace() : const LoginPage();
-            },
-          ),
-        );
-      },
+    return MaterialApp(
+      title: 'Smart Curb App',
+      debugShowCheckedModeBanner: false,
+      theme: appTheme,
+      scrollBehavior: const AppScrollBehavior(),
+      home: StreamBuilder<User?>(
+        stream: FirebaseAuth.instance.authStateChanges(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Scaffold(
+              body: Center(child: CircularProgressIndicator()),
+            );
+          }
+          return snapshot.hasData ? const UserSpace() : const LoginPage();
+        },
+      ),
     );
   }
 }
@@ -177,7 +279,6 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Scaffold(
       body: SafeArea(
         child: Center(
@@ -185,80 +286,129 @@ class _LoginPageState extends State<LoginPage> {
             padding: const EdgeInsets.symmetric(horizontal: 32.0),
             child: Column(
               children: [
-                Image.asset(
-                  'assets/logo.png',
-                  height: 140,
-                  fit: BoxFit.contain,
-                  errorBuilder: (_, __, ___) =>
-                      Icon(Icons.radar, size: 100, color: theme.primaryColor),
-                ),
+                // Logo pops in (scale + fade), then the rest rises in order.
+                const _LogoEntrance(),
                 const SizedBox(height: 20),
-                RichText(
-                  text: TextSpan(
-                    style: const TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1.5,
+                const FadeSlideIn(index: 2, child: _BrandTitle(fontSize: 26)),
+                const SizedBox(height: 6),
+                const FadeSlideIn(
+                  index: 3,
+                  child: Text(
+                    'SMART PARKING',
+                    style: TextStyle(
+                      color: kTextMuted,
+                      fontSize: 10,
+                      letterSpacing: 1.2,
+                      fontWeight: FontWeight.w600,
                     ),
-                    children: [
-                      TextSpan(
-                        text: 'SMART ',
-                        style: TextStyle(color: theme.colorScheme.onSurface),
-                      ),
-                      TextSpan(
-                        text: 'CURB',
-                        style: TextStyle(color: theme.primaryColor),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'SMART PARKING',
-                  style: TextStyle(
-                    color: theme.colorScheme.onSurfaceVariant,
-                    fontSize: 12,
-                    letterSpacing: 2,
-                    fontWeight: FontWeight.w600,
                   ),
                 ),
                 const SizedBox(height: 40),
-                AppTextField(
-                  controller: _emailCtrl,
-                  hintText: 'Email',
-                  icon: Icons.email_outlined,
-                  keyboardType: TextInputType.emailAddress,
+                FadeSlideIn(
+                  index: 4,
+                  child: AppTextField(
+                    controller: _emailCtrl,
+                    hintText: 'Email',
+                    icon: Icons.email_outlined,
+                    keyboardType: TextInputType.emailAddress,
+                  ),
                 ),
                 const SizedBox(height: 16),
-                AppTextField(
-                  controller: _passwordCtrl,
-                  hintText: 'Password',
-                  icon: Icons.lock_outline,
-                  obscureText: true,
+                FadeSlideIn(
+                  index: 5,
+                  child: AppTextField(
+                    controller: _passwordCtrl,
+                    hintText: 'Password',
+                    icon: Icons.lock_outline,
+                    obscureText: true,
+                  ),
                 ),
                 const SizedBox(height: 28),
-                PrimaryButton(
-                  title: 'Login',
-                  isLoading: _isLoading,
-                  onPressed: _handleLogin,
+                FadeSlideIn(
+                  index: 6,
+                  child: PrimaryButton(
+                    title: 'Login',
+                    isLoading: _isLoading,
+                    onPressed: _handleLogin,
+                  ),
                 ),
                 const SizedBox(height: 16),
-                TextButton(
-                  onPressed: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const RegisterPage()),
-                  ),
-                  child: Text(
-                    "Don't have an account? Register",
-                    style: TextStyle(
-                      color: theme.primaryColor,
-                      fontWeight: FontWeight.w600,
+                FadeSlideIn(
+                  index: 7,
+                  child: TextButton(
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const RegisterPage()),
                     ),
+                    child: const Text("Don't have an account? Register"),
                   ),
                 ),
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BrandTitle extends StatelessWidget {
+  final double fontSize;
+  const _BrandTitle({required this.fontSize});
+
+  @override
+  Widget build(BuildContext context) {
+    return RichText(
+      text: TextSpan(
+        style: mono(fontSize: fontSize, letterSpacing: 1.5),
+        children: const [
+          TextSpan(text: 'SMART ', style: TextStyle(color: kText)),
+          TextSpan(text: 'CURB', style: TextStyle(color: kAccent)),
+        ],
+      ),
+    );
+  }
+}
+
+/// Login logo: scales up from 85% with a soft accent glow that fades out.
+class _LogoEntrance extends StatelessWidget {
+  const _LogoEntrance();
+
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: reduceMotion(context) ? Duration.zero : kMotionSlow * 2,
+      curve: Curves.easeOutBack,
+      builder: (context, t, child) => Opacity(
+        opacity: t.clamp(0.0, 1.0),
+        child: Transform.scale(
+          scale: 0.85 + 0.15 * t,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: [
+                BoxShadow(
+                  color: kAccent.withValues(
+                    alpha: 0.25 * (1 - t.clamp(0.0, 1.0)),
+                  ),
+                  blurRadius: 40,
+                  spreadRadius: 6,
+                ),
+              ],
+            ),
+            child: child,
+          ),
+        ),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(14),
+        child: Image.asset(
+          'assets/logo.png',
+          height: 140,
+          fit: BoxFit.contain,
+          errorBuilder: (_, _, _) =>
+              const Icon(Icons.radar, size: 100, color: kAccent),
         ),
       ),
     );
@@ -305,7 +455,9 @@ class _RegisterPageState extends State<RegisterPage> {
       );
       if (mounted) Navigator.pop(context);
     } on FirebaseAuthException catch (e) {
-      if (mounted) showErrorSnackBar(context, e.message ?? 'Registration failed.');
+      if (mounted) {
+        showErrorSnackBar(context, e.message ?? 'Registration failed.');
+      }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -313,7 +465,6 @@ class _RegisterPageState extends State<RegisterPage> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(title: const Text('Create Account')),
       body: SafeArea(
@@ -322,52 +473,59 @@ class _RegisterPageState extends State<RegisterPage> {
             padding: const EdgeInsets.symmetric(horizontal: 32.0),
             child: Column(
               children: [
-                Icon(Icons.person_add_alt_1, size: 70, color: theme.primaryColor),
+                const FadeSlideIn(
+                  child: Icon(Icons.person_add_alt_1, size: 70, color: kAccent),
+                ),
                 const SizedBox(height: 16),
-                Text(
-                  'Join Smart Curb',
-                  style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                    color: theme.colorScheme.onSurface,
-                  ),
+                FadeSlideIn(
+                  index: 1,
+                  child: Text('Join Smart Curb', style: mono(fontSize: 24)),
                 ),
                 const SizedBox(height: 32),
-                AppTextField(
-                  controller: _emailCtrl,
-                  hintText: 'Email Address',
-                  icon: Icons.email_outlined,
-                  keyboardType: TextInputType.emailAddress,
+                FadeSlideIn(
+                  index: 2,
+                  child: AppTextField(
+                    controller: _emailCtrl,
+                    hintText: 'Email Address',
+                    icon: Icons.email_outlined,
+                    keyboardType: TextInputType.emailAddress,
+                  ),
                 ),
                 const SizedBox(height: 16),
-                AppTextField(
-                  controller: _passwordCtrl,
-                  hintText: 'Password',
-                  icon: Icons.lock_outline,
-                  obscureText: true,
+                FadeSlideIn(
+                  index: 3,
+                  child: AppTextField(
+                    controller: _passwordCtrl,
+                    hintText: 'Password',
+                    icon: Icons.lock_outline,
+                    obscureText: true,
+                  ),
                 ),
                 const SizedBox(height: 16),
-                AppTextField(
-                  controller: _confirmCtrl,
-                  hintText: 'Confirm Password',
-                  icon: Icons.lock_reset,
-                  obscureText: true,
+                FadeSlideIn(
+                  index: 4,
+                  child: AppTextField(
+                    controller: _confirmCtrl,
+                    hintText: 'Confirm Password',
+                    icon: Icons.lock_reset,
+                    obscureText: true,
+                  ),
                 ),
                 const SizedBox(height: 28),
-                PrimaryButton(
-                  title: 'Register',
-                  isLoading: _isLoading,
-                  onPressed: _handleRegister,
+                FadeSlideIn(
+                  index: 5,
+                  child: PrimaryButton(
+                    title: 'Register',
+                    isLoading: _isLoading,
+                    onPressed: _handleRegister,
+                  ),
                 ),
                 const SizedBox(height: 16),
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: Text(
-                    'Already have an account? Back to Login',
-                    style: TextStyle(
-                      color: theme.primaryColor,
-                      fontWeight: FontWeight.w600,
-                    ),
+                FadeSlideIn(
+                  index: 6,
+                  child: TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Already have an account? Back to Login'),
                   ),
                 ),
               ],
@@ -395,7 +553,6 @@ class _UserSpaceState extends State<UserSpace> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(
@@ -403,34 +560,12 @@ class _UserSpaceState extends State<UserSpace> {
           tooltip: 'Logout',
           onPressed: () => FirebaseAuth.instance.signOut(),
         ),
-        title: Container(
-          height: 40,
-          decoration: BoxDecoration(
-            color: theme.brightness == Brightness.dark
-                ? Colors.white10
-                : Colors.grey[200],
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: TextField(
-            style: TextStyle(color: theme.colorScheme.onSurface),
-            decoration: InputDecoration(
-              hintText: 'Search...',
-              hintStyle: TextStyle(color: theme.colorScheme.onSurfaceVariant),
-              prefixIcon: Icon(
-                Icons.search,
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-              border: InputBorder.none,
-              contentPadding: const EdgeInsets.symmetric(vertical: 10),
-            ),
-          ),
-        ),
+        // The old search field did nothing, so it is replaced by the brand title.
+        title: const _BrandTitle(fontSize: 18),
         centerTitle: true,
         actions: [
           PopupMenuButton<String>(
-            icon: Icon(Icons.more_vert, color: theme.primaryColor),
-            color: theme.cardColor,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            icon: const Icon(Icons.more_vert, color: kAccent),
             offset: const Offset(0, 50),
             onSelected: (val) {
               final page = (val == 'settings')
@@ -438,28 +573,14 @@ class _UserSpaceState extends State<UserSpace> {
                   : const UserAboutPage();
               Navigator.push(context, MaterialPageRoute(builder: (_) => page));
             },
-
-
-          
-
-
-
-
-
-
-
-
-
-
-
             itemBuilder: (_) => [
-              _buildMenuItem('settings', Icons.settings, 'Settings', theme),
-              _buildMenuItem('about', Icons.info_outline, 'About App', theme),
+              _buildMenuItem('settings', Icons.settings, 'Settings'),
+              _buildMenuItem('about', Icons.info_outline, 'About App'),
             ],
           ),
         ],
       ),
-      body: IndexedStack(
+      body: FadeIndexedStack(
         index: _currentIndex,
         children: const [
           _HomeTab(),
@@ -467,35 +588,36 @@ class _UserSpaceState extends State<UserSpace> {
           _ProfileTab(),
         ],
       ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _currentIndex,
-        onTap: (index) => setState(() => _currentIndex = index),
-        type: BottomNavigationBarType.fixed,
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.directions_car),
-            label: 'Vehicle',
-          ),
-          BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
-        ],
+      bottomNavigationBar: DecoratedBox(
+        decoration: const BoxDecoration(
+          border: Border(top: BorderSide(color: kDivider)),
+        ),
+        child: NavigationBar(
+          selectedIndex: _currentIndex,
+          onDestinationSelected: (index) =>
+              setState(() => _currentIndex = index),
+          height: 68,
+          destinations: const [
+            NavigationDestination(icon: Icon(Icons.home), label: 'Home'),
+            NavigationDestination(
+              icon: Icon(Icons.directions_car),
+              label: 'Vehicle',
+            ),
+            NavigationDestination(icon: Icon(Icons.person), label: 'Profile'),
+          ],
+        ),
       ),
     );
   }
 
-  PopupMenuItem<String> _buildMenuItem(
-    String val,
-    IconData icon,
-    String label,
-    ThemeData theme,
-  ) {
+  PopupMenuItem<String> _buildMenuItem(String val, IconData icon, String label) {
     return PopupMenuItem(
       value: val,
       child: Row(
         children: [
-          Icon(icon, color: theme.colorScheme.onSurfaceVariant, size: 20),
+          Icon(icon, color: kTextMuted, size: 20),
           const SizedBox(width: 12),
-          Text(label, style: TextStyle(color: theme.colorScheme.onSurface)),
+          Text(label, style: const TextStyle(color: kText)),
         ],
       ),
     );
@@ -506,9 +628,31 @@ class _UserSpaceState extends State<UserSpace> {
 // TAB 1: HOME (Places & Campus Management)
 // ==========================================
 
-class _HomeTab extends StatelessWidget {
+Widget buildCampusLogo(String shortName) {
+  return Container(
+    width: 52,
+    height: 52,
+    decoration: BoxDecoration(
+      color: kCardAlt,
+      borderRadius: BorderRadius.circular(kRadius),
+      border: Border.all(color: kDivider),
+    ),
+    alignment: Alignment.center,
+    child: Text(
+      shortName,
+      style: mono(fontSize: 15, color: kAccent, letterSpacing: 0.8),
+    ),
+  );
+}
+
+class _HomeTab extends StatefulWidget {
   const _HomeTab();
 
+  @override
+  State<_HomeTab> createState() => _HomeTabState();
+}
+
+class _HomeTabState extends State<_HomeTab> {
   static const List<Map<String, String>> _availableCampuses = [
     {
       'id': 'fau_boca',
@@ -518,282 +662,384 @@ class _HomeTab extends StatelessWidget {
     },
   ];
 
-  void _showAddSpaceDialog(BuildContext context) {
-    final theme = Theme.of(context);
-    final uid = FirebaseAuth.instance.currentUser?.uid;
+  // Stream is created once instead of on every build (avoids re-subscribing).
+  late final String? _uid = FirebaseAuth.instance.currentUser?.uid;
+  late final Stream<DatabaseEvent>? _stream = _uid == null
+      ? null
+      : FirebaseDatabase.instance.ref('drivers/$_uid/locations').onValue;
 
-    showDialog(
-      context: context,
-      barrierDismissible: true,
-      builder: (dialogCtx) => Dialog(
-        backgroundColor: theme.cardColor,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
-        child: Container(
-          width: double.infinity,
-          constraints: const BoxConstraints(maxWidth: 550, maxHeight: 600),
-          padding: const EdgeInsets.all(20.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.close),
-                    color: theme.colorScheme.onSurface,
-                    tooltip: 'Close',
-                    onPressed: () => Navigator.of(dialogCtx).pop(),
-                  ),
-                  Text(
-                    'Select Location',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: theme.colorScheme.onSurface,
-                    ),
-                  ),
-                  const SizedBox(width: 48),
-                ],
-              ),
-              const Divider(height: 24),
-              Expanded(
-                child: ListView.builder(
-                  itemCount: _availableCampuses.length,
-                  itemBuilder: (context, index) {
-                    final campus = _availableCampuses[index];
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 12.0),
-                      padding: const EdgeInsets.all(16.0),
-                      decoration: BoxDecoration(
-                        color: theme.scaffoldBackgroundColor,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: theme.dividerColor),
-                      ),
-                      child: Row(
-                        children: [
-                          _buildCampusLogo(campus['shortName']!, theme),
-                          const SizedBox(width: 14),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  campus['fullName']!,
-                                  style: TextStyle(
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.bold,
-                                    color: theme.colorScheme.onSurface,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  campus['address']!,
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: theme.colorScheme.onSurfaceVariant,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          ElevatedButton(
-                            onPressed: () {
-                              Navigator.of(dialogCtx).pop();
-                              if (uid != null) {
-                                FirebaseDatabase.instance
-                                    .ref('drivers/$uid/locations/${campus['id']}')
-                                    .set({
-                                  'shortName': campus['shortName'],
-                                  'fullName': campus['fullName'],
-                                  'address': campus['address'],
-                                  'addedAt': ServerValue.timestamp,
-                                });
-                              }
-                            },
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: theme.primaryColor,
-                              foregroundColor: const Color(0xFF12110F),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 10,
-                              ),
-                            ),
-                            child: const Text(
-                              'Add',
-                              style: TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+  void _addCampus(Map<String, String> campus) {
+    final uid = _uid;
+    if (uid == null) return;
+    FirebaseDatabase.instance.ref('drivers/$uid/locations/${campus['id']}').set({
+      'shortName': campus['shortName'],
+      'fullName': campus['fullName'],
+      'address': campus['address'],
+      'addedAt': ServerValue.timestamp,
+    });
   }
 
-  static Widget _buildCampusLogo(String shortName, ThemeData theme) {
-    return Container(
-      width: 52,
-      height: 52,
-      decoration: BoxDecoration(
-        color: const Color(0xFF003366),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFFCC0000), width: 1.5),
-      ),
-      alignment: Alignment.center,
-      child: Text(
-        shortName,
-        style: const TextStyle(
-          color: Colors.white,
-          fontSize: 16,
-          fontWeight: FontWeight.w900,
-          letterSpacing: 1,
-        ),
+  final _searchCtrl = TextEditingController();
+  String _query = '';
+
+  /// Ids of locations already on the home page (kept in sync by the stream).
+  Set<String> _addedIds = const {};
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  void _showAddSpaceDialog() {
+    final notAdded = [
+      for (final c in _availableCampuses)
+        if (!_addedIds.contains(c['id'])) c,
+    ];
+    showAppDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (_) => _SelectLocationDialog(
+        campuses: notAdded,
+        onAdd: _addCampus,
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-
+    final uid = _uid;
     if (uid == null) {
       return const Center(child: Text('User not signed in.'));
     }
 
     return StreamBuilder<DatabaseEvent>(
-      stream: FirebaseDatabase.instance.ref('drivers/$uid/locations').onValue,
+      stream: _stream,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
         }
 
         final rawData = snapshot.data?.snapshot.value;
-
-        if (rawData == null) {
+        if (rawData is! Map) {
+          _addedIds = const {};
           return AnimatedAddCard(
             title: 'No Locations Found',
             subtitle: 'Tap to add a new location',
-            onTap: () => _showAddSpaceDialog(context),
+            onTap: _showAddSpaceDialog,
           );
         }
 
-        final locationsMap = Map<dynamic, dynamic>.from(rawData as Map);
-        final locationEntries = locationsMap.entries.toList();
+        final locations = <String, Map<String, dynamic>>{
+          for (final entry in rawData.entries)
+            if (entry.value is Map)
+              entry.key.toString():
+                  Map<String, dynamic>.from(entry.value as Map),
+        };
+        _addedIds = locations.keys.toSet();
+        final visible = locations.entries
+            .where((e) => matchesLocationQuery(e.value, _query))
+            .toList();
 
-        return ListView(
-          padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0),
+        return _ListWithBottomAction(
+          actionTitle: 'Add more locations',
+          actionIcon: Icons.add_location_alt_outlined,
+          onAction: _showAddSpaceDialog,
           children: [
-            ...locationEntries.map((entry) {
-              final locKey = entry.key.toString();
-              final data = Map<String, dynamic>.from(entry.value as Map);
-              final shortName = data['shortName']?.toString() ?? 'FAU';
-              final fullName =
-                  data['fullName']?.toString() ?? 'Florida Atlantic University';
-              final address = data['address']?.toString() ??
-                  '777 Glades Rd, Boca Raton, FL 33431';
-
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 12.0),
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(16),
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const FauMapScreen(),
-                      ),
-                    );
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.all(20.0),
-                    decoration: BoxDecoration(
-                      color: theme.cardColor,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: theme.dividerColor, width: 1.5),
-                    ),
-                    child: Row(
-                      children: [
-                        _buildCampusLogo(shortName, theme),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                fullName,
-                                style: TextStyle(
-                                  fontSize: 17,
-                                  fontWeight: FontWeight.bold,
-                                  color: theme.colorScheme.onSurface,
-                                ),
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
-                                address,
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  color: theme.colorScheme.onSurfaceVariant,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.delete_outline, size: 20),
-                          color: Colors.redAccent.withOpacity(0.7),
-                          tooltip: 'Remove Place',
-                          onPressed: () {
-                            FirebaseDatabase.instance
-                                .ref('drivers/$uid/locations/$locKey')
-                                .remove();
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              );
-            }),
-            const SizedBox(height: 8),
-            OutlinedButton(
-              onPressed: () => _showAddSpaceDialog(context),
-              style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                side: BorderSide(color: theme.primaryColor, width: 1.5),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-              child: Text(
-                'Add more locations',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: theme.primaryColor,
-                ),
-              ),
+            AppTextField(
+              controller: _searchCtrl,
+              hintText: 'Search your locations',
+              icon: Icons.search,
+              onChanged: (v) => setState(() => _query = v),
             ),
+            const SizedBox(height: 16),
+            for (final e in visible) _buildLocationCard(uid, e.key, e.value),
+            if (visible.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 24),
+                child: Text(
+                  'No saved locations match "${_query.trim()}".',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: kTextMuted, fontSize: 13),
+                ),
+              ),
           ],
         );
       },
     );
   }
+
+  Widget _buildLocationCard(String uid, String locKey, Map<String, dynamic> data) {
+    final shortName = data['shortName']?.toString() ?? 'FAU';
+    final fullName = data['fullName']?.toString() ?? 'Florida Atlantic University';
+    final address =
+        data['address']?.toString() ?? '777 Glades Rd, Boca Raton, FL 33431';
+
+    return Padding(
+      key: ValueKey('loc-$locKey'),
+      padding: const EdgeInsets.only(bottom: 12.0),
+      child: PressScale(
+        child: InkWell(
+        borderRadius: BorderRadius.circular(kRadius),
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const FauMapScreen()),
+        ),
+        child: Container(
+          padding: const EdgeInsets.all(16.0),
+          decoration: BoxDecoration(
+            color: kCard,
+            borderRadius: BorderRadius.circular(kRadius),
+            border: Border.all(color: kDivider),
+          ),
+          child: Row(
+            children: [
+              buildCampusLogo(shortName),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      fullName,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: kText,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      address,
+                      style: const TextStyle(fontSize: 12.5, color: kTextMuted),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.delete_outline, size: 20),
+                color: kRed,
+                tooltip: 'Remove Place',
+                onPressed: () => FirebaseDatabase.instance
+                    .ref('drivers/$uid/locations/$locKey')
+                    .remove(),
+              ),
+            ],
+          ),
+        ),
+      ),
+      ),
+    );
+  }
+}
+
+/// Case-insensitive match on a location's short name, full name or address.
+/// An empty query matches everything.
+bool matchesLocationQuery(Map<String, dynamic> loc, String query) {
+  final q = query.trim().toLowerCase();
+  if (q.isEmpty) return true;
+  return ['shortName', 'fullName', 'address']
+      .any((k) => (loc[k]?.toString().toLowerCase() ?? '').contains(q));
+}
+
+class _SelectLocationDialog extends StatefulWidget {
+  /// Campuses not yet on the user's home page.
+  final List<Map<String, String>> campuses;
+  final void Function(Map<String, String> campus) onAdd;
+
+  const _SelectLocationDialog({required this.campuses, required this.onAdd});
+
+  @override
+  State<_SelectLocationDialog> createState() => _SelectLocationDialogState();
+}
+
+class _SelectLocationDialogState extends State<_SelectLocationDialog> {
+  final _searchCtrl = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final results = widget.campuses
+        .where((c) => matchesLocationQuery(c, _query))
+        .toList();
+
+    final String? emptyText = widget.campuses.isEmpty
+        ? 'All available locations are already on your home page.'
+        : (results.isEmpty ? 'No locations match "${_query.trim()}".' : null);
+
+    return Dialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+      child: Container(
+        width: double.infinity,
+        constraints: const BoxConstraints(maxWidth: 550, maxHeight: 600),
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  color: kText,
+                  tooltip: 'Close',
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+                Text('Select Location', style: mono(fontSize: 16)),
+                const SizedBox(width: 48),
+              ],
+            ),
+            const Divider(height: 24),
+            AppTextField(
+              controller: _searchCtrl,
+              hintText: 'Search locations',
+              icon: Icons.search,
+              onChanged: (v) => setState(() => _query = v),
+            ),
+            const SizedBox(height: 16),
+            Expanded(
+              child: emptyText != null
+                  ? Padding(
+                      padding: const EdgeInsets.only(top: 24),
+                      child: Text(
+                        emptyText,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: kTextMuted, fontSize: 13),
+                      ),
+                    )
+                  : ListView.builder(
+                      itemCount: results.length,
+                      itemBuilder: (context, index) =>
+                          _buildCampusRow(results[index]),
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCampusRow(Map<String, String> campus) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12.0),
+      padding: const EdgeInsets.all(16.0),
+      decoration: BoxDecoration(
+        color: kBg,
+        borderRadius: BorderRadius.circular(kRadius),
+        border: Border.all(color: kDivider),
+      ),
+      child: Row(
+        children: [
+          buildCampusLogo(campus['shortName']!),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  campus['fullName']!,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: kText,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  campus['address']!,
+                  style: const TextStyle(fontSize: 12, color: kTextMuted),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              widget.onAdd(campus);
+            },
+            style: ElevatedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            ),
+            child: const Text('Add'),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 // ==========================================
-// FAU CAMPUS MAP SCREEN & PATHFINDING
+// GEOMETRY HELPERS (fast, campus-scale)
+// ==========================================
+
+/// Equirectangular math: accurate to well under 0.1% at campus distances
+/// and much cheaper than an ellipsoid (Vincenty) distance, which matters
+/// because these run on every GPS fix and every 50 ms simulation tick.
+class Geo {
+  static const double _earthR = 6371008.8;
+  static const double _deg = math.pi / 180.0;
+
+  static double meters(LatLng a, LatLng b) {
+    final x = (b.longitude - a.longitude) *
+        _deg *
+        math.cos((a.latitude + b.latitude) * 0.5 * _deg);
+    final y = (b.latitude - a.latitude) * _deg;
+    return math.sqrt(x * x + y * y) * _earthR;
+  }
+
+  static double pathLength(List<LatLng> pts) {
+    var total = 0.0;
+    for (var i = 0; i < pts.length - 1; i++) {
+      total += meters(pts[i], pts[i + 1]);
+    }
+    return total;
+  }
+
+  static LatLng lerp(LatLng a, LatLng b, double t) => LatLng(
+        a.latitude + (b.latitude - a.latitude) * t,
+        a.longitude + (b.longitude - a.longitude) * t,
+      );
+
+  /// Fraction (0..1) along segment a→b of the point closest to p.
+  static double projectT(LatLng p, LatLng a, LatLng b) {
+    final cosLat = math.cos(a.latitude * _deg);
+    final abx = (b.longitude - a.longitude) * cosLat;
+    final aby = b.latitude - a.latitude;
+    final apx = (p.longitude - a.longitude) * cosLat;
+    final apy = p.latitude - a.latitude;
+    final len2 = abx * abx + aby * aby;
+    if (len2 == 0) return 0;
+    return ((apx * abx + apy * aby) / len2).clamp(0.0, 1.0).toDouble();
+  }
+
+  /// Compass bearing 0..360 from a to b.
+  static double bearing(LatLng a, LatLng b) {
+    final lat1 = a.latitude * _deg;
+    final lat2 = b.latitude * _deg;
+    final dLon = (b.longitude - a.longitude) * _deg;
+    final y = math.sin(dLon) * math.cos(lat2);
+    final x = math.cos(lat1) * math.sin(lat2) -
+        math.sin(lat1) * math.cos(lat2) * math.cos(dLon);
+    return (math.atan2(y, x) / _deg + 360.0) % 360.0;
+  }
+
+  /// Signed shortest rotation (-180..180] from one angle to another.
+  static double shortestAngle(double from, double to) {
+    var d = (to - from) % 360.0; // Dart % is always >= 0 here
+    if (d > 180.0) d -= 360.0;
+    return d;
+  }
+}
+
+// ==========================================
+// FAU CAMPUS MODELS & A* PATHFINDING
 // ==========================================
 
 class FauBuilding {
@@ -801,26 +1047,12 @@ class FauBuilding {
   final String code;
   final String name;
   final LatLng position;
-  final String recommendedLotId;
 
   const FauBuilding({
     required this.id,
     required this.code,
     required this.name,
     required this.position,
-    this.recommendedLotId = 'N/A',
-  });
-}
-
-class CampusWaypoint {
-  final String id;
-  final LatLng position;
-  final List<String> neighbors;
-
-  const CampusWaypoint({
-    required this.id,
-    required this.position,
-    required this.neighbors,
   });
 }
 
@@ -836,219 +1068,331 @@ class PathResult {
   });
 }
 
-class CampusPathfinder {
-  static const Distance _dist = Distance();
+class _GraphSnap {
+  final String a;
+  final String b;
+  final LatLng point;
+  final double dist;
+  const _GraphSnap(this.a, this.b, this.point, this.dist);
+}
 
-  static final Map<String, CampusWaypoint> walkwayGraph = {
-    'node_lot12': const CampusWaypoint(
-      id: 'node_lot12',
-      position: LatLng(26.373262, -80.106806),
-      neighbors: ['node_ed47_west'],
-    ),
-    'node_lot14': const CampusWaypoint(
-      id: 'node_lot14',
-      position: LatLng(26.373005, -80.099683),
-      neighbors: ['node_bc71_east'],
-    ),
-    'node_lot07': const CampusWaypoint(
-      id: 'node_lot07',
-      position: LatLng(26.373999, -80.105842),
-      neighbors: ['node_ed47_west', 'node_lot06'],
-    ),
-    'node_lot06': const CampusWaypoint(
-      id: 'node_lot06',
-      position: LatLng(26.374013, -80.104280),
-      neighbors: ['node_lot07', 'node_breezeway_west'],
-    ),
-    'node_ed47': const CampusWaypoint(
-      id: 'node_ed47',
-      position: LatLng(26.373358, -80.105828),
-      neighbors: ['node_ed47_west', 'node_breezeway_west'],
-    ),
-    'node_bc71': const CampusWaypoint(
-      id: 'node_bc71',
-      position: LatLng(26.373263, -80.100446),
-      neighbors: ['node_bc71_east', 'node_breezeway_east'],
-    ),
-    'node_cm22': const CampusWaypoint(
-      id: 'node_cm22',
-      position: LatLng(26.372528, -80.104044),
-      neighbors: ['node_breezeway_west', 'node_breezeway_center'],
-    ),
-    'node_ed47_west': const CampusWaypoint(
-      id: 'node_ed47_west',
-      position: LatLng(26.373300, -80.106300),
-      neighbors: ['node_lot12', 'node_ed47', 'node_lot07'],
-    ),
-    'node_breezeway_west': const CampusWaypoint(
-      id: 'node_breezeway_west',
-      position: LatLng(26.373300, -80.103500),
-      neighbors: ['node_ed47', 'node_breezeway_center', 'node_lot06', 'node_cm22'],
-    ),
-    'node_breezeway_center': const CampusWaypoint(
-      id: 'node_breezeway_center',
-      position: LatLng(26.373280, -80.101700),
-      neighbors: ['node_breezeway_west', 'node_breezeway_center'],
-    ),
-    'node_breezeway_east': const CampusWaypoint(
-      id: 'node_breezeway_east',
-      position: LatLng(26.373270, -80.101000),
-      neighbors: ['node_breezeway_center', 'node_bc71'],
-    ),
-    'node_bc71_east': const CampusWaypoint(
-      id: 'node_bc71',
-      position: LatLng(26.373150, -80.099950),
-      neighbors: ['node_bc71', 'node_lot14'],
-    ),
+/// Tiny binary min-heap for the A* open set (O(log n) instead of sorting).
+class _MinHeap {
+  final List<double> _keys = [];
+  final List<String> _vals = [];
+
+  bool get isNotEmpty => _keys.isNotEmpty;
+
+  void push(double key, String val) {
+    _keys.add(key);
+    _vals.add(val);
+    var i = _keys.length - 1;
+    while (i > 0) {
+      final p = (i - 1) >> 1;
+      if (_keys[p] <= _keys[i]) break;
+      _swap(i, p);
+      i = p;
+    }
+  }
+
+  String pop() {
+    final top = _vals[0];
+    final lastK = _keys.removeLast();
+    final lastV = _vals.removeLast();
+    if (_keys.isNotEmpty) {
+      _keys[0] = lastK;
+      _vals[0] = lastV;
+      var i = 0;
+      final n = _keys.length;
+      while (true) {
+        final l = 2 * i + 1;
+        final r = l + 1;
+        var m = i;
+        if (l < n && _keys[l] < _keys[m]) m = l;
+        if (r < n && _keys[r] < _keys[m]) m = r;
+        if (m == i) break;
+        _swap(i, m);
+        i = m;
+      }
+    }
+    return top;
+  }
+
+  void _swap(int a, int b) {
+    final k = _keys[a];
+    _keys[a] = _keys[b];
+    _keys[b] = k;
+    final v = _vals[a];
+    _vals[a] = _vals[b];
+    _vals[b] = v;
+  }
+}
+
+class CampusPathfinder {
+  /// Where each parking lot is (lots are not graph nodes; like buildings,
+  /// they are snapped onto the nearest walkway when routing).
+  static const Map<String, LatLng> lotPositions = {
+    'lot12': LatLng(26.373262, -80.106806),
+    'lot14': LatLng(26.373005, -80.099683),
+    'lot07': LatLng(26.373999, -80.105842),
+    'lot06': LatLng(26.374013, -80.104280),
   };
 
+  /// True once the full OpenStreetMap walkway network has been loaded.
+  static bool usingOsmGraph = false;
+
+  /// Loads the campus walking network (every sidewalk, footpath, crossing,
+  /// campus road and parking aisle from OpenStreetMap) from
+  /// assets/campus_walkways.json. Format: `nodes` = flat [lat, lon, ...],
+  /// `edges` = flat [nodeIndex, nodeIndex, ...]. If it can't be read, the
+  /// small built-in graph below stays in use.
+  static Future<void> load() async {
+    try {
+      final raw = await rootBundle.loadString('assets/campus_walkways.json');
+      final json = jsonDecode(raw) as Map<String, dynamic>;
+      final n = (json['nodes'] as List).cast<num>();
+      final e = (json['edges'] as List).cast<num>();
+      final newNodes = <String, LatLng>{
+        for (var i = 0; i < n.length ~/ 2; i++)
+          'n$i': LatLng(n[2 * i].toDouble(), n[2 * i + 1].toDouble()),
+      };
+      final newEdges = <List<String>>[
+        for (var i = 0; i < e.length ~/ 2; i++)
+          ['n${e[2 * i].toInt()}', 'n${e[2 * i + 1].toInt()}'],
+      ];
+      if (newNodes.isEmpty || newEdges.isEmpty) return;
+      nodes = newNodes;
+      edges = newEdges;
+      _adj = _buildAdjacency();
+      _cache.clear();
+      _snapCache.clear();
+      usingOsmGraph = true;
+    } catch (err) {
+      debugPrint('[walkways] using the built-in graph: $err');
+    }
+  }
+
+  /// Walkway nodes. Starts as the small hand-made graph around the first
+  /// lots and buildings; [load] replaces it with the full campus network.
+  static Map<String, LatLng> nodes = {
+    'lot12': const LatLng(26.373262, -80.106806),
+    'lot14': const LatLng(26.373005, -80.099683),
+    'lot07': const LatLng(26.373999, -80.105842),
+    'lot06': const LatLng(26.374013, -80.104280),
+    'ed47': const LatLng(26.373358, -80.105828),
+    'bc71': const LatLng(26.373263, -80.100446),
+    'cm22': const LatLng(26.372528, -80.104044),
+    'ed47_west': const LatLng(26.373300, -80.106300),
+    'breezeway_west': const LatLng(26.373300, -80.103500),
+    'breezeway_center': const LatLng(26.373280, -80.101700),
+    'breezeway_east': const LatLng(26.373270, -80.101000),
+    'bc71_east': const LatLng(26.373150, -80.099950),
+  };
+
+  /// Walkways, listed once each. They are always two-way, so a one-sided
+  /// neighbor list can no longer break the graph.
+  static List<List<String>> edges = [
+    ['lot12', 'ed47_west'],
+    ['lot07', 'ed47_west'],
+    ['ed47', 'ed47_west'],
+    ['lot07', 'lot06'],
+    ['lot06', 'breezeway_west'],
+    ['ed47', 'breezeway_west'],
+    ['cm22', 'breezeway_west'],
+    ['cm22', 'breezeway_center'],
+    ['breezeway_west', 'breezeway_center'],
+    ['breezeway_center', 'breezeway_east'],
+    ['breezeway_east', 'bc71'],
+    ['bc71', 'bc71_east'],
+    ['bc71_east', 'lot14'],
+  ];
+
+  static Map<String, Map<String, double>> _adj = _buildAdjacency();
+
+  static Map<String, Map<String, double>> _buildAdjacency() {
+    final adj = <String, Map<String, double>>{};
+    for (final e in edges) {
+      final a = nodes[e[0]];
+      final b = nodes[e[1]];
+      assert(a != null, 'Walkway edge references unknown node "${e[0]}"');
+      assert(b != null, 'Walkway edge references unknown node "${e[1]}"');
+      if (a == null || b == null || e[0] == e[1]) continue;
+      final w = Geo.meters(a, b);
+      adj.putIfAbsent(e[0], () => {})[e[1]] = w;
+      adj.putIfAbsent(e[1], () => {})[e[0]] = w;
+    }
+    return adj;
+  }
+
+  /// Lots and buildings never move, so each lot→building walk is computed once.
+  static final Map<String, PathResult> _cache = {};
+
+  static PathResult walkingRoute(String lotId, LatLng lotPos, LatLng buildingPos) {
+    final key = '$lotId|${buildingPos.latitude},${buildingPos.longitude}';
+    return _cache.putIfAbsent(key, () {
+      final path = findPath(lotPos, buildingPos);
+      return PathResult(
+        lotId: lotId,
+        pathPoints: path,
+        totalDistanceMeters: Geo.pathLength(path),
+      );
+    });
+  }
+
+  /// Closest non-full lot by real walking distance. Lots with no sensors
+  /// (capacity 0) are treated as unknown and skipped.
   static PathResult? findBestAvailableRoute({
     required LatLng buildingPos,
     required Map<String, Map<String, dynamic>> lots,
   }) {
-    PathResult? bestResult;
-    double shortestDistance = double.infinity;
-
+    PathResult? best;
     for (final entry in lots.entries) {
-      final lotId = entry.key;
-      final lotData = entry.value;
+      final occupied = (entry.value['occupied'] as num?)?.toInt() ?? 0;
+      final capacity = (entry.value['capacity'] as num?)?.toInt() ?? 0;
+      if (capacity <= 0 || occupied >= capacity) continue;
 
-      final occupied = lotData['occupied'] as int? ?? 0;
-      final capacity = lotData['capacity'] as int? ?? 1;
+      final lotPos = entry.value['position'] as LatLng?;
+      if (lotPos == null) continue;
 
-      if (capacity > 0 && occupied >= capacity) {
-        continue;
-      }
-
-      final String nodeKey = 'node_$lotId';
-      final LatLng lotPos = walkwayGraph.containsKey(nodeKey)
-          ? walkwayGraph[nodeKey]!.position
-          : (lotData['position'] as LatLng);
-
-      final path = runAStar(start: lotPos, goal: buildingPos);
-      final dist = _calculatePathDistance(path);
-
-      if (dist < shortestDistance) {
-        shortestDistance = dist;
-        bestResult = PathResult(
-          lotId: lotId,
-          pathPoints: path,
-          totalDistanceMeters: dist,
-        );
+      final r = walkingRoute(entry.key, lotPos, buildingPos);
+      if (best == null || r.totalDistanceMeters < best.totalDistanceMeters) {
+        best = r;
       }
     }
-
-    return bestResult;
+    return best;
   }
 
-  static List<LatLng> runAStar({
-    required LatLng start,
-    required LatLng goal,
-  }) {
-    final startNodeId = _findClosestWaypoint(start);
-    final goalNodeId = _findClosestWaypoint(goal);
+  /// Lots and buildings never move, so where each one joins the network is
+  /// worked out once (there are thousands of walkway segments to check).
+  static final Map<String, List<_GraphSnap>> _snapCache = {};
 
-    if (startNodeId == goalNodeId) {
-      return [start, goal];
-    }
+  /// How much farther than its nearest walkway the destination may still
+  /// join the network. Building positions are their centres, and the nearest
+  /// walkway can be on the far side (BU-86's is south, but Lot 6 is north, so
+  /// every route walked all the way around it). A building can be entered
+  /// from any side, so the goal joins every walkway in reach and A* picks
+  /// the side that is actually shorter; the walk from that walkway to the
+  /// centre is part of the route's cost. The start (a lot or the user's
+  /// position) still joins only its nearest walkway, or a route could skip
+  /// the network at both ends.
+  static const double _goalReach = 45.0; // meters
 
-    final List<String> openSet = [startNodeId];
-    final Map<String, String> cameFrom = {};
-
-    final Map<String, double> gScore = {
-      for (final k in walkwayGraph.keys) k: double.infinity,
-    };
-    gScore[startNodeId] = 0.0;
-
-    final Map<String, double> fScore = {
-      for (final k in walkwayGraph.keys) k: double.infinity,
-    };
-    fScore[startNodeId] = _dist.as(
-      LengthUnit.Meter,
-      walkwayGraph[startNodeId]!.position,
-      goal,
-    );
-
-    while (openSet.isNotEmpty) {
-      openSet.sort((a, b) => fScore[a]!.compareTo(fScore[b]!));
-      final current = openSet.removeAt(0);
-
-      if (current == goalNodeId) {
-        final List<LatLng> path = [goal];
-        String curr = current;
-        while (cameFrom.containsKey(curr)) {
-          path.insert(0, walkwayGraph[curr]!.position);
-          curr = cameFrom[curr]!;
-        }
-        path.insert(0, walkwayGraph[startNodeId]!.position);
-        path.insert(0, start);
-        return path;
+  /// Projects p onto every walkway segment (not just nodes) within [reach]
+  /// of the nearest one, so points between nodes route correctly.
+  static List<_GraphSnap> _snapToGraph(LatLng p, {double reach = 0}) {
+    // Walking reroutes start from live GPS points (each one new), so keep the
+    // cache from growing forever.
+    if (_snapCache.length > 500) _snapCache.clear();
+    return _snapCache.putIfAbsent('$reach|${p.latitude},${p.longitude}', () {
+      final all = <_GraphSnap>[];
+      var nearest = double.infinity;
+      for (final e in edges) {
+        final pa = nodes[e[0]];
+        final pb = nodes[e[1]];
+        if (pa == null || pb == null) continue;
+        final q = Geo.lerp(pa, pb, Geo.projectT(p, pa, pb));
+        final d = Geo.meters(p, q);
+        all.add(_GraphSnap(e[0], e[1], q, d));
+        if (d < nearest) nearest = d;
       }
-
-      final currentNode = walkwayGraph[current];
-      if (currentNode == null) continue;
-
-      for (final neighborId in currentNode.neighbors) {
-        final neighborNode = walkwayGraph[neighborId];
-        if (neighborNode == null) continue;
-
-        final tentativeG = gScore[current]! +
-            _dist.as(
-              LengthUnit.Meter,
-              currentNode.position,
-              neighborNode.position,
-            );
-
-        if (tentativeG < (gScore[neighborId] ?? double.infinity)) {
-          cameFrom[neighborId] = current;
-          gScore[neighborId] = tentativeG;
-          fScore[neighborId] = tentativeG +
-              _dist.as(
-                LengthUnit.Meter,
-                neighborNode.position,
-                goal,
-              );
-
-          if (!openSet.contains(neighborId)) {
-            openSet.add(neighborId);
-          }
-        }
-      }
-    }
-
-    return [start, goal];
-  }
-
-  static String _findClosestWaypoint(LatLng target) {
-    String closestId = walkwayGraph.keys.first;
-    double minMeters = double.infinity;
-
-    walkwayGraph.forEach((id, wp) {
-      final d = _dist.as(LengthUnit.Meter, target, wp.position);
-      if (d < minMeters) {
-        minMeters = d;
-        closestId = id;
-      }
+      return [
+        for (final s in all)
+          if (s.dist <= nearest + reach) s,
+      ];
     });
-
-    return closestId;
   }
 
-  static double _calculatePathDistance(List<LatLng> points) {
-    double total = 0.0;
-    for (int i = 0; i < points.length - 1; i++) {
-      total += _dist.as(LengthUnit.Meter, points[i], points[i + 1]);
+  static List<LatLng> findPath(LatLng start, LatLng goal) {
+    final ss = _snapToGraph(start);
+    final gs = _snapToGraph(goal, reach: _goalReach);
+    const sId = '__start';
+    const gId = '__goal';
+
+    // Temporary nodes/edges joining start and goal to the walkways: the
+    // point itself, a node where it meets each walkway in reach, and that
+    // walkway's two ends.
+    final extra = <String, Map<String, double>>{};
+    final pos = <String, LatLng>{sId: start, gId: goal};
+    void link(String u, String v, double w) {
+      extra.putIfAbsent(u, () => {})[v] = w;
+      extra.putIfAbsent(v, () => {})[u] = w;
     }
-    return total;
+
+    void join(String end, String prefix, List<_GraphSnap> snaps) {
+      for (var i = 0; i < snaps.length; i++) {
+        final s = snaps[i];
+        final id = '$prefix$i';
+        pos[id] = s.point;
+        link(end, id, s.dist);
+        link(id, s.a, Geo.meters(s.point, nodes[s.a]!));
+        link(id, s.b, Geo.meters(s.point, nodes[s.b]!));
+      }
+    }
+
+    join(sId, '__s', ss);
+    join(gId, '__g', gs);
+    for (var i = 0; i < ss.length; i++) {
+      for (var j = 0; j < gs.length; j++) {
+        if (ss[i].a == gs[j].a && ss[i].b == gs[j].b) {
+          link('__s$i', '__g$j', Geo.meters(ss[i].point, gs[j].point)); // same walkway
+        }
+      }
+    }
+
+    LatLng posOf(String id) => pos[id] ?? nodes[id]!;
+
+    final gScore = <String, double>{sId: 0.0};
+    final cameFrom = <String, String>{};
+    final closed = <String>{};
+    final open = _MinHeap()..push(Geo.meters(start, goal), sId);
+
+    while (open.isNotEmpty) {
+      final current = open.pop();
+      if (!closed.add(current)) continue; // stale heap entry
+
+      if (current == gId) {
+        final ids = <String>[gId];
+        var c = gId;
+        while (cameFrom.containsKey(c)) {
+          c = cameFrom[c]!;
+          ids.add(c);
+        }
+        final raw = ids.reversed.map(posOf); // starts at start, ends at goal
+        // Drop near-duplicate consecutive points.
+        final out = <LatLng>[raw.first];
+        for (final p in raw.skip(1)) {
+          if (Geo.meters(out.last, p) > 0.5) out.add(p);
+        }
+        if (out.length == 1) out.add(goal);
+        return out;
+      }
+
+      final gc = gScore[current]!;
+      final neighborMaps = [_adj[current], extra[current]];
+      for (final m in neighborMaps) {
+        if (m == null) continue;
+        m.forEach((nId, w) {
+          if (closed.contains(nId)) return;
+          final tentative = gc + w;
+          if (tentative < (gScore[nId] ?? double.infinity)) {
+            gScore[nId] = tentative;
+            cameFrom[nId] = current;
+            open.push(tentative + Geo.meters(posOf(nId), goal), nId);
+          }
+        });
+      }
+    }
+
+    return [start, goal]; // unreachable (graph disconnected)
   }
 }
 
 // ---------------------------------------------------------
-// REAL STREET & DRIVEWAY ROUTING ENGINE (OSRM)
+// REAL STREET ROUTING (OSRM)
 // ---------------------------------------------------------
 
 class RealRoadRouter {
-  static const Distance _dist = Distance();
+  static final http.Client _client = http.Client(); // reuse connections
 
   static Future<List<LatLng>> getRoadRoute({
     required LatLng start,
@@ -1062,33 +1406,121 @@ class RealRoadRouter {
     );
 
     try {
-      // ⭐️ Increased timeout to 10 seconds for long off-campus trips
-      final response = await http.get(url).timeout(const Duration(seconds: 10));
+      final response =
+          await _client.get(url).timeout(const Duration(seconds: 10));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final routes = data['routes'] as List<dynamic>?;
         if (routes != null && routes.isNotEmpty) {
-          final coordinates = routes[0]['geometry']['coordinates'] as List<dynamic>;
-          return coordinates
-              .map((pt) => LatLng((pt[1] as num).toDouble(), (pt[0] as num).toDouble()))
+          final coords = routes[0]['geometry']['coordinates'] as List<dynamic>;
+          final pts = coords
+              .map((pt) => LatLng(
+                    (pt[1] as num).toDouble(),
+                    (pt[0] as num).toDouble(),
+                  ))
               .toList();
+          if (pts.length >= 2) return pts;
         }
       } else {
-        debugPrint('OSRM Server returned status: ${response.statusCode}');
+        debugPrint('OSRM returned status ${response.statusCode}');
       }
     } catch (e) {
-      debugPrint('OSRM routing network error: $e');
+      debugPrint('OSRM routing error: $e');
     }
-
     return [start, destination];
   }
+}
 
-  static double calculateDistance(List<LatLng> points) {
-    double total = 0.0;
-    for (int i = 0; i < points.length - 1; i++) {
-      total += _dist.as(LengthUnit.Meter, points[i], points[i + 1]);
+// ==========================================
+// FAU CAMPUS MAP SCREEN (MapLibre GL, 3D)
+// ==========================================
+
+enum _Progress { none, onRoute, offRoute, arrived }
+
+class _RouteProjection {
+  final int seg;
+  final LatLng point;
+  final double dist;
+  const _RouteProjection(this.seg, this.point, this.dist);
+}
+
+// ---------- GeoJSON helpers ----------
+
+List<double> _coord(LatLng p) => [p.longitude, p.latitude];
+
+Map<String, dynamic> _fc(List<Map<String, dynamic>> features) =>
+    {'type': 'FeatureCollection', 'features': features};
+
+Map<String, dynamic> _pointFeature(LatLng p, Map<String, dynamic> props) => {
+      'type': 'Feature',
+      'properties': props,
+      'geometry': {'type': 'Point', 'coordinates': _coord(p)},
+    };
+
+String _hex(Color c) =>
+    '#${(c.toARGB32() & 0xFFFFFF).toRadixString(16).padLeft(6, '0')}';
+
+/// Draws the navigation arrow once and caches the PNG bytes.
+final Future<Uint8List> _puckIconBytes = _drawPuckIcon();
+
+Future<Uint8List> _drawPuckIcon() async {
+  const s = 96.0;
+  final recorder = ui.PictureRecorder();
+  final canvas = Canvas(recorder);
+  const center = Offset(s / 2, s / 2);
+
+  canvas.drawCircle(center, 30, Paint()..color = Colors.black);
+  canvas.drawCircle(
+    center,
+    30,
+    Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 6
+      ..color = kAccent,
+  );
+  final arrow = Path()
+    ..moveTo(s / 2, s / 2 - 19)
+    ..lineTo(s / 2 + 13, s / 2 + 15)
+    ..lineTo(s / 2, s / 2 + 7)
+    ..lineTo(s / 2 - 13, s / 2 + 15)
+    ..close();
+  canvas.drawPath(arrow, Paint()..color = kAccent);
+
+  final image = await recorder.endRecording().toImage(s.toInt(), s.toInt());
+  final data = await image.toByteData(format: ui.ImageByteFormat.png);
+  image.dispose();
+  return data!.buffer.asUint8List();
+}
+
+/// Coalesces GeoJSON updates per source: while one update is in flight,
+/// newer ones replace each other, so the platform channel never backs up
+/// (important for the 20 fps simulation).
+class _SourceSync {
+  final Future<void> Function(String id, Map<String, dynamic> data) _send;
+  final Map<String, Map<String, dynamic>> _pending = {};
+  final Set<String> _busy = {};
+
+  _SourceSync(this._send);
+
+  void push(String id, Map<String, dynamic> data) {
+    _pending[id] = data;
+    if (!_busy.contains(id)) _drain(id);
+  }
+
+  Future<void> _drain(String id) async {
+    _busy.add(id);
+    try {
+      while (_pending.containsKey(id)) {
+        final data = _pending.remove(id)!;
+        try {
+          await _send(id, data);
+        } catch (e) {
+          debugPrint('[map] update of "$id" failed: $e');
+        }
+      }
+    } finally {
+      _busy.remove(id);
     }
-    return total;
   }
 }
 
@@ -1099,784 +1531,2515 @@ class FauMapScreen extends StatefulWidget {
   State<FauMapScreen> createState() => _FauMapScreenState();
 }
 
-class _FauMapScreenState extends State<FauMapScreen> with SingleTickerProviderStateMixin {
-  final MapController _mapController = MapController();
-  List<LatLng> _fullCalculatedPoints = [];
-  StreamSubscription<Position>? _positionStreamSub;
-  StreamSubscription<DatabaseEvent>? _parkingSub;
-  StreamSubscription<CompassEvent>? _compassSub;
+class _FauMapScreenState extends State<FauMapScreen> {
+  // ---- map style ----
+  /// Bright, detailed OpenStreetMap style (free, no API key).
+  static const String _styleUrl = 'https://tiles.openfreemap.org/styles/liberty';
 
-  // ⭐️ Smooth Camera Turn Animation Controllers
-  AnimationController? _cameraAnimController;
-  Animation<double>? _rotationAnimation;
-  Animation<LatLng>? _positionAnimation;
+  // ---- camera tuning ----
+  static const double _overviewZoom = 16.0;
+  // Performance: the steeper the tilt, the more of the horizon is visible,
+  // and the more distant 3D buildings MapLibre has to load and draw. Near
+  // 60° it extrudes most of Boca Raton, which drops frames. 45° keeps the 3D
+  // look with far fewer buildings on screen.
+  static const double _overviewTilt = 45.0;
+  /// Tilting further by hand eases back to this when you let go.
+  static const double _maxTilt = 50.0;
+  // Turn-by-turn camera, tuned to feel like Apple / Google Maps: course-up,
+  // close-in street-level zoom, arrow in the lower part of the screen.
+  // (Max map zoom is 20, see minMaxZoomPreference.)
+  static const double _navZoom3D = 19.5;
+  static const double _navZoom2D = 18.0;
+  static const double _navTilt = 45.0;
 
-  Timer? _simulationTimer;
-  bool _isSimulatingRoute = false;
-  int _currentSimIndex = 0;
+  /// Arrow sits this far down the map (0 = top, 1 = bottom).
+  static const double _navPuckY = 0.72;
 
-  LatLng? _currentUserLocation;
-  double _currentHeading = 0.0;
-  bool _isLocating = false;
-  String _gpsStatus = 'Searching for GPS...';
+  double get _navZoom => _is3D ? _navZoom3D : _navZoom2D;
 
-  bool _isNavigationTracking = false;
-  bool _developerMode = false;
-  LatLng? _cursorLocation;
+  // ---- routing tuning ----
+  static const double _offRouteMeters = 35.0;
+  static const double _arrivalMeters = 10.0;
+  static const double _maxGpsAccuracyForReroute = 30.0;
+  static const Duration _rerouteCooldown = Duration(seconds: 6);
+  static const Duration _simTick = Duration(milliseconds: 50);
+  static const double _simMetersPerTick = 0.447; // 20 mph at 50 ms ticks
 
-  FauBuilding? _selectedBuilding;
-  PathResult? _currentRoute;
-  int _routeRequestId = 0;
-
-  static final LatLngBounds _fauBounds = LatLngBounds(
-    const LatLng(26.3630, -80.1170),
-    const LatLng(26.3860, -80.0890),
-  );
-
+  // ---- campus geometry ----
+  static const LatLng _campusEntrance = LatLng(26.3685, -80.1020);
+  // Campus box: the map can't be panned outside it, and inside it counts as
+  // "on campus". The north edge sits just past NW Spanish River Blvd, so the
+  // map starts counting at its traffic lights coming in from I-95 (I-95 ramp
+  // lights ~26.3873, the Airport Rd and FAU Blvd 4-way lights ~26.3861-66).
+  static const LatLng _sw = LatLng(26.3630, -80.1170);
+  static const LatLng _ne = LatLng(26.3880, -80.0890);
   static const LatLng _fauCenter = LatLng(26.3745, -80.1030);
+  static final CameraTargetBounds _cameraBounds =
+      CameraTargetBounds(LatLngBounds(southwest: _sw, northeast: _ne));
+
+  static bool _inCampus(LatLng p) =>
+      p.latitude >= _sw.latitude &&
+      p.latitude <= _ne.latitude &&
+      p.longitude >= _sw.longitude &&
+      p.longitude <= _ne.longitude;
+
+  // ---- map source / layer ids ----
+  static const String _srcRoute = 'sc-route';
+  static const String _srcWalk = 'sc-walk';
+  static const String _srcLots = 'sc-lots';
+  static const String _srcBuildings = 'sc-buildings';
+  static const String _srcPuck = 'sc-puck';
+  static const String _layerBuildings3d = 'sc-buildings-3d';
+  static const String _puckImage = 'sc-puck-arrow';
+  static const List<String> _fonts = ['Noto Sans Regular'];
 
   static final Map<String, LatLng> _lotPositions = {
-    'lot12': const LatLng(26.373262, -80.106806),
-    'lot14': const LatLng(26.373005, -80.099683),
-    'lot07': const LatLng(26.373999, -80.105842),
-    'lot06': const LatLng(26.374013, -80.104280),
+    ...CampusPathfinder.lotPositions,
   };
 
-  Map<String, Map<String, dynamic>> _liveLots = {};
-
+  /// Every FAU Boca Raton building that has an official building code, from
+  /// OpenStreetMap (© OpenStreetMap contributors, ODbL), pulled Oct 2026.
+  /// Position = centre of the building's outline, so the dots line up with
+  /// the buildings drawn on the map. Parking garages (PK-) are left out.
   static const List<FauBuilding> _campusBuildings = [
     FauBuilding(
-      id: 'ed47',
-      code: 'ED-47',
-      name: 'College of Education (ED-47)',
-      position: LatLng(26.373358, -80.105828),
+      id: 'ad10',
+      code: 'AD-10',
+      name: 'Kenneth R. Williams Administration (AD-10)',
+      position: LatLng(26.371848, -80.101591),
+    ),
+    FauBuilding(
+      id: 'ag39',
+      code: 'AG-39',
+      name: 'Ritter Art Gallery (AG-39)',
+      position: LatLng(26.371550, -80.103648),
+    ),
+    FauBuilding(
+      id: 'ah52',
+      code: 'AH-52',
+      name: 'Dorothy F. Schmidt Center for Arts and Humanities (AH-52)',
+      position: LatLng(26.369743, -80.101365),
+    ),
+    FauBuilding(
+      id: 'al9',
+      code: 'AL-9',
+      name: 'Dorothy F. Schmidt Arts and Letters (AL-9)',
+      position: LatLng(26.369474, -80.102208),
+    ),
+    FauBuilding(
+      id: 'au31a',
+      code: 'AU-31A',
+      name: 'Carole & Barry Kaye Performing Arts Auditorium (AU-31A)',
+      position: LatLng(26.370302, -80.105596),
+    ),
+    FauBuilding(
+      id: 'az79',
+      code: 'AZ-79',
+      name: 'Memory & Wellness Center, Louis & Anne Green (AZ-79)',
+      position: LatLng(26.379654, -80.097165),
+    ),
+    FauBuilding(
+      id: 'bb48',
+      code: 'BB-48',
+      name: 'Baseball Stadium (BB-48)',
+      position: LatLng(26.370815, -80.109459),
     ),
     FauBuilding(
       id: 'bc71',
       code: 'BC-71',
       name: 'Charles E. Schmidt Biomedical Science Center (BC-71)',
-      position: LatLng(26.373263, -80.100446),
+      position: LatLng(26.373296, -80.100442),
+    ),
+    FauBuilding(
+      id: 'bk76',
+      code: 'BK-76',
+      name: 'Bookstore (BK-76)',
+      position: LatLng(26.370663, -80.103727),
+    ),
+    FauBuilding(
+      id: 'bs12',
+      code: 'BS-12',
+      name: 'Behavioral Sciences (BS-12)',
+      position: LatLng(26.372992, -80.102838),
+    ),
+    FauBuilding(
+      id: 'bu86',
+      code: 'BU-86',
+      name: 'College of Business (BU-86)',
+      position: LatLng(26.373213, -80.104676),
+    ),
+    FauBuilding(
+      id: 'ce31d',
+      code: 'CE-31D',
+      name: 'Continuing Education Hall (CE-31D)',
+      position: LatLng(26.370530, -80.106951),
     ),
     FauBuilding(
       id: 'cm22',
       code: 'CM-22',
       name: 'Computer Center (CM-22)',
-      position: LatLng(26.372528, -80.104044),
+      position: LatLng(26.372498, -80.104066),
+    ),
+    FauBuilding(
+      id: 'co69',
+      code: 'CO-69',
+      name: 'Campus Operations & Police (CO-69)',
+      position: LatLng(26.378060, -80.097316),
+    ),
+    FauBuilding(
+      id: 'cr31e',
+      code: 'CR-31E',
+      name: 'Student Activities Center (CR-31E)',
+      position: LatLng(26.369951, -80.106673),
+    ),
+    FauBuilding(
+      id: 'cu97',
+      code: 'CU-97',
+      name: 'Culture & Society Building (CU-97)',
+      position: LatLng(26.368409, -80.101906),
+    ),
+    FauBuilding(
+      id: 'dm6',
+      code: 'DM-6',
+      name: 'Nations North Residence Hall - Algonquin (DM-6)',
+      position: LatLng(26.369466, -80.104897),
+    ),
+    FauBuilding(
+      id: 'dp49',
+      code: 'DP-49',
+      name: 'Gladys Davis Pavilion (DP-49)',
+      position: LatLng(26.372508, -80.107069),
+    ),
+    FauBuilding(
+      id: 'ds87',
+      code: 'DS-87',
+      name: 'Desantis Pavilion (DS-87)',
+      position: LatLng(26.373398, -80.104460),
+    ),
+    FauBuilding(
+      id: 'ed47',
+      code: 'ED-47',
+      name: 'College of Education (ED-47)',
+      position: LatLng(26.373268, -80.105829),
+    ),
+    FauBuilding(
+      id: 'ee96',
+      code: 'EE-96',
+      name: 'Engineering & Computer Science (EE-96)',
+      position: LatLng(26.372883, -80.098079),
+    ),
+    FauBuilding(
+      id: 'eg36',
+      code: 'EG-36',
+      name: 'College of Engineering West (EG-36)',
+      position: LatLng(26.370577, -80.104460),
+    ),
+    FauBuilding(
+      id: 'fa94',
+      code: 'FA-94',
+      name: 'Marleen & Harold Forkas Alumni Center (FA-94)',
+      position: LatLng(26.374215, -80.103465),
+    ),
+    FauBuilding(
+      id: 'fl24',
+      code: 'FL-24',
+      name: 'Fleming Hall (FL-24)',
+      position: LatLng(26.373073, -80.103857),
+    ),
+    FauBuilding(
+      id: 'fw23',
+      code: 'FW-23',
+      name: 'Fleming West (FW-23)',
+      position: LatLng(26.373242, -80.104207),
+    ),
+    FauBuilding(
+      id: 'gn73',
+      code: 'GN-73',
+      name: 'General Classroom North (GN-73)',
+      position: LatLng(26.373214, -80.102372),
+    ),
+    FauBuilding(
+      id: 'gp92',
+      code: 'GP-92',
+      name: 'Glades Park Towers (GP-92)',
+      position: LatLng(26.367746, -80.104263),
+    ),
+    FauBuilding(
+      id: 'gs2',
+      code: 'GS-2',
+      name: 'General Classroom South (GS-2)',
+      position: LatLng(26.371073, -80.102823),
+    ),
+    FauBuilding(
+      id: 'gy38',
+      code: 'GY-38',
+      name: 'The Burrow Arena (GY-38)',
+      position: LatLng(26.372357, -80.109352),
+    ),
+    FauBuilding(
+      id: 'hp89',
+      code: 'HP-89',
+      name: 'Heritage Park Towers (HP-89)',
+      position: LatLng(26.369451, -80.103761),
+    ),
+    FauBuilding(
+      id: 'ir70',
+      code: 'IR-70',
+      name: 'Indian River Towers (IR-70)',
+      position: LatLng(26.368233, -80.103209),
+    ),
+    FauBuilding(
+      id: 'is4',
+      code: 'IS-4',
+      name: 'Instructional Services (IS-4)',
+      position: LatLng(26.371261, -80.103649),
+    ),
+    FauBuilding(
+      id: 'kh25',
+      code: 'KH-25',
+      name: 'Barry Kaye Hall (KH-25)',
+      position: LatLng(26.373115, -80.103473),
+    ),
+    FauBuilding(
+      id: 'll31c',
+      code: 'LL-31C',
+      name: 'Friedberg Lifelong Learning Center (LL-31C)',
+      position: LatLng(26.370811, -80.106865),
+    ),
+    FauBuilding(
+      id: 'lo31b',
+      code: 'LO-31B',
+      name: 'Live Oak Pavilion (LO-31B)',
+      position: LatLng(26.370781, -80.105759),
+    ),
+    FauBuilding(
+      id: 'ly3',
+      code: 'LY-3',
+      name: 'S E Wimberly Library (LY-3)',
+      position: LatLng(26.371845, -80.104117),
+    ),
+    FauBuilding(
+      id: 'ly3a',
+      code: 'LY-3A',
+      name: 'Hillel Jewish Life Center (LY-3A)',
+      position: LatLng(26.371831, -80.103370),
+    ),
+    FauBuilding(
+      id: 'nu84',
+      code: 'NU-84',
+      name: 'Christine E Lynn College of Nursing (NU-84)',
+      position: LatLng(26.370830, -80.100582),
+    ),
+    FauBuilding(
+      id: 'od93',
+      code: 'OD-93',
+      name: 'Office Depot Center for Executive Education (OD-93)',
+      position: LatLng(26.373414, -80.104990),
+    ),
+    FauBuilding(
+      id: 'pa51',
+      code: 'PA-51',
+      name: 'Dorothy F. Schmidt Performing Arts (PA-51)',
+      position: LatLng(26.368891, -80.101744),
+    ),
+    FauBuilding(
+      id: 'pg35',
+      code: 'PG-35',
+      name: 'Plant Growth Complex (PG-35)',
+      position: LatLng(26.373576, -80.103010),
+    ),
+    FauBuilding(
+      id: 'pr75',
+      code: 'PR-75',
+      name: 'Eleanor R. Baldwin House (PR-75)',
+      position: LatLng(26.370914, -80.095192),
+    ),
+    FauBuilding(
+      id: 'ps55',
+      code: 'PS-55',
+      name: 'Physical Science (PS-55)',
+      position: LatLng(26.372671, -80.101989),
+    ),
+    FauBuilding(
+      id: 'pw62',
+      code: 'PW-62',
+      name: 'B.P.W. Scholarship House (PW-62)',
+      position: LatLng(26.367102, -80.096201),
+    ),
+    FauBuilding(
+      id: 'rc91',
+      code: 'RC-91',
+      name: 'Recreation & Fitness Center (RC-91)',
+      position: LatLng(26.374130, -80.102294),
+    ),
+    FauBuilding(
+      id: 'rd01',
+      code: 'RD-01',
+      name: 'Innovation Centre 1 (RD-01)',
+      position: LatLng(26.385306, -80.097104),
+    ),
+    FauBuilding(
+      id: 'rd02',
+      code: 'RD-02',
+      name: 'Innovation Centre 2 (RD-02)',
+      position: LatLng(26.383796, -80.097171),
+    ),
+    FauBuilding(
+      id: 'sb68',
+      code: 'SB-68',
+      name: 'Softball Stadium (SB-68)',
+      position: LatLng(26.373551, -80.110084),
+    ),
+    FauBuilding(
+      id: 'sc1',
+      code: 'SC-1',
+      name: 'Sanson Life Science (SC-1)',
+      position: LatLng(26.372423, -80.102987),
+    ),
+    FauBuilding(
+      id: 'se43',
+      code: 'SE-43',
+      name: 'Science & Engineering (SE-43)',
+      position: LatLng(26.373294, -80.101803),
+    ),
+    FauBuilding(
+      id: 'sh46',
+      code: 'SH-46',
+      name: 'Student Housing Services (SH-46)',
+      position: LatLng(26.368800, -80.104836),
+    ),
+    FauBuilding(
+      id: 'so44',
+      code: 'SO-44',
+      name: 'Social Sciences (SO-44)',
+      position: LatLng(26.370683, -80.101659),
+    ),
+    FauBuilding(
+      id: 'ss8',
+      code: 'SS-8',
+      name: 'Student Services (SS-8)',
+      position: LatLng(26.370406, -80.103054),
+    ),
+    FauBuilding(
+      id: 'ss8w',
+      code: 'SS-8W',
+      name: 'Student Health Services (SS-8W)',
+      position: LatLng(26.370394, -80.103400),
+    ),
+    FauBuilding(
+      id: 'su80',
+      code: 'SU-80',
+      name: 'Student Support Services (SU-80)',
+      position: LatLng(26.369258, -80.105631),
+    ),
+    FauBuilding(
+      id: 'un31',
+      code: 'UN-31',
+      name: 'Student Union (UN-31)',
+      position: LatLng(26.370257, -80.106234),
+    ),
+    FauBuilding(
+      id: 'ut5',
+      code: 'UT-5',
+      name: 'Utilities (UT-5)',
+      position: LatLng(26.372408, -80.104928),
+    ),
+    FauBuilding(
+      id: 'va53',
+      code: 'VA-53',
+      name: 'Dorothy F. Schmidt Visual Arts (VA-53)',
+      position: LatLng(26.369090, -80.100889),
     ),
   ];
 
-@override
+  // ---- map ----
+  MapLibreMapController? _map;
+  bool _styleReady = false;
+  bool _introPlayed = false;
+  bool _is3D = true;
+  late final _SourceSync _sync = _SourceSync(_sendSource);
+  Offset? _pointerDownAt;
+  double _camBearing = 0;
+
+  /// Size of the map area (below the app bar), set by the LayoutBuilder.
+  double _mapHeight = 0;
+  double _mapWidth = 0;
+
+  // ---- subscriptions ----
+  StreamSubscription<geo.Position>? _positionSub;
+  StreamSubscription<DatabaseEvent>? _parkingSub;
+  StreamSubscription<CompassEvent>? _compassSub;
+  Timer? _simTimer;
+
+  // ---- smooth arrow + camera (live GPS and Simulate Run) ----
+  // Positions arrive about once a second (GPS) or every 0.5 s (simulation).
+  // The arrow glides from where it is to each new position over about the
+  // time between positions. In focus mode the camera makes ONE linear ease per
+  // position with the same timing, so arrow and camera stay locked together
+  // while the map only gets about one camera command a second. (Moving the
+  // camera every frame cancelled the user's drag and wheel-zoom gestures.)
+  static const Duration _glideFrame = Duration(milliseconds: 33); // ~30 fps
+  static const double _glideSnapMeters = 100; // bigger jumps don't animate
+  Timer? _glideTimer;
+  LatLng? _shownPos; // where the arrow is drawn; null = draw at _userPos
+  LatLng? _glideFrom;
+  LatLng? _glideTo;
+  DateTime _glideStart = DateTime.fromMillisecondsSinceEpoch(0);
+  Duration _glideDuration = Duration.zero;
+  DateTime _lastFixAt = DateTime.fromMillisecondsSinceEpoch(0);
+  int _glideFrameCount = 0;
+
+  // ---- detecting the user moving the map in focus mode ----
+  // The app always knows where its own camera should be: the target of an
+  // instant move, or a point along a linear ease. If the map reports
+  // anything else, the user dragged, zoomed, rotated or tilted it, so focus
+  // mode turns off and the camera stays exactly where it is.
+  /// Deliberate animations (focus-mode intro, 2D/3D switch) pause the check.
+  DateTime _camAnimUntil = DateTime.fromMillisecondsSinceEpoch(0);
+  LatLng? _cmdTarget; // where the latest camera command ends up
+  double _cmdBearing = 0;
+  // The command before that: a camera report can arrive just after the next
+  // command was sent, so matching it also counts as "ours".
+  LatLng? _prevCmdTarget;
+  double _prevCmdBearing = 0;
+  // Start of the current linear ease (null = instant move, no ease).
+  LatLng? _easeFrom;
+  double _easeFromBearing = 0;
+  DateTime _easeStart = DateTime.fromMillisecondsSinceEpoch(0);
+  Duration _easeDuration = Duration.zero;
+
+  /// The "arrow low on screen" padding stays on after focus mode ends, so the
+  /// view doesn't jump; it is removed right before the next app animation.
+  bool _navPaddingOn = false;
+
+  void _setCameraCommand(
+    LatLng target,
+    double bearing, {
+    LatLng? easeFrom,
+    double easeFromBearing = 0,
+    Duration easeDuration = Duration.zero,
+  }) {
+    _prevCmdTarget = _cmdTarget;
+    _prevCmdBearing = _cmdBearing;
+    _cmdTarget = target;
+    _cmdBearing = bearing;
+    _easeFrom = easeFrom;
+    _easeFromBearing = easeFromBearing;
+    _easeStart = DateTime.now();
+    _easeDuration = easeDuration;
+  }
+
+  /// 0..1 progress of the current ease (1 when there is none).
+  double get _easeT {
+    if (_easeFrom == null || _easeDuration == Duration.zero) return 1;
+    final elapsed = DateTime.now().difference(_easeStart).inMilliseconds;
+    return (elapsed / _easeDuration.inMilliseconds).clamp(0.0, 1.0);
+  }
+
+  /// Where the app's camera should be right now.
+  LatLng? _expectedCamTarget() {
+    final cmd = _cmdTarget;
+    final from = _easeFrom;
+    if (cmd == null || from == null) return cmd;
+    return Geo.lerp(from, cmd, _easeT);
+  }
+
+  double _expectedCamBearing() {
+    if (_easeFrom == null) return _cmdBearing;
+    final d = Geo.shortestAngle(_easeFromBearing, _cmdBearing);
+    return (_easeFromBearing + d * _easeT) % 360;
+  }
+
+  int _simTickCount = 0;
+
+  /// Dev mode: last tapped coordinate (notifier = no full rebuild).
+  final ValueNotifier<LatLng?> _devTap = ValueNotifier(null);
+
+  // ---- search box ----
+  final TextEditingController _searchCtrl = TextEditingController();
+  final FocusNode _searchFocus = FocusNode();
+  String _searchQuery = '';
+
+  // ---- location ----
+  LatLng? _userPos;
+  double _heading = 0;
+  DateTime _lastGpsHeadingAt = DateTime.fromMillisecondsSinceEpoch(0);
+  bool _isLocating = false;
+  String _gpsStatus = 'Searching for GPS...';
+
+  // ---- modes ----
+  bool _navTracking = false;
+  bool _devMode = false;
+
+  /// Dev: when on, a map tap moves the location arrow there.
+  bool _clickToMove = false;
+
+  /// Last time a finger/mouse went down on one of our controls over the map.
+  /// On web the map also receives that click, so map clicks right after it
+  /// are ignored (no arrow move or building pick from pressing a button).
+  DateTime _lastOverlayPressAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// Wraps a control that sits on top of the map so presses on it never
+  /// "click through" to the map underneath. On web the map is a separate
+  /// browser element, so without PointerInterceptor it also receives the
+  /// mouse: scrolling the suggestion list zoomed the map and a quick double
+  /// click on the guidance card double-click-zoomed it, which (correctly,
+  /// from the map's point of view) switched focus mode off. On phones it
+  /// does nothing extra.
+  Widget _tapShield(Widget child) => PointerInterceptor(
+        child: Listener(
+          onPointerDown: (_) => _lastOverlayPressAt = DateTime.now(),
+          child: child,
+        ),
+      );
+  bool _devLocationOverride = false;
+  bool _isSimulating = false;
+
+  // ---- routing ----
+  FauBuilding? _selectedBuilding;
+  PathResult? _walkResult;
+  String? _routeLotId;
+  List<LatLng> _fullRoute = const [];
+  List<double> _routeSuffix = const [];
+  List<LatLng> _displayRoute = const [];
+  int _routeSeg = 0;
+  double _routeRemaining = 0;
+  double _distToRoute = 0;
+  bool _arrived = false;
+  int _routeRequestId = 0;
+  bool _isRouting = false;
+  DateTime _lastRouteAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  Map<String, Map<String, dynamic>> _liveLots = {};
+
+  /// Lot whose spot bubble is open over the map (tap a lot to show it).
+  String? _openLotId;
+
+  /// Where that lot's dot is on screen, in logical pixels from the map's
+  /// top-left; the bubble is drawn just above it.
+  Offset? _lotAnchor;
+  bool _anchorBusy = false;
+  bool _anchorDirty = false;
+
+  bool get _isOnCampus => _userPos != null && _inCampus(_userPos!);
+
+  // ==========================================
+  // LIFECYCLE
+  // ==========================================
+
+  @override
   void initState() {
     super.initState();
-    _cameraAnimController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 250),
-    );
-
-    // ⭐️ Drive camera from the controller smoothly
-    _cameraAnimController!.addListener(() {
-      if (_rotationAnimation != null && _currentUserLocation != null) {
-        _mapController.move(_currentUserLocation!, 18.2);
-        _mapController.rotate(_rotationAnimation!.value);
-      }
-    });
-
+    _searchFocus.addListener(_onSearchFocusChanged);
     _startLiveLocationTracking();
     _startCompassTracking();
     _listenToFirebaseParking();
   }
 
-  
-@override
+  @override
   void dispose() {
-    _simulationTimer?.cancel(); 
-    _cameraAnimController?.dispose();
-    _positionStreamSub?.cancel();
+    _simTimer?.cancel();
+    _glideTimer?.cancel();
+    _walkRevealTimer?.cancel();
+    _walkSimTimer?.cancel();
+    _positionSub?.cancel();
     _compassSub?.cancel();
     _parkingSub?.cancel();
+    _devTap.dispose();
+    _searchFocus.dispose();
+    _searchCtrl.dispose();
+    _styleReady = false;
+    _map = null; // the MapLibreMap widget disposes its own controller
     super.dispose();
   }
 
-  // ⭐️ COMPASS TRACKING: headingForCameraMode + Auto-turn camera in Navigation Mode
-void _startCompassTracking() {
-    _compassSub?.cancel();
-    _compassSub = FlutterCompass.events?.listen((CompassEvent event) {
-      if (!mounted) return;
+  // ==========================================
+  // MAP SETUP
+  // ==========================================
 
-      // ⭐️ Do not fight the map camera during 20 mph route simulation
-      if (_isSimulatingRoute) return;
-
-      final double? h = event.headingForCameraMode ?? event.heading;
-      if (h != null) {
-        // Filter out microscopic sensor jitter (ignore changes < 2.0 degrees)
-        if ((h - _currentHeading).abs() < 2.0) return;
-
-        setState(() {
-          _currentHeading = h;
-        });
-
-        final bool isCampus = _currentUserLocation != null &&
-            _fauBounds.contains(_currentUserLocation!);
-
-        if (_isNavigationTracking && isCampus && _currentUserLocation != null) {
-          _smoothMoveAndRotate(_currentUserLocation!, h);
-        }
-      }
-    });
-  }
-
-
-
-
-void _trimRouteBehindUser(LatLng userPos) {
-    if (_fullCalculatedPoints.length < 2) return;
-
-    const Distance distCalc = Distance();
-    int closestIndex = 0;
-    double minDistance = double.infinity;
-
-    // Find the closest upcoming or current waypoint on the master route
-    for (int i = 0; i < _fullCalculatedPoints.length; i++) {
-      final d = distCalc.as(LengthUnit.Meter, userPos, _fullCalculatedPoints[i]);
-      if (d < minDistance) {
-        minDistance = d;
-        closestIndex = i;
-      }
+  Future<void> _guard(Future<Object?> Function() f) async {
+    try {
+      await f();
+    } catch (e) {
+      debugPrint('[map] $e');
     }
-
-    // Keep only the points from the closest waypoint forward to the destination
-    final remainingPoints = _fullCalculatedPoints.sublist(closestIndex);
-
-    // Anchor the start of the line directly to the user's puck
-    final trimmedPath = [userPos, ...remainingPoints];
-
-    setState(() {
-      if (_currentRoute != null) {
-        _currentRoute = PathResult(
-          lotId: _currentRoute!.lotId,
-          pathPoints: trimmedPath,
-          totalDistanceMeters: RealRoadRouter.calculateDistance(trimmedPath),
-        );
-      }
-    });
   }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-  void _listenToFirebaseParking() {
-    _parkingSub = FirebaseDatabase.instance.ref('demo').onValue.listen((event) {
-      final rawData = event.snapshot.value;
-      if (rawData == null) return;
-
-      final rootData = Map<dynamic, dynamic>.from(rawData as Map);
-      final rawLots = rootData['lots'] != null
-          ? Map<dynamic, dynamic>.from(rootData['lots'] as Map)
-          : <dynamic, dynamic>{};
-      final rawUnits = rootData['units'] != null
-          ? Map<dynamic, dynamic>.from(rootData['units'] as Map)
-          : <dynamic, dynamic>{};
-
-      final Map<String, int> capacityMap = {};
-      final Map<String, int> occupiedMap = {};
-
-      rawUnits.forEach((unitKey, unitVal) {
-        if (unitVal is Map) {
-          final unitData = Map<String, dynamic>.from(unitVal);
-          final String? targetLot = unitData['lot']?.toString();
-          final bool isOccupied = unitData['occupied'] == true;
-
-          if (targetLot != null && targetLot.isNotEmpty) {
-            capacityMap[targetLot] = (capacityMap[targetLot] ?? 0) + 1;
-            if (isOccupied) {
-              occupiedMap[targetLot] = (occupiedMap[targetLot] ?? 0) + 1;
-            }
-          }
-        }
-      });
-
-      final Map<String, Map<String, dynamic>> updatedLots = {};
-
-      rawLots.forEach((lotKey, lotVal) {
-        final String lotId = lotKey.toString();
-        final lotData = lotVal is Map ? Map<String, dynamic>.from(lotVal) : <String, dynamic>{};
-
-        final String lotName = lotData['name']?.toString() ??
-            (lotId == 'lot06'
-                ? 'Lot 6'
-                : lotId == 'lot07'
-                    ? 'Lot 7'
-                    : lotId.toUpperCase());
-
-        final int totalUnits = capacityMap[lotId] ?? 0;
-        final int occupiedUnits = occupiedMap[lotId] ?? 0;
-
-        final double ratio = totalUnits > 0 ? (occupiedUnits / totalUnits) : 0.0;
-        Color badgeColor;
-        if (totalUnits == 0) {
-          badgeColor = Colors.grey;
-        } else if (ratio < 0.60) {
-          badgeColor = const Color(0xFFC6F24A);
-        } else if (ratio < 0.90) {
-          badgeColor = const Color(0xFFF5A623);
-        } else {
-          badgeColor = const Color(0xFFF2694C);
-        }
-
-        updatedLots[lotId] = {
-          'name': lotName,
-          'status': '$occupiedUnits/$totalUnits',
-          'occupied': occupiedUnits,
-          'capacity': totalUnits,
-          'position': _lotPositions[lotId] ?? const LatLng(26.373000, -80.103000),
-          'color': badgeColor,
-        };
-      });
-
-      if (mounted) {
-        setState(() {
-          _liveLots = updatedLots;
-        });
-
-        if (_selectedBuilding != null) {
-          _updateNavigationRoute(_selectedBuilding!);
-        }
-      }
-    });
+  Future<void> _sendSource(String id, Map<String, dynamic> data) async {
+    final m = _map;
+    if (m == null || !_styleReady || !mounted) return;
+    await m.setGeoJsonSource(id, data);
   }
 
-  Future<void> _updateNavigationRoute(FauBuilding building) async {
-    if (_liveLots.isEmpty) return;
+  /// Runs on first load AND again if Android recreates the map
+  /// (a new style discards every source and layer we added).
+  Future<void> _onStyleLoaded() async {
+    final m = _map;
+    if (m == null) return;
+    _styleReady = false;
+    await _setupStyle(m);
+    if (!mounted || _map != m) return;
+    _styleReady = true;
+    _pushAll();
 
-    final currentReqId = ++_routeRequestId;
+    if (!_introPlayed) {
+      _introPlayed = true;
+      _animateTo(
+        CameraPosition(
+          target: _fauCenter,
+          zoom: _overviewZoom,
+          bearing: 20,
+          tilt: _is3D ? _overviewTilt : 0,
+        ),
+        const Duration(milliseconds: 2500),
+      );
+    }
+  }
 
-    // ⭐️ If _currentUserLocation is null, grab the live GPS fix immediately before falling back
-    LatLng startPos;
-    if (_currentUserLocation != null) {
-      startPos = _currentUserLocation!;
-    } else {
+  Future<void> _setupStyle(MapLibreMapController m) async {
+    Future<bool> safe(String what, Future<Object?> Function() f) async {
       try {
-        final pos = await Geolocator.getCurrentPosition(
-          locationSettings: const LocationSettings(
-            accuracy: LocationAccuracy.medium,
-            timeLimit: Duration(seconds: 3),
-          ),
-        );
-        startPos = LatLng(pos.latitude, pos.longitude);
-        _currentUserLocation = startPos;
-      } catch (_) {
-        startPos = const LatLng(26.3685, -80.1020); // Emergency fallback only if GPS is disabled/timed out
+        await f();
+        return true;
+      } catch (e) {
+        debugPrint('[map] $what failed: $e');
+        return false;
       }
     }
 
-    final bestLotResult = CampusPathfinder.findBestAvailableRoute(
-      buildingPos: building.position,
-      lots: _liveLots,
+    final empty = _fc(const <Map<String, dynamic>>[]);
+
+    var layerIds = const <String>[];
+    var sourceIds = const <String>[];
+    await safe('read style', () async {
+      layerIds = (await m.getLayerIds()).map((e) => e.toString()).toList();
+      sourceIds = (await m.getSourceIds()).map((e) => e.toString()).toList();
+      return null;
+    });
+
+    // Keep street / place names above our 3D buildings.
+    String? firstLabel;
+    for (final id in layerIds) {
+      if (id.contains('label') || id.startsWith('place') || id.startsWith('poi')) {
+        firstLabel = id;
+        break;
+      }
+    }
+
+    // Hide the style's own 3D buildings (we draw our own) and its POI
+    // icons, so the only markers on the map are your campus nodes.
+    for (final id in layerIds) {
+      final isStyle3d = id.contains('building-3d') || id.contains('building_3d');
+      final isPoi = id.startsWith('poi');
+      if (isStyle3d || isPoi) {
+        await safe('hide $id', () => m.setLayerVisibility(id, false));
+      }
+    }
+
+    // ---- 3D buildings from OpenStreetMap (OpenMapTiles schema) ----
+    var buildings3d = false;
+    if (sourceIds.contains('openmaptiles')) {
+      const height = ['coalesce', ['get', 'render_height'], 8];
+      const base = ['coalesce', ['get', 'render_min_height'], 0];
+      buildings3d = await safe(
+        '3d buildings',
+        () => m.addFillExtrusionLayer(
+          'openmaptiles',
+          _layerBuildings3d,
+          const FillExtrusionLayerProperties(
+            fillExtrusionColor: [
+              'interpolate', ['linear'], height,
+              0, '#EDE8DD',
+              15, '#E0D9CB',
+              40, '#D1C8B6',
+              90, '#BFB5A1',
+            ],
+            // Buildings "grow" out of the ground as you zoom in. No 3D below
+            // zoom 15, where it costs a lot and adds little.
+            fillExtrusionHeight: [
+              'interpolate', ['linear'], ['zoom'],
+              15, 0,
+              16, height,
+            ],
+            fillExtrusionBase: [
+              'interpolate', ['linear'], ['zoom'],
+              15, 0,
+              16, base,
+            ],
+            fillExtrusionOpacity: 0.9,
+          ),
+          sourceLayer: 'building',
+          minzoom: 15,
+          belowLayerId: firstLabel,
+          enableInteraction: false,
+        ),
+      );
+    }
+
+    // Soft sunlight so 3D buildings get shaded walls instead of flat color.
+    await safe(
+      'light',
+      () => m.setLight(
+        const LightProperties(
+          anchor: 'map',
+          position: [1.3, 210, 35], // radial, azimuth (from SSW), polar
+          intensity: 0.4,
+        ),
+      ),
     );
 
-    if (bestLotResult == null) {
-      if (mounted) {
-        setState(() => _currentRoute = null);
+    // ---- our GeoJSON sources (start empty, filled by _pushAll) ----
+    for (final id in [
+      _srcRoute,
+      _srcWalk,
+      _srcLots,
+      _srcBuildings,
+      _srcPuck,
+    ]) {
+      await safe('source $id', () => m.addGeoJsonSource(id, empty));
+    }
+
+    // ---- route line: under the 3D buildings so they occlude it correctly ----
+    final routeBelow = buildings3d ? _layerBuildings3d : firstLabel;
+    await safe(
+      'route casing',
+      () => m.addLineLayer(
+        _srcRoute,
+        'sc-route-casing',
+        const LineLayerProperties(
+          lineColor: '#000000',
+          lineWidth: 10.0,
+          lineOpacity: 0.75,
+          lineCap: 'round',
+          lineJoin: 'round',
+        ),
+        belowLayerId: routeBelow,
+        enableInteraction: false,
+      ),
+    );
+    await safe(
+      'route line',
+      () => m.addLineLayer(
+        _srcRoute,
+        'sc-route-line',
+        LineLayerProperties(
+          lineColor: _hex(kAccent),
+          lineWidth: 6.0,
+          lineCap: 'round',
+          lineJoin: 'round',
+        ),
+        belowLayerId: routeBelow,
+        enableInteraction: false,
+      ),
+    );
+
+    // ---- walking line (lot -> building), shown once you've parked ----
+    // Footstep-style dark dots over a soft accent glow, the usual "walk this
+    // part" look, clearly different from the solid driving route.
+    await safe(
+      'walk glow',
+      () => m.addLineLayer(
+        _srcWalk,
+        'sc-walk-glow',
+        LineLayerProperties(
+          lineColor: _hex(kAccent),
+          lineWidth: 11.0,
+          lineOpacity: 0.35,
+          lineBlur: 2.0,
+          lineCap: 'round',
+          lineJoin: 'round',
+        ),
+        belowLayerId: routeBelow,
+        enableInteraction: false,
+      ),
+    );
+    await safe(
+      'walk dots',
+      () => m.addLineLayer(
+        _srcWalk,
+        'sc-walk-dots',
+        LineLayerProperties(
+          lineColor: _hex(kOnAccent),
+          lineWidth: 5.0,
+          lineDasharray: const [0, 1.8], // zero-length dashes + round caps = dots
+          lineCap: 'round',
+          lineJoin: 'round',
+        ),
+        belowLayerId: routeBelow,
+        enableInteraction: false,
+      ),
+    );
+
+    // ---- building markers ----
+    // ~60 buildings: dots stay small when zoomed out and grow as you zoom
+    // in; code labels only appear once zoomed in, and labels that would
+    // overlap are hidden. The selected building is always big and labelled.
+    const isSelected = ['==', ['get', 'selected'], true];
+    const notSelected = ['!=', ['get', 'selected'], true];
+    await safe(
+      'building dots',
+      () => m.addCircleLayer(
+        _srcBuildings,
+        'sc-buildings-dot',
+        CircleLayerProperties(
+          circleRadius: [
+            'interpolate', ['linear'], ['zoom'],
+            15, ['case', isSelected, 7, 2.5],
+            18, ['case', isSelected, 9, 5],
+          ],
+          circleColor: ['case', isSelected, _hex(kAccent), _hex(kDev)],
+          circleStrokeColor: '#000000',
+          circleStrokeWidth: [
+            'interpolate', ['linear'], ['zoom'],
+            15, ['case', isSelected, 2, 1],
+            18, 2,
+          ],
+        ),
+        enableInteraction: false,
+      ),
+    );
+    await safe(
+      'building labels',
+      () => m.addSymbolLayer(
+        _srcBuildings,
+        'sc-buildings-label',
+        SymbolLayerProperties(
+          textField: ['get', 'code'],
+          textFont: _fonts,
+          textSize: 11,
+          textColor: '#FFFFFF',
+          textHaloColor: '#000000',
+          textHaloWidth: 1.6,
+          textAnchor: 'top',
+          textOffset: [0, 0.9],
+          textAllowOverlap: false, // hide labels that would collide
+        ),
+        filter: notSelected,
+        minzoom: 16.3,
+        enableInteraction: false,
+      ),
+    );
+    await safe(
+      'selected building label',
+      () => m.addSymbolLayer(
+        _srcBuildings,
+        'sc-buildings-label-selected',
+        SymbolLayerProperties(
+          textField: ['get', 'code'],
+          textFont: _fonts,
+          textSize: 14,
+          textColor: _hex(kAccent),
+          textHaloColor: '#000000',
+          textHaloWidth: 1.6,
+          textAnchor: 'top',
+          textOffset: [0, 0.9],
+          textAllowOverlap: true,
+          textIgnorePlacement: true,
+        ),
+        filter: isSelected,
+        enableInteraction: false,
+      ),
+    );
+
+    // ---- lot markers: status-coloured dot with the label underneath ----
+    // Dot and label share the lot's live status colour (green / amber / red).
+    // The recommended lot gets a bigger dot with an accent ring.
+    const isBestLot = ['==', ['get', 'best'], true];
+    await safe(
+      'lot dots',
+      () => m.addCircleLayer(
+        _srcLots,
+        'sc-lots-dot',
+        CircleLayerProperties(
+          circleRadius: ['case', isBestLot, 8, 6],
+          circleColor: ['get', 'color'],
+          circleStrokeColor: ['case', isBestLot, _hex(kAccent), '#000000'],
+          circleStrokeWidth: ['case', isBestLot, 3, 2],
+        ),
+        enableInteraction: false,
+      ),
+    );
+    await safe(
+      'lot labels',
+      () => m.addSymbolLayer(
+        _srcLots,
+        'sc-lots-label',
+        const SymbolLayerProperties(
+          textField: ['get', 'label'],
+          textFont: _fonts,
+          textSize: ['case', isBestLot, 13, 11],
+          textColor: ['get', 'color'],
+          textHaloColor: '#000000',
+          textHaloWidth: 1.8,
+          textJustify: 'center',
+          textAnchor: 'top',
+          textOffset: [0, 0.9],
+          textAllowOverlap: true,
+          textIgnorePlacement: true,
+        ),
+        enableInteraction: false,
+      ),
+    );
+
+    // ---- user puck: flat glow + arrow that lies on the tilted map ----
+    await safe(
+      'puck glow',
+      () => m.addCircleLayer(
+        _srcPuck,
+        'sc-puck-glow',
+        CircleLayerProperties(
+          circleRadius: 22,
+          circleColor: _hex(kAccent),
+          circleOpacity: 0.22,
+          circlePitchAlignment: 'map',
+        ),
+        enableInteraction: false,
+      ),
+    );
+    await safe('puck icon', () async {
+      await m.addImage(_puckImage, await _puckIconBytes);
+      return null;
+    });
+    await safe(
+      'puck arrow',
+      () => m.addSymbolLayer(
+        _srcPuck,
+        'sc-puck-arrow',
+        const SymbolLayerProperties(
+          iconImage: _puckImage,
+          iconSize: 0.5,
+          iconRotate: ['get', 'bearing'],
+          iconRotationAlignment: 'map',
+          iconPitchAlignment: 'map',
+          iconAllowOverlap: true,
+          iconIgnorePlacement: true,
+        ),
+        enableInteraction: false,
+      ),
+    );
+  }
+
+  // ==========================================
+  // MAP DATA PUSHES
+  // ==========================================
+
+  void _pushAll() {
+    _walkShownFor = null; // a (re)loaded style starts with empty sources
+    _pushOverlays();
+    _pushRoute();
+    _pushPuck();
+  }
+
+  void _pushOverlays() {
+    _pushLots();
+    _pushBuildings();
+  }
+
+  void _pushLots() {
+    final bestId = _walkResult?.lotId;
+    final labels = <Map<String, dynamic>>[];
+
+    _liveLots.forEach((id, lot) {
+      final isBest = id == bestId;
+      labels.add(_pointFeature(lot['position'] as LatLng, {
+        'label': '${lot['name']}\n${lot['status']}',
+        // Live status colour from _parseLots (green / amber / red).
+        'color': _hex(lot['color'] as Color),
+        'best': isBest,
+      }));
+    });
+
+    _sync.push(_srcLots, _fc(labels));
+  }
+
+  void _pushBuildings() {
+    final selectedId = _selectedBuilding?.id;
+    _sync.push(
+      _srcBuildings,
+      _fc([
+        for (final b in _campusBuildings)
+          _pointFeature(b.position, {
+            'code': b.code,
+            'selected': b.id == selectedId,
+          }),
+      ]),
+    );
+  }
+
+  void _pushRoute() {
+    _sync.push(
+      _srcRoute,
+      _fc(_displayRoute.length < 2
+          ? const <Map<String, dynamic>>[]
+          : [
+              {
+                'type': 'Feature',
+                'properties': <String, dynamic>{},
+                'geometry': {
+                  'type': 'LineString',
+                  'coordinates': [for (final p in _displayRoute) _coord(p)],
+                },
+              },
+            ]),
+    );
+    _pushWalk();
+  }
+
+  // ---- walking line ----
+
+  static const Duration _walkRevealTime = Duration(milliseconds: 700);
+  Timer? _walkRevealTimer;
+  String? _walkShownFor; // lot|building currently drawn (avoids re-animating)
+
+  Map<String, dynamic> _lineFeature(List<LatLng> pts) => {
+        'type': 'Feature',
+        'properties': <String, dynamic>{},
+        'geometry': {
+          'type': 'LineString',
+          'coordinates': [for (final p in pts) _coord(p)],
+        },
+      };
+
+  /// The first [meters] of [pts] (the line "drawing itself" from the lot).
+  static List<LatLng> _pathPrefix(List<LatLng> pts, double meters) {
+    final out = <LatLng>[pts.first];
+    var left = meters;
+    for (var i = 0; i < pts.length - 1; i++) {
+      final d = Geo.meters(pts[i], pts[i + 1]);
+      if (d >= left) {
+        out.add(Geo.lerp(pts[i], pts[i + 1], d == 0 ? 0 : left / d));
+        return out;
+      }
+      left -= d;
+      out.add(pts[i + 1]);
+    }
+    return out;
+  }
+
+  /// Shows the A* walking path from the lot to the building only after
+  /// arriving at the lot; hidden the rest of the time. When it first appears
+  /// it draws itself out from the lot toward the building.
+  void _pushWalk() {
+    final walk = _walkResult;
+    final building = _selectedBuilding;
+    final show = _arrived &&
+        !_walkDone && // already walked to the building
+        walk != null &&
+        building != null &&
+        walk.pathPoints.length >= 2;
+
+    if (!show) {
+      _walkPath = const [];
+      if (_walkShownFor != null || _walkRevealTimer != null) {
+        _walkRevealTimer?.cancel();
+        _walkRevealTimer = null;
+        _walkShownFor = null;
+        _sync.push(_srcWalk, _fc(const <Map<String, dynamic>>[]));
       }
       return;
     }
 
-    final LatLng lotPos = _liveLots[bestLotResult.lotId]!['position'] as LatLng;
+    final key = '${walk.lotId}|${building.id}';
+    if (_walkShownFor == key) return; // already drawn (or drawing)
+    _walkShownFor = key;
+    // Start of the walk: lot -> building.
+    if (mounted) setState(() => _setWalkPath(walk.pathPoints));
+    _revealWalk(_walkPath);
+  }
 
-    final roadPoints = await RealRoadRouter.getRoadRoute(
-      start: startPos,
-      destination: lotPos,
+  /// Draws [pts] as the walking line, "drawing itself" from its start.
+  void _revealWalk(List<LatLng> pts) {
+    _walkRevealTimer?.cancel();
+    _walkRevealTimer = null;
+    if (pts.length < 2) return;
+    if (reduceMotion(context)) {
+      _sync.push(_srcWalk, _fc([_lineFeature(pts)]));
+      return;
+    }
+    final total = Geo.pathLength(pts);
+    final start = DateTime.now();
+    _walkRevealTimer = Timer.periodic(_glideFrame, (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      final t = (DateTime.now().difference(start).inMilliseconds /
+              _walkRevealTime.inMilliseconds)
+          .clamp(0.0, 1.0);
+      final eased = kEaseOut.transform(t);
+      final part = t >= 1 ? pts : _pathPrefix(pts, total * eased);
+      if (part.length >= 2) _sync.push(_srcWalk, _fc([_lineFeature(part)]));
+      if (t >= 1) {
+        timer.cancel();
+        _walkRevealTimer = null;
+      }
+    });
+  }
+
+  void _pushPuck() {
+    final p = _shownPos ?? _userPos;
+    _sync.push(
+      _srcPuck,
+      _fc(p == null
+          ? const <Map<String, dynamic>>[]
+          : [
+              _pointFeature(p, {'bearing': _puckBearing()}),
+            ]),
     );
+  }
 
-    if (!mounted || currentReqId != _routeRequestId) return;
+  // ==========================================
+  // CAMERA
+  // ==========================================
 
-    setState(() {
-      _fullCalculatedPoints = List<LatLng>.from(roadPoints);
-      _currentRoute = PathResult(
-        lotId: bestLotResult.lotId,
-        pathPoints: List<LatLng>.from(roadPoints),
-        totalDistanceMeters: RealRoadRouter.calculateDistance(roadPoints),
+  void _animateTo(CameraPosition p, Duration d) {
+    final m = _map;
+    if (m == null) return;
+    // Outside focus mode, drop the leftover "arrow low" padding first; the
+    // animation that follows hides the shift.
+    if (!_navTracking) _clearNavPadding();
+    // Don't mistake our own animation for the user moving the map, and keep
+    // focus-mode camera updates from cutting it off.
+    _camAnimUntil = DateTime.now().add(d + const Duration(milliseconds: 150));
+    _setCameraCommand(p.target, p.bearing);
+    _guard(() => m.animateCamera(CameraUpdate.newCameraPosition(p), duration: d));
+  }
+
+  /// Called for every camera change. In focus mode, a camera that isn't where
+  /// the app put it means the user dragged, zoomed, rotated or tilted the map,
+  /// so focus mode switches off and leaves the camera where they put it.
+  /// When the camera comes to rest after a gesture, ease any tilt steeper
+  /// than [_maxTilt] back to it (the plugin has no max-pitch setting), so the
+  /// map never sits at a horizon view that drops frames.
+  void _onCameraIdle() {
+    if (_openLotId != null) _updateLotAnchor(); // settle the lot bubble
+    final m = _map;
+    final cam = m?.cameraPosition;
+    if (m == null || cam == null || !_styleReady) return;
+    if (DateTime.now().isBefore(_camAnimUntil)) return;
+    if (cam.tilt > _maxTilt + 0.5) {
+      _guard(() => m.animateCamera(
+            CameraUpdate.tiltTo(_maxTilt),
+            duration: const Duration(milliseconds: 350),
+          ));
+    }
+  }
+
+  /// Camera reports in a row that disagree with where the app put the camera.
+  int _camOffCount = 0;
+
+  void _onCameraMove(CameraPosition cam) {
+    // Keep the lot bubble on top of its dot while the map moves.
+    if (_openLotId != null) _updateLotAnchor();
+    if (!_navTracking) return;
+    if (DateTime.now().isBefore(_camAnimUntil)) {
+      _camOffCount = 0;
+      return;
+    }
+    final expected = _expectedCamTarget();
+    if (expected == null) return;
+
+    bool near(LatLng? target, double bearing) =>
+        target != null &&
+        Geo.meters(cam.target, target) <= 2.0 &&
+        Geo.shortestAngle(cam.bearing, bearing).abs() <= 4;
+
+    // The app never changes zoom or tilt in focus mode outside the paused
+    // animations, so any change at all there is the user (catches the very
+    // first frame of a mouse-wheel zoom).
+    final zoomOrTilt = (cam.zoom - _navZoom).abs() > 0.01 ||
+        (cam.tilt - (_is3D ? _navTilt : 0)).abs() > 0.5;
+    final positionOk = near(expected, _expectedCamBearing()) ||
+        near(_cmdTarget, _cmdBearing) ||
+        near(_prevCmdTarget, _prevCmdBearing);
+    if (!zoomOrTilt && positionOk) {
+      _camOffCount = 0;
+      return;
+    }
+    // A real drag or zoom sends a stream of camera reports, so needing two
+    // in a row still reacts instantly but ignores a single stray report
+    // (e.g. one that arrives late on a phone).
+    if (++_camOffCount >= 2) {
+      _camOffCount = 0;
+      _setNavTracking(false, userGesture: true);
+    }
+  }
+
+  /// Direction the nav camera should face: exactly where the car's arrow
+  /// points (the road segment it is on, or the GPS/compass heading off-route),
+  /// so the arrow always points straight up and the camera turns only as
+  /// much as the car does.
+  double _navCameraBearing() => _puckBearing();
+
+  /// Shifts the map's focal point down so the arrow sits at [_navPuckY].
+  /// Applied instantly (not animated): an animated padding change is
+  /// cancelled by the camera move that follows it, which is why the arrow
+  /// used to stay in the middle of the screen.
+  Future<void> _applyNavPadding(MapLibreMapController m) async {
+    final h = _mapHeight > 0 ? _mapHeight : MediaQuery.of(context).size.height;
+    // Centre of the padded viewport = (top + h) / 2 = h * _navPuckY.
+    final top = h * (2 * _navPuckY - 1);
+    _navPaddingOn = true;
+    try {
+      await m.setPadding(top: top);
+    } catch (e) {
+      debugPrint('[map] $e');
+    }
+  }
+
+  /// Removes the focus-mode padding (no-op if it is already off).
+  void _clearNavPadding() {
+    final m = _map;
+    if (m == null || !_navPaddingOn) return;
+    _navPaddingOn = false;
+    _guard(() => m.setPadding());
+  }
+
+  /// Turns focus mode on or off.
+  ///
+  /// Turning it off never moves the camera: it stays at the same place, zoom
+  /// and angle and simply stops following the arrow. [userGesture] means the
+  /// user is dragging/zooming right now, so the app must not touch the camera
+  /// at all (any camera call would cancel their gesture). Otherwise an ease
+  /// that is still running is stopped where it is.
+  Future<void> _setNavTracking(bool on, {bool userGesture = false}) async {
+    final pos = _shownPos ?? _userPos;
+    final m = _map;
+    if (_navTracking == on) return;
+    setState(() => _navTracking = on);
+    if (m == null) return;
+
+    if (!on) {
+      final cam = m.cameraPosition;
+      if (!userGesture && _easeT < 1 && cam != null) {
+        // Freeze the camera exactly where it is now.
+        _guard(() => m.moveCamera(CameraUpdate.newCameraPosition(cam)));
+      }
+      _easeFrom = null;
+      return;
+    }
+
+    if (pos == null) return;
+    final bearing = _navCameraBearing();
+    _camBearing = bearing;
+    // The padding shift below also reports a camera move; ignore it.
+    _camAnimUntil = DateTime.now().add(const Duration(seconds: 1));
+    _cmdTarget = null;
+    _prevCmdTarget = null;
+    _easeFrom = null;
+    await _applyNavPadding(m);
+    if (!mounted || !_navTracking) return;
+    _animateTo(
+      CameraPosition(
+        target: pos,
+        zoom: _navZoom,
+        bearing: bearing,
+        tilt: _is3D ? _navTilt : 0,
+      ),
+      const Duration(milliseconds: 800),
+    );
+  }
+
+  void _toggle3D() {
+    final m = _map;
+    setState(() => _is3D = !_is3D);
+    if (m == null) return;
+    final pos = _userPos;
+    if (_navTracking && pos != null) {
+      // Navigating: switch zoom and tilt together, keep facing the route.
+      _animateTo(
+        CameraPosition(
+          target: pos,
+          zoom: _navZoom,
+          bearing: _camBearing,
+          tilt: _is3D ? _navTilt : 0,
+        ),
+        const Duration(milliseconds: 700),
       );
+      return;
+    }
+    final tilt = _is3D ? _overviewTilt : 0.0;
+    _guard(() => m.animateCamera(
+          CameraUpdate.tiltTo(tilt),
+          duration: const Duration(milliseconds: 700),
+        ));
+  }
+
+  void _resetView() {
+    _clearDestination();
+    if (_navTracking) _setNavTracking(false);
+    _animateTo(
+      CameraPosition(
+        target: _fauCenter,
+        zoom: _overviewZoom,
+        bearing: 0,
+        tilt: _is3D ? _overviewTilt : 0,
+      ),
+      const Duration(milliseconds: 1000),
+    );
+  }
+
+  // ==========================================
+  // SENSORS
+  // ==========================================
+
+  void _startCompassTracking() {
+    _compassSub = FlutterCompass.events?.listen((event) {
+      // While the position is dev-controlled (Simulate Run/Walk, tap-move,
+      // teleport) the direction comes from that movement. The device compass
+      // must not steer it: on a computer it often reports 0° (north), which
+      // fought the walk's direction and made the arrow/camera flip back and
+      // forth.
+      if (!mounted || _isSimulating || _isWalkSim || _devLocationOverride) {
+        return;
+      }
+      if (DateTime.now().difference(_lastGpsHeadingAt) <
+          const Duration(seconds: 3)) {
+        return; // GPS course wins while driving
+      }
+      final raw = event.headingForCameraMode ?? event.heading;
+      if (raw == null) return;
+      final h = raw % 360.0;
+      if (Geo.shortestAngle(_heading, h).abs() < 2.0) return;
+
+      setState(() => _heading = h);
+      _pushPuck();
+      if (_navTracking && _isOnCampus) {
+        // On a route the camera stays course-up; the compass only steers it
+        // when there is no route to follow.
+        _refreshNavCamera(const Duration(milliseconds: 300));
+      }
     });
   }
 
-  void _onBuildingSelected(FauBuilding building) {
-    setState(() {
-      _selectedBuilding = building;
-    });
-    _updateNavigationRoute(building);
-    _mapController.move(building.position, 16.5);
-  }
-
- Future<void> _startLiveLocationTracking() async {
+  Future<void> _startLiveLocationTracking() async {
     setState(() {
       _isLocating = true;
       _gpsStatus = 'Requesting GPS permissions...';
     });
 
-    try {
-      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) {
-        setState(() {
-          _isLocating = false;
-          _gpsStatus = 'Location services disabled.';
-        });
-        return;
-      }
+    void fail(String msg) {
+      if (!mounted) return;
+      setState(() {
+        _isLocating = false;
+        _gpsStatus = msg;
+      });
+    }
 
-      LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-        if (permission == LocationPermission.denied) {
-          setState(() {
-            _isLocating = false;
-            _gpsStatus = 'GPS permission denied.';
-          });
-          return;
+    try {
+      if (!await geo.Geolocator.isLocationServiceEnabled()) {
+        return fail('Location services disabled.');
+      }
+      var permission = await geo.Geolocator.checkPermission();
+      if (permission == geo.LocationPermission.denied) {
+        permission = await geo.Geolocator.requestPermission();
+        if (permission == geo.LocationPermission.denied) {
+          return fail('GPS permission denied.');
         }
       }
-
-      if (permission == LocationPermission.deniedForever) {
-        setState(() {
-          _isLocating = false;
-          _gpsStatus = 'GPS permanently denied.';
-        });
-        return;
+      if (permission == geo.LocationPermission.deniedForever) {
+        return fail('GPS permanently denied.');
       }
 
-      final initialPos = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+      final initial = await geo.Geolocator.getCurrentPosition(
+        locationSettings: const geo.LocationSettings(accuracy: geo.LocationAccuracy.high),
       );
-
-      if (mounted) {
-        final loc = LatLng(initialPos.latitude, initialPos.longitude);
-        final bool isCampus = _fauBounds.contains(loc);
-
-        setState(() {
-          _currentUserLocation = loc;
-          _isLocating = false;
-          _gpsStatus =
-              'Live GPS: ${initialPos.latitude.toStringAsFixed(4)}, ${initialPos.longitude.toStringAsFixed(4)}';
-
-          if (!isCampus && _isNavigationTracking) {
-            _isNavigationTracking = false;
-          }
-
-          // Initial route calculation on first load
-          if (_selectedBuilding != null &&
-              (_currentRoute == null || _currentRoute!.pathPoints.isEmpty)) {
-            _updateNavigationRoute(_selectedBuilding!);
-          }
-        });
+      if (!mounted) return;
+      _handlePosition(initial);
+      if (_selectedBuilding != null && _fullRoute.isEmpty) {
+        _updateNavigationRoute();
       }
 
-      _positionStreamSub = Geolocator.getPositionStream(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.bestForNavigation,
+      _positionSub = geo.Geolocator.getPositionStream(
+        locationSettings: const geo.LocationSettings(
+          accuracy: geo.LocationAccuracy.bestForNavigation,
           distanceFilter: 2,
         ),
-      ).listen((Position position) {
-        if (!mounted) return;
-        final loc = LatLng(position.latitude, position.longitude);
-        final bool isCampus = _fauBounds.contains(loc);
-
-        setState(() {
-          _currentUserLocation = loc;
-          _isLocating = false;
-          _gpsStatus =
-              'Live GPS: ${position.latitude.toStringAsFixed(4)}, ${position.longitude.toStringAsFixed(4)}';
-
-          // ⭐️ Transit speed gate: trust satellite heading when moving (> 2.2 mph)
-          if (position.speed > 1.0 && position.heading > 0) {
-            _currentHeading = position.heading;
-          }
-
-          // ⭐️ Smooth turn animation instead of instant snapping
-          if (_isNavigationTracking && isCampus) {
-            _smoothMoveAndRotate(loc, _currentHeading);
-          } else if (!isCampus && _isNavigationTracking) {
-            _isNavigationTracking = false;
-          }
-        });
-
-        // ⭐️ Route Trimming & Off-Route Recalculation
-        if (!_isSimulatingRoute && _currentRoute != null && _currentRoute!.pathPoints.length >= 2) {
-          const Distance distCalc = Distance();
-          final target = _currentRoute!.pathPoints[1];
-          final double distanceToTarget = distCalc.as(LengthUnit.Meter, loc, target);
-
-          if (distanceToTarget < 8.0) {
-            // Driver reached waypoint: pop node so it vanishes behind them
-            _currentRoute!.pathPoints.removeAt(0);
-          } else if (distanceToTarget > 25.0 && _selectedBuilding != null) {
-            // Driver deviated (> 25m off route): recalculate fresh route from new street
-            _updateNavigationRoute(_selectedBuilding!);
-            return;
-          }
-
-          // Anchor the front of the guideline to the indicator puck
-          if (_currentRoute!.pathPoints.isNotEmpty) {
-            _currentRoute!.pathPoints[0] = loc;
-          }
-        }
-      });
+      ).listen(
+        _handlePosition,
+        onError: (Object e) => fail('GPS stream error: $e'),
+      );
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _isLocating = false;
-          _gpsStatus = 'Error reading GPS: $e';
-        });
-      }
+      fail('Error reading GPS: $e');
     }
   }
-  
-  // ==========================================
-  // JOYSTICK SIMULATION CONTROLLERS
-  // ==========================================
 
-  // 1. Instant travel to the start of the guideline inside campus
-  void _instantTravelToRouteStart() {
-    if (_currentRoute == null || _currentRoute!.pathPoints.isEmpty) return;
-    final startPt = _currentRoute!.pathPoints.first;
+  void _handlePosition(geo.Position p) {
+    if (!mounted) return;
+    if (_isSimulating || _devLocationOverride) return;
+
+    final loc = LatLng(p.latitude, p.longitude);
+    final onCampus = _inCampus(loc);
+    final hasCourse = p.speed > 1.0 && p.heading >= 0;
+    var progress = _Progress.none;
+    final wasTracking = _navTracking;
 
     setState(() {
-      _currentUserLocation = startPt;
-      _currentSimIndex = 0;
-      _gpsStatus = 'Teleported to Route Start';
+      _userPos = loc;
+      _isLocating = false;
+      _gpsStatus =
+          'Live GPS: ${p.latitude.toStringAsFixed(4)}, ${p.longitude.toStringAsFixed(4)}';
+      if (hasCourse) {
+        _heading = p.heading;
+        _lastGpsHeadingAt = DateTime.now();
+      }
+      progress = _updateRouteProgress(loc);
     });
 
-    _mapController.move(startPt, 17.5);
-    if (_selectedBuilding != null) {
-      _updateNavigationRoute(_selectedBuilding!);
+    if (wasTracking && !onCampus) {
+      _setNavTracking(false);
+    }
+    _startGlide(loc); // moves the arrow (and nav camera) smoothly to the fix
+
+    if (progress == _Progress.arrived) _onArrived();
+    // Parked and walking: follow the walking line (and reroute if needed).
+    if (_arrived) _trackWalk(loc, p.accuracy);
+    if (progress == _Progress.offRoute &&
+        p.accuracy <= _maxGpsAccuracyForReroute) {
+      _maybeReroute();
     }
   }
 
+  /// Starts (or retargets) the arrow glide toward a new position (a GPS fix,
+  /// or the next simulated position). In focus mode the camera eases along
+  /// with it over the same time.
+  void _startGlide(LatLng target) {
+    final now = DateTime.now();
+    final from = _shownPos ?? _userPos;
+    final sinceLastFix = now.difference(_lastFixAt);
+    _lastFixAt = now;
 
-
-void _smoothMoveAndRotate(LatLng targetPos, double targetBearing) {
-    if (!mounted || _cameraAnimController == null) return;
-
-    final double startRotation = _mapController.camera.rotation;
-    final LatLng startPos = _mapController.camera.center;
-    final double targetRotation = -targetBearing;
-
-    // Calculate shortest angular difference (prevent 360 spin)
-    double diff = (targetRotation - startRotation) % 360.0;
-    if (diff > 180.0) diff -= 360.0;
-    if (diff < -180.0) diff += 360.0;
-    final double endRotation = startRotation + diff;
-
-    // If change is negligible, update directly without fighting animations
-    const Distance distCalc = Distance();
-    if (distCalc.as(LengthUnit.Meter, startPos, targetPos) < 0.2 && diff.abs() < 1.0) {
-      _mapController.move(targetPos, 18.2);
-      _mapController.rotate(targetRotation);
+    // First fix, or a jump too big to be driving: just place the arrow.
+    if (from == null || Geo.meters(from, target) > _glideSnapMeters) {
+      _stopGlide();
+      _pushPuck();
+      _pushRoute();
+      if (_navTracking) _jumpNavCamera(target);
       return;
     }
 
-    _cameraAnimController!.stop();
-
-    _rotationAnimation = Tween<double>(
-      begin: startRotation,
-      end: endRotation,
-    ).animate(CurvedAnimation(
-      parent: _cameraAnimController!,
-      curve: Curves.easeOutQuad,
-    ));
-
-    _cameraAnimController!.reset();
-    _cameraAnimController!.forward();
+    _glideFrom = from;
+    _glideTo = target;
+    _glideStart = now;
+    // Glide for about as long as fixes are arriving, so the arrow is still
+    // moving when the next one lands instead of stopping and restarting.
+    final ms = sinceLastFix.inMilliseconds.clamp(300, 1500);
+    _glideDuration = Duration(milliseconds: ms);
+    _glideTimer ??= Timer.periodic(_glideFrame, (_) => _glideStep());
+    if (_navTracking) _easeNavCamera(target, _glideDuration);
   }
 
-
-
-
-  // 2. Animate along route points at 20 mph (~8.94 m/s)
-  void _toggleRouteSimulation() {
-    if (_isSimulatingRoute) {
-      _stopRouteSimulation();
+  void _glideStep() {
+    final from = _glideFrom;
+    final to = _glideTo;
+    if (!mounted || from == null || to == null) {
+      _stopGlide();
       return;
     }
+    final elapsed = DateTime.now().difference(_glideStart).inMilliseconds;
+    final t = (elapsed / _glideDuration.inMilliseconds).clamp(0.0, 1.0);
+    final pos = Geo.lerp(from, to, t);
+    _shownPos = pos;
+    _glideFrameCount++;
 
-    if (_currentRoute == null || _currentRoute!.pathPoints.length < 2) return;
+    // Keep the route line attached to the arrow instead of the latest fix.
+    if (_displayRoute.length >= 2) {
+      _displayRoute = [pos, ..._displayRoute.skip(1)];
+      if (_glideFrameCount % 3 == 0 || t >= 1) _pushRoute(); // ~10 Hz
+    }
+    _pushPuck(); // the camera is already easing along on its own
+    // Walking: keep the walking line attached to the arrow (~10 Hz).
+    if (_walkActive && _glideFrameCount % 3 == 0) {
+      _drawWalkLine(pos);
+    }
 
-    setState(() => _isSimulatingRoute = true);
+    if (t >= 1) {
+      _glideTimer?.cancel();
+      _glideTimer = null;
+    }
+  }
 
-    // 20 mph ≈ 8.94 m/s -> 0.447 meters per 50ms tick (smoother 20fps interpolation)
-    const double metersPerTick = 0.45;
-    const Distance distCalc = Distance();
+  /// Cancels any glide and draws the arrow at the real position again.
+  void _stopGlide() {
+    _glideTimer?.cancel();
+    _glideTimer = null;
+    _glideFrom = null;
+    _glideTo = null;
+    _shownPos = null;
+  }
 
-    _simulationTimer = Timer.periodic(const Duration(milliseconds: 50), (timer) {
-      if (!mounted || _currentRoute == null || _currentRoute!.pathPoints.length < 2) {
-        _stopRouteSimulation();
+  CameraPosition _navCamera(LatLng target, double bearing) => CameraPosition(
+        target: target,
+        zoom: _navZoom,
+        bearing: bearing,
+        tilt: _is3D ? _navTilt : 0,
+      );
+
+  /// Focus mode: ease the camera linearly to [target] over [d], facing the
+  /// car's direction. One call per position; the map animates it smoothly.
+  void _easeNavCamera(LatLng target, Duration d) {
+    final m = _map;
+    if (m == null || !_navTracking) return;
+    // Let a deliberate animation (intro, 2D/3D) finish first.
+    if (DateTime.now().isBefore(_camAnimUntil)) return;
+    final fromTarget = _expectedCamTarget() ?? target;
+    final fromBearing = _expectedCamBearing();
+    final bearing = _navCameraBearing();
+    _camBearing = bearing;
+    _setCameraCommand(
+      target,
+      bearing,
+      easeFrom: fromTarget,
+      easeFromBearing: fromBearing,
+      easeDuration: d,
+    );
+    _guard(() => m.easeCamera(
+          CameraUpdate.newCameraPosition(_navCamera(target, bearing)),
+          duration: d,
+          interpolation: CameraAnimationInterpolation.linear,
+        ));
+  }
+
+  /// Focus mode: move the camera instantly (used after a big position jump).
+  void _jumpNavCamera(LatLng target) {
+    final m = _map;
+    if (m == null || !_navTracking) return;
+    if (DateTime.now().isBefore(_camAnimUntil)) return;
+    final bearing = _navCameraBearing();
+    _camBearing = bearing;
+    _setCameraCommand(target, bearing);
+    _guard(() => m.moveCamera(
+          CameraUpdate.newCameraPosition(_navCamera(target, bearing)),
+        ));
+  }
+
+  /// Focus mode: re-aim the camera when the direction changes without a new
+  /// position (compass turn, new route). If the arrow is mid-glide, the
+  /// camera keeps travelling with it to the glide's end on the same timing.
+  void _refreshNavCamera(Duration whenStill) {
+    final glideTo = _glideTo;
+    if (_glideTimer != null && glideTo != null) {
+      final left = _glideDuration - DateTime.now().difference(_glideStart);
+      _easeNavCamera(
+        glideTo,
+        left > const Duration(milliseconds: 50)
+            ? left
+            : const Duration(milliseconds: 50),
+      );
+      return;
+    }
+    final pos = _shownPos ?? _userPos;
+    if (pos != null) _easeNavCamera(pos, whenStill);
+  }
+
+  Future<void> _resyncRealGps() async {
+    try {
+      final p = await geo.Geolocator.getCurrentPosition(
+        locationSettings: const geo.LocationSettings(
+          accuracy: geo.LocationAccuracy.high,
+          timeLimit: Duration(seconds: 5),
+        ),
+      );
+      _handlePosition(p);
+      if (_selectedBuilding != null) _updateNavigationRoute();
+    } catch (_) {}
+  }
+
+  Future<LatLng?> _quickFix() async {
+    try {
+      final p = await geo.Geolocator.getCurrentPosition(
+        locationSettings: const geo.LocationSettings(
+          accuracy: geo.LocationAccuracy.medium,
+          timeLimit: Duration(seconds: 3),
+        ),
+      );
+      return LatLng(p.latitude, p.longitude);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // ==========================================
+  // LIVE PARKING DATA
+  // ==========================================
+
+  static String _prettyLotName(String id) {
+    final m = RegExp(r'^lot0*(\d+)$', caseSensitive: false).firstMatch(id);
+    return m != null ? 'Lot ${m.group(1)}' : id.toUpperCase();
+  }
+
+  static LatLng? _readLatLng(Map<String, dynamic> data) {
+    final lat = data['lat'] ?? data['latitude'];
+    final lng = data['lng'] ?? data['longitude'];
+    if (lat is num && lng is num) return LatLng(lat.toDouble(), lng.toDouble());
+    return null;
+  }
+
+  Map<String, Map<String, dynamic>> _parseLots(Object? raw) {
+    if (raw is! Map) return {};
+    final rawLots = raw['lots'] is Map ? raw['lots'] as Map : const {};
+    final rawUnits = raw['units'] is Map ? raw['units'] as Map : const {};
+
+    final capacity = <String, int>{};
+    final occupied = <String, int>{};
+    final spots = <String, List<Map<String, dynamic>>>{};
+    rawUnits.forEach((unitId, unit) {
+      if (unit is! Map) return;
+      final lot = unit['lot']?.toString();
+      if (lot == null || lot.isEmpty) return;
+      final occ = unit['occupied'];
+      final isOcc = occ == true || occ == 1 || occ == 'true';
+      // Units without an `online` flag are treated as reporting.
+      final on = unit['online'];
+      final isOnline = !(on == false || on == 0 || on == 'false');
+      capacity[lot] = (capacity[lot] ?? 0) + 1;
+      // An offline curb can't be trusted as free, so it counts as taken:
+      // it stays in the lot's total but drops out of the free count
+      // (labels, colours and best-lot routing all use this tally).
+      if (isOcc || !isOnline) occupied[lot] = (occupied[lot] ?? 0) + 1;
+      (spots[lot] ??= []).add({
+        'id': unitId.toString(),
+        'occupied': isOcc,
+        'online': isOnline,
+      });
+    });
+    for (final list in spots.values) {
+      list.sort((a, b) => (a['id'] as String).compareTo(b['id'] as String));
+    }
+
+    final result = <String, Map<String, dynamic>>{};
+    rawLots.forEach((key, val) {
+      final lotId = key.toString();
+      final lotData =
+          val is Map ? Map<String, dynamic>.from(val) : <String, dynamic>{};
+      final pos = _lotPositions[lotId] ?? _readLatLng(lotData);
+      if (pos == null) return;
+
+      final total = capacity[lotId] ?? 0;
+      final occ = occupied[lotId] ?? 0;
+      final ratio = total > 0 ? occ / total : 0.0;
+      // Same thresholds as the dashboard's lot bars (Overview.jsx).
+      final Color color;
+      if (total == 0) {
+        color = kTextMuted;
+      } else if (ratio >= 0.90) {
+        color = kRed;
+      } else if (ratio >= 0.70) {
+        color = kAmber;
+      } else {
+        color = kOpen;
+      }
+
+      result[lotId] = {
+        'name': lotData['name']?.toString() ?? _prettyLotName(lotId),
+        'status': '$occ/$total',
+        'occupied': occ,
+        'capacity': total,
+        'position': pos,
+        'color': color,
+        // Every curb unit in the lot, for the tap-a-lot spot grid.
+        'units': spots[lotId] ?? const <Map<String, dynamic>>[],
+      };
+    });
+    return result;
+  }
+
+  void _listenToFirebaseParking() {
+    _parkingSub = FirebaseDatabase.instance.ref('demo').onValue.listen((event) {
+      if (!mounted) return;
+      final lots = _parseLots(event.snapshot.value);
+      setState(() => _liveLots = lots);
+
+      final building = _selectedBuilding;
+      if (building == null) {
+        _pushOverlays();
         return;
       }
 
-      final points = _currentRoute!.pathPoints;
-      LatLng currentPt = _currentUserLocation ?? points.first;
-      LatLng targetPt = points[1];
+      final best = CampusPathfinder.findBestAvailableRoute(
+        buildingPos: building.position,
+        lots: lots,
+      );
 
-      double distanceToTarget = distCalc.as(LengthUnit.Meter, currentPt, targetPt);
-
-      // Advance/pop when reaching the waypoint (or if already right next to it)
-      while (distanceToTarget <= metersPerTick) {
-        // Point reached! Pop it off so the line behind vanishes permanently
-        points.removeAt(0);
-        currentPt = targetPt;
-
-        if (points.length < 2) {
-          _stopRouteSimulation();
-          setState(() {
-            _currentUserLocation = currentPt;
-            _currentRoute!.pathPoints.clear();
-          });
-          return;
-        }
-
-        targetPt = points[1];
-        distanceToTarget = distCalc.as(LengthUnit.Meter, currentPt, targetPt);
+      // Only hit OSRM when the recommended lot actually changes.
+      if (best?.lotId != _routeLotId) {
+        _updateNavigationRoute();
+      } else if (_fullRoute.isEmpty && !_isRouting && !_arrived) {
+        _updateNavigationRoute();
+      } else if (best != null) {
+        setState(() => _walkResult = best);
       }
-
-      // Interpolate along the current front segment
-      final double fraction = metersPerTick / distanceToTarget;
-      final double newLat = currentPt.latitude + (targetPt.latitude - currentPt.latitude) * fraction;
-      final double newLng = currentPt.longitude + (targetPt.longitude - currentPt.longitude) * fraction;
-      final LatLng interpolatedPt = LatLng(newLat, newLng);
-
-      // Strict forward bearing heading
-      final double bearing = _calculateBearing(interpolatedPt, targetPt);
-
-      // Anchor the start of the rendered guideline directly to the front of the vehicle
-      points[0] = interpolatedPt;
-
-      setState(() {
-        _currentUserLocation = interpolatedPt;
-        _currentHeading = bearing;
-        _gpsStatus = 'Simulating 20 mph (${bearing.round()}°)';
-
-        if (_isNavigationTracking) {
-          _smoothMoveAndRotate(interpolatedPt, bearing);
-        }
-      });
+      _pushOverlays();
     });
   }
 
-  void _stopRouteSimulation() {
-    _simulationTimer?.cancel();
-    _simulationTimer = null;
-    if (mounted) {
-      setState(() => _isSimulatingRoute = false);
+  // ==========================================
+  // ROUTING
+  // ==========================================
+
+  static List<double> _suffixLengths(List<LatLng> r) {
+    final s = List<double>.filled(r.length, 0.0);
+    for (var i = r.length - 2; i >= 0; i--) {
+      s[i] = s[i + 1] + Geo.meters(r[i], r[i + 1]);
+    }
+    return s;
+  }
+
+  Future<void> _updateNavigationRoute() async {
+    final building = _selectedBuilding;
+    if (building == null || _liveLots.isEmpty) return;
+
+    final reqId = ++_routeRequestId;
+    final best = CampusPathfinder.findBestAvailableRoute(
+      buildingPos: building.position,
+      lots: _liveLots,
+    );
+
+    if (best == null) {
+      setState(() {
+        _walkResult = null;
+        _routeLotId = null;
+        _isRouting = false;
+        _clearDrivingRoute();
+      });
+      _pushOverlays();
+      _pushRoute();
+      return;
+    }
+
+    final lotPos = _liveLots[best.lotId]!['position'] as LatLng;
+    setState(() {
+      _walkResult = best;
+      _isRouting = true;
+    });
+    _pushOverlays();
+    _lastRouteAt = DateTime.now();
+
+    final start = _userPos ?? await _quickFix() ?? _campusEntrance;
+    if (!mounted || reqId != _routeRequestId) return;
+
+    final road =
+        await RealRoadRouter.getRoadRoute(start: start, destination: lotPos);
+    if (!mounted || reqId != _routeRequestId) return;
+
+    setState(() {
+      _isRouting = false;
+      _routeLotId = best.lotId;
+      _fullRoute = road;
+      _routeSuffix = _suffixLengths(road);
+      _routeSeg = 0;
+      _distToRoute = 0;
+      _arrived = false;
+      _walkDone = false;
+      _displayRoute = List<LatLng>.of(road);
+      _routeRemaining = _routeSuffix.first;
+    });
+    _pushRoute();
+    _pushPuck();
+
+    // Already navigating: turn the camera to face the new route right away.
+    final pos = _userPos;
+    if (_navTracking && pos != null) {
+      setState(() => _updateRouteProgress(pos));
+      _refreshNavCamera(const Duration(milliseconds: 600));
     }
   }
 
-  double _calculateBearing(LatLng start, LatLng end) {
-    final double lat1 = start.latitude * (math.pi / 180.0);
-    final double lat2 = end.latitude * (math.pi / 180.0);
-    final double dLon = (end.longitude - start.longitude) * (math.pi / 180.0);
-
-    final double y = math.sin(dLon) * math.cos(lat2);
-    final double x = math.cos(lat1) * math.sin(lat2) -
-        math.sin(lat1) * math.cos(lat2) * math.cos(dLon);
-
-    final double radians = math.atan2(y, x);
-    return (radians * (180.0 / math.pi) + 360.0) % 360.0;
+  void _maybeReroute() {
+    if (_isRouting || _selectedBuilding == null) return;
+    if (DateTime.now().difference(_lastRouteAt) < _rerouteCooldown) return;
+    _updateNavigationRoute();
   }
-  void _showBuildingSelector() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: const Color(0xFF171714),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) {
-        return Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    'Select Building',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close, color: Colors.white70),
-                    onPressed: () => Navigator.pop(ctx),
-                  ),
-                ],
-              ),
-              const Divider(color: Colors.white24),
-              Expanded(
-                child: ListView.separated(
-                  itemCount: _campusBuildings.length,
-                  separatorBuilder: (context, index) =>
-                      const Divider(color: Colors.white12, height: 1),
-                  itemBuilder: (context, index) {
-                    final bldg = _campusBuildings[index];
 
-                    final bestRoute = CampusPathfinder.findBestAvailableRoute(
-                      buildingPos: bldg.position,
-                      lots: _liveLots,
-                    );
+  /// Must be called inside setState.
+  void _clearDrivingRoute() {
+    _fullRoute = const [];
+    _routeSuffix = const [];
+    _displayRoute = const [];
+    _routeSeg = 0;
+    _routeRemaining = 0;
+    _distToRoute = 0;
+    _arrived = false;
+    _walkDone = false;
+  }
 
-                    final lot = bestRoute != null ? _liveLots[bestRoute.lotId] : null;
+  _RouteProjection _project(LatLng p, int from, int to) {
+    var best = _RouteProjection(from, _fullRoute[from], double.infinity);
+    for (var i = from; i <= to; i++) {
+      final a = _fullRoute[i];
+      final b = _fullRoute[i + 1];
+      final q = Geo.lerp(a, b, Geo.projectT(p, a, b));
+      final d = Geo.meters(p, q);
+      if (d < best.dist) best = _RouteProjection(i, q, d);
+    }
+    return best;
+  }
 
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-                      child: Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.white10,
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Text(
-                              bldg.code,
-                              style: const TextStyle(
-                                color: Color(0xFFC6F24A),
-                                fontWeight: FontWeight.bold,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  bldg.name,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 14,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  lot != null
-                                      ? 'Best Lot: ${lot['name']} (${lot['status']} open • ${bestRoute!.totalDistanceMeters.round()}m)'
-                                      : 'All nearby lots full',
-                                  style: const TextStyle(
-                                    color: Colors.white60,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          ElevatedButton.icon(
-                            onPressed: () {
-                              Navigator.pop(ctx);
-                              _onBuildingSelected(bldg);
-                            },
-                            icon: const Icon(
-                              Icons.navigation,
-                              size: 14,
-                              color: Colors.black,
-                            ),
-                            label: const Text(
-                              'Go to',
-                              style: TextStyle(
-                                color: Colors.black,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 12,
-                              ),
-                            ),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFFC6F24A),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 6,
-                              ),
-                              minimumSize: Size.zero,
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        );
-      },
+  /// Mutates state only — call inside setState.
+  _Progress _updateRouteProgress(LatLng pos) {
+    final route = _fullRoute;
+    if (route.length < 2 || _arrived) return _Progress.none;
+
+    final proj = _project(
+      pos,
+      math.max(0, _routeSeg - 2),
+      math.min(route.length - 2, _routeSeg + 25),
     );
+    _distToRoute = proj.dist;
+    if (proj.dist > _offRouteMeters) return _Progress.offRoute;
+
+    _routeSeg = proj.seg;
+    _routeRemaining =
+        Geo.meters(proj.point, route[proj.seg + 1]) + _routeSuffix[proj.seg + 1];
+
+    if (_routeRemaining <= _arrivalMeters) {
+      _arrived = true;
+      _displayRoute = const [];
+      return _Progress.arrived;
+    }
+    _displayRoute = [pos, ...route.sublist(proj.seg + 1)];
+    return _Progress.onRoute;
+  }
+
+  void _onArrived() {
+    if (!mounted) return;
+    // Parked: clear the finished driving line and show the walk to the
+    // building (_pushRoute also pushes the walking line).
+    _pushRoute();
+    final lotName = _liveLots[_routeLotId]?['name'] ?? 'the lot';
+    final walk = _walkResult;
+    final building = _selectedBuilding;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          walk != null && building != null
+              ? 'Arrived at $lotName. About ${formatDistance(walk.totalDistanceMeters)} walk to ${building.code}.'
+              : 'Arrived at $lotName.',
+        ),
+      ),
+    );
+  }
+
+  void _onBuildingSelected(FauBuilding building) {
+    _stopSimulation();
+    _searchCtrl.text = building.name; // also covers picks made by map tap
+    setState(() {
+      _selectedBuilding = building;
+      _routeLotId = null;
+      _clearDrivingRoute();
+      _walkResult = CampusPathfinder.findBestAvailableRoute(
+        buildingPos: building.position,
+        lots: _liveLots,
+      );
+    });
+    _pushOverlays();
+    _pushRoute();
+    _updateNavigationRoute();
+
+    final m = _map;
+    if (m != null && !_navTracking) {
+      _clearNavPadding();
+      _guard(() => m.animateCamera(
+            CameraUpdate.newLatLngZoom(building.position, 17.0),
+            duration: const Duration(milliseconds: 900),
+          ));
+    }
+  }
+
+  void _clearDestination() {
+    _stopSimulation();
+    _routeRequestId++; // cancel any in-flight route request
+    _searchCtrl.clear();
+    setState(() {
+      _selectedBuilding = null;
+      _walkResult = null;
+      _routeLotId = null;
+      _isRouting = false;
+      _clearDrivingRoute();
+    });
+    _pushOverlays();
+    _pushRoute();
+    _pushPuck();
+  }
+
+  // ==========================================
+  // MAP TAPS
+  // ==========================================
+
+  void _onMapClick(math.Point<double> point, LatLng latLng) {
+    // A press on one of our buttons/cards also reaches the map on web;
+    // ignore that echo so buttons never move the arrow or pick a building.
+    if (DateTime.now().difference(_lastOverlayPressAt) <
+        const Duration(milliseconds: 600)) {
+      return;
+    }
+    if (_devMode) _devTap.value = latLng;
+
+    // Dev mode: a tap anywhere just moves the arrow there. Routes, the
+    // walking line and the destination are left untouched.
+    if (_devMode && _clickToMove) {
+      _devMoveTo(latLng);
+      return;
+    }
+
+    // With ~60 buildings close together, a tap picks whichever building or
+    // lot is actually nearest (lots first on a tie), within reach.
+    FauBuilding? nearest;
+    var nearestDist = 35.0; // meters
+    for (final b in _campusBuildings) {
+      final d = Geo.meters(latLng, b.position);
+      if (d < nearestDist) {
+        nearestDist = d;
+        nearest = b;
+      }
+    }
+
+    String? nearestLot;
+    var lotDist = 40.0; // meters
+    _liveLots.forEach((id, lot) {
+      final d = Geo.meters(latLng, lot['position'] as LatLng);
+      if (d < lotDist) {
+        lotDist = d;
+        nearestLot = id;
+      }
+    });
+
+    if (nearestLot != null && (nearest == null || lotDist <= nearestDist)) {
+      if (nearestLot != _openLotId) {
+        // Hidden until the new dot's screen position comes back.
+        setState(() {
+          _openLotId = nearestLot;
+          _lotAnchor = null;
+        });
+      }
+      _updateLotAnchor();
+      return;
+    }
+    // Tapping anywhere else closes the lot bubble.
+    if (_openLotId != null) setState(() => _openLotId = null);
+    if (nearest != null) _onBuildingSelected(nearest);
+  }
+
+  // ==========================================
+  // DEVELOPER TOOLS
+  // ==========================================
+
+  void _teleportToCampus() {
+    _stopSimulation();
+    _stopGlide();
+    var target = _campusEntrance;
+    for (final p in _fullRoute) {
+      if (_inCampus(p)) {
+        target = p;
+        break;
+      }
+    }
+    setState(() {
+      _devLocationOverride = true;
+      _userPos = target;
+      _gpsStatus = 'Teleported to campus (dev)';
+    });
+    _pushPuck();
+    final m = _map;
+    if (m != null) {
+      if (_navTracking) _setNavTracking(false);
+      _clearNavPadding();
+      _guard(() => m.animateCamera(
+            CameraUpdate.newLatLngZoom(target, 17.5),
+            duration: const Duration(milliseconds: 1200),
+          ));
+    }
+    _updateNavigationRoute();
+  }
+
+  void _toggleSimulation() {
+    if (_isSimulating) {
+      _stopSimulation();
+      return;
+    }
+    if (_fullRoute.length < 2 || _arrived) return;
+
+    final proj =
+        _project(_userPos ?? _fullRoute.first, 0, _fullRoute.length - 2);
+    final onRoute = proj.dist <= _offRouteMeters;
+
+    _simTickCount = 0;
+    _stopGlide();
+    setState(() {
+      _isSimulating = true;
+      _devLocationOverride = true;
+      _userPos = onRoute ? proj.point : _fullRoute.first;
+      _routeSeg = onRoute ? proj.seg : 0;
+    });
+    _simTimer = Timer.periodic(_simTick, (_) => _simStep());
+  }
+
+  void _simStep() {
+    if (!mounted) return;
+    final route = _fullRoute;
+    if (route.length < 2) {
+      _stopSimulation();
+      return;
+    }
+
+    var cur = _userPos ?? route.first;
+    var seg = _routeSeg;
+    var budget = _simMetersPerTick;
+
+    while (seg < route.length - 1) {
+      final next = route[seg + 1];
+      final d = Geo.meters(cur, next);
+      if (d > budget) {
+        cur = Geo.lerp(cur, next, budget / d);
+        break;
+      }
+      budget -= d;
+      cur = next;
+      seg++;
+    }
+
+    if (seg >= route.length - 1) {
+      _stopSimulation();
+      _stopGlide(); // put the arrow exactly on the end of the route
+      setState(() {
+        _userPos = route.last;
+        _arrived = true;
+        _displayRoute = const [];
+        _routeRemaining = 0;
+        _gpsStatus = 'Simulation finished';
+      });
+      _pushPuck();
+      _pushRoute();
+      _onArrived();
+      return;
+    }
+
+    final bearing = Geo.bearing(cur, route[seg + 1]);
+    _simTickCount++;
+
+    // Per-tick state is updated WITHOUT setState; Flutter widgets only
+    // refresh a few times a second.
+    _userPos = cur;
+    _routeSeg = seg;
+    _heading = bearing;
+    _distToRoute = 0;
+    _displayRoute = [cur, ...route.sublist(seg + 1)];
+    _routeRemaining = Geo.meters(cur, route[seg + 1]) + _routeSuffix[seg + 1];
+
+    if (_simTickCount % 5 == 0) {
+      setState(() => _gpsStatus = 'Simulating 20 mph (${bearing.round()}°)');
+    }
+
+    // Feed the simulated car through the same glide as live GPS (a "fix"
+    // every 0.5 s): the arrow, the route line and the focus-mode camera all
+    // move exactly as they do when driving for real.
+    if (_simTickCount % 10 == 1) _startGlide(cur);
+  }
+
+  void _stopSimulation() {
+    _stopWalkSimulation(); // anything that stops the drive stops a walk too
+    _simTimer?.cancel();
+    _simTimer = null;
+    if (mounted && _isSimulating) {
+      setState(() => _isSimulating = false);
+      _pushRoute();
+    }
+  }
+
+  // ==========================================
+  // WALKING (lot -> building, after parking)
+  // ==========================================
+  // Works like the driving route: your position is matched to the walking
+  // line, the line shrinks behind you, and if you head off another way the
+  // line is recalculated (A*) from where you are. Live GPS and the dev
+  // "Simulate Walk" both go through this.
+
+  /// Off the walking line by more than this (for [_walkOffFixesToReroute]
+  /// fixes in a row) means you took another way. Phone GPS between buildings
+  /// often drifts 5–15 m, so a single stray fix doesn't trigger a reroute.
+  static const double _walkOffRouteMeters = 20;
+  static const int _walkOffFixesToReroute = 2;
+  static const Duration _walkRerouteCooldown = Duration(seconds: 4);
+
+  /// "You've arrived" when this little of the path is left, or when this
+  /// close to the building's centre (big buildings: you reach a door first).
+  static const double _walkArriveRemaining = 15;
+  static const double _walkArriveNearBuilding = 25;
+
+  /// The walking path being followed right now (replaced on reroute).
+  List<LatLng> _walkPath = const [];
+  List<double> _walkSuffix = const [];
+  int _walkPathSeg = 0;
+  int _walkOffCount = 0;
+  DateTime _lastWalkRerouteAt = DateTime.fromMillisecondsSinceEpoch(0);
+  bool _walkDone = false; // reached the building
+  double _walkRemaining = 0;
+
+  /// Parked, line showing, building not reached yet.
+  bool get _walkActive => _arrived && !_walkDone && _walkPath.length >= 2;
+
+  /// Must be called inside setState (or before a rebuild).
+  void _setWalkPath(List<LatLng> pts) {
+    _walkPath = pts;
+    _walkSuffix = _suffixLengths(pts);
+    _walkPathSeg = 0;
+    _walkOffCount = 0;
+    _walkRemaining = _walkSuffix.isEmpty ? 0 : _walkSuffix.first;
+  }
+
+  /// Nearest point on [path] (searching segments [from]..[to]) to [p].
+  static _RouteProjection _projectOnPath(
+    List<LatLng> path,
+    LatLng p,
+    int from,
+    int to,
+  ) {
+    var best = _RouteProjection(from, path[from], double.infinity);
+    for (var i = from; i <= to; i++) {
+      final a = path[i];
+      final b = path[i + 1];
+      final q = Geo.lerp(a, b, Geo.projectT(p, a, b));
+      final d = Geo.meters(p, q);
+      if (d < best.dist) best = _RouteProjection(i, q, d);
+    }
+    return best;
+  }
+
+  /// Redraws the walking line from [from] (the arrow) to the building.
+  void _drawWalkLine(LatLng from) {
+    if (!_walkActive || _walkRevealTimer != null) return;
+    _sync.push(
+      _srcWalk,
+      _fc([
+        _lineFeature([from, ..._walkPath.sublist(_walkPathSeg + 1)]),
+      ]),
+    );
+  }
+
+  /// Live GPS while walking: progress along the line, reroute if you leave
+  /// it, and "arrived" when you reach the building. [immediate] (dev-mode
+  /// tap moves) reroutes on the first off-line position, without waiting.
+  void _trackWalk(LatLng pos, double accuracy, {bool immediate = false}) {
+    final building = _selectedBuilding;
+    if (!_walkActive || building == null || _isWalkSim) return;
+
+    final proj = _projectOnPath(_walkPath, pos, 0, _walkPath.length - 2);
+    if (proj.dist > _walkOffRouteMeters) {
+      if (immediate) {
+        _rerouteWalk(pos);
+        return;
+      }
+      if (accuracy > _maxGpsAccuracyForReroute) return; // fix too fuzzy
+      _walkOffCount++;
+      if (_walkOffCount >= _walkOffFixesToReroute &&
+          DateTime.now().difference(_lastWalkRerouteAt) >
+              _walkRerouteCooldown) {
+        _rerouteWalk(pos);
+      }
+      return;
+    }
+
+    _walkOffCount = 0;
+    setState(() {
+      _walkPathSeg = proj.seg;
+      _walkRemaining = Geo.meters(proj.point, _walkPath[proj.seg + 1]) +
+          _walkSuffix[proj.seg + 1];
+    });
+    if (_walkRemaining <= _walkArriveRemaining ||
+        Geo.meters(pos, building.position) <= _walkArriveNearBuilding) {
+      _finishWalk();
+    }
+  }
+
+  /// You went another way: new A* walk from where you are to the building.
+  void _rerouteWalk(LatLng from) {
+    final building = _selectedBuilding;
+    if (building == null || !_arrived || _walkDone) return;
+    _lastWalkRerouteAt = DateTime.now();
+    final path = CampusPathfinder.findPath(from, building.position);
+    if (path.length < 2) return;
+    setState(() => _setWalkPath(path));
+    _revealWalk(path); // the new line draws itself out from you
+  }
+
+  /// Reached the building: hide the line and say so. [end] places the arrow
+  /// exactly at the end (simulation only; real GPS keeps its own position).
+  void _finishWalk({LatLng? end}) {
+    _stopWalkSimulation();
+    if (end != null) _stopGlide();
+    final building = _selectedBuilding;
+    setState(() {
+      if (end != null) {
+        _userPos = end;
+        _gpsStatus = 'Walk finished';
+      }
+      _walkDone = true;
+      _walkRemaining = 0;
+    });
+    _pushPuck();
+    _pushWalk(); // hides the line now that you're there
+    if (building != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("You've arrived at ${building.name}.")),
+      );
+    }
+  }
+
+  /// Dev mode: move the location arrow to [p] (a tapped point) and treat it
+  /// like a real GPS reading there, so routing can be tested:
+  ///  * driving, on the route  -> the route trims to start at the arrow
+  ///  * driving, off the route -> the driving route reroutes from there
+  ///  * at the lot             -> arrival (walking line appears)
+  ///  * walking, off the line  -> the walking line reroutes from there
+  ///  * near the building      -> "You've arrived"
+  /// Dev moves reroute straight away (no 2-reading wait or cooldown, which
+  /// only exist to filter real GPS drift). The destination is never changed.
+  /// Running simulations stop so the arrow stays where it was put; real GPS
+  /// stays ignored until dev mode is switched off.
+  void _devMoveTo(LatLng p) {
+    _stopSimulation(); // also stops a simulated walk
+    final from = _shownPos ?? _userPos;
+    _stopGlide();
+    setState(() {
+      _devLocationOverride = true;
+      _userPos = p;
+      if (from != null && Geo.meters(from, p) > 1) {
+        _heading = Geo.bearing(from, p); // face the way it moved
+      }
+      _gpsStatus = 'Dev location (tap the map to move)';
+    });
+
+    const moveTime = Duration(milliseconds: 450);
+    if (from == null || reduceMotion(context)) {
+      _pushPuck();
+      if (_navTracking) _jumpNavCamera(p);
+    } else {
+      // Quick glide from where the arrow was; the lines follow the arrow
+      // the same way they do for real GPS.
+      _shownPos = from;
+      _glideFrom = from;
+      _glideTo = p;
+      _glideStart = DateTime.now();
+      _glideDuration = moveTime;
+      _glideTimer = Timer.periodic(_glideFrame, (_) => _glideStep());
+      if (_navTracking) _easeNavCamera(p, moveTime);
+    }
+
+    _applyDevFix(p);
+  }
+
+  /// Runs a dev-moved position through the same route logic as a GPS fix.
+  void _applyDevFix(LatLng p) {
+    // Driving: progress along the route, arrival, or leaving it.
+    var progress = _Progress.none;
+    setState(() => progress = _updateRouteProgress(p));
+    _pushRoute();
+    if (progress == _Progress.arrived) {
+      _onArrived();
+    } else if (progress == _Progress.offRoute &&
+        !_isRouting &&
+        _selectedBuilding != null) {
+      _updateNavigationRoute(); // reroute the drive from the arrow, now
+    }
+
+    // Walking (after parking): progress, reroute or arrival.
+    if (_arrived) _trackWalk(p, 0, immediate: true);
+  }
+
+  // ---- DEV: simulated walk ----
+
+  /// Average adult walking pace: 1.4 m/s (about 5 km/h / 3.1 mph).
+  static const double _walkSpeedMps = 1.4;
+
+  /// Dev speed-up for the walk: real walking barely moves on screen (about
+  /// 7 px/s even fully zoomed in), so it can run faster for testing.
+  static const List<int> _walkSpeedSteps = [1, 3, 8];
+  int _walkSpeedIndex = 1; // start at 3x so the movement is easy to see
+  int get _walkSpeedMult => _walkSpeedSteps[_walkSpeedIndex];
+
+  void _cycleWalkSpeed() {
+    setState(() {
+      _walkSpeedIndex = (_walkSpeedIndex + 1) % _walkSpeedSteps.length;
+      if (_isWalkSim) _gpsStatus = 'Simulating walk ($_walkSpeedMult×)';
+    });
+  }
+
+  Timer? _walkSimTimer;
+  bool _isWalkSim = false;
+  int _walkTick = 0;
+
+  /// Walks the arrow along the current walking path at a normal pace,
+  /// through the same glide as GPS, so the focus-mode camera follows.
+  /// Resumes from where the arrow is; if it's off the path, the walk is
+  /// rerouted from there first.
+  void _toggleWalkSimulation() {
+    if (_isWalkSim) {
+      _stopWalkSimulation();
+      return;
+    }
+    if (!_walkActive) return;
+
+    var start = _walkPath.first;
+    final here = _userPos;
+    if (here != null) {
+      final proj = _projectOnPath(_walkPath, here, 0, _walkPath.length - 2);
+      if (proj.dist > _walkOffRouteMeters) {
+        _rerouteWalk(here); // start the walk from where you actually are
+        start = _walkPath.first;
+      } else {
+        _walkPathSeg = proj.seg;
+        start = proj.point;
+      }
+    }
+
+    _stopGlide();
+    _walkTick = 0;
+    setState(() {
+      _isWalkSim = true;
+      _devLocationOverride = true; // ignore real GPS while walking
+      _userPos = start;
+      _heading = Geo.bearing(start, _walkPath[_walkPathSeg + 1]);
+      _gpsStatus = 'Simulating walk ($_walkSpeedMult×)';
+    });
+    _pushPuck();
+    _walkSimTimer = Timer.periodic(_simTick, (_) => _walkStep());
+  }
+
+  void _walkStep() {
+    final pts = _walkPath;
+    if (!mounted || !_walkActive) {
+      _stopWalkSimulation();
+      return;
+    }
+    var cur = _userPos ?? pts.first;
+    var seg = _walkPathSeg;
+    var budget =
+        _walkSpeedMps * _walkSpeedMult * _simTick.inMilliseconds / 1000;
+
+    while (seg < pts.length - 1) {
+      final next = pts[seg + 1];
+      final d = Geo.meters(cur, next);
+      if (d > budget) {
+        cur = Geo.lerp(cur, next, budget / d);
+        break;
+      }
+      budget -= d;
+      cur = next;
+      seg++;
+    }
+
+    if (seg >= pts.length - 1) {
+      _finishWalk(end: pts.last);
+      return;
+    }
+
+    _walkTick++;
+    _userPos = cur;
+    _walkPathSeg = seg;
+    final next = pts[seg + 1];
+    // Face the way you're walking (skip tiny bits of path that jitter).
+    if (Geo.meters(cur, next) > 0.3) _heading = Geo.bearing(cur, next);
+    _walkRemaining = Geo.meters(cur, next) + _walkSuffix[seg + 1];
+
+    // A "fix" every 0.5 s through the glide: smooth arrow + camera, and the
+    // glide keeps the line attached to the arrow.
+    if (_walkTick % 10 == 1) _startGlide(cur);
+    if (_walkTick % 5 == 0) setState(() {}); // refresh the countdown
+  }
+
+  void _stopWalkSimulation() {
+    _walkSimTimer?.cancel();
+    _walkSimTimer = null;
+    if (mounted && _isWalkSim) setState(() => _isWalkSim = false);
+  }
+
+  void _toggleDevMode() {
+    final turningOff = _devMode;
+    setState(() {
+      _devMode = !_devMode;
+      if (turningOff) _clickToMove = false; // always starts off
+    });
+    if (turningOff) {
+      _stopSimulation();
+      _devTap.value = null;
+      if (_devLocationOverride) {
+        _devLocationOverride = false;
+        _resyncRealGps();
+      }
+    }
+  }
+
+  // ==========================================
+  // UI
+  // ==========================================
+
+  double _puckBearing() {
+    if (_displayRoute.length >= 2 &&
+        _distToRoute < 15 &&
+        _routeSeg < _fullRoute.length - 1) {
+      return Geo.bearing(_fullRoute[_routeSeg], _fullRoute[_routeSeg + 1]);
+    }
+    return _heading;
+  }
+
+  // ---- destination search ----
+
+  /// The suggestion panel is tall enough for this many rows; any more are
+  /// reached by scrolling inside the panel.
+  static const int _maxVisibleSuggestions = 5;
+  static const double _suggestionRowHeight = 58;
+
+  /// Every building in random order, shown while the box is empty
+  /// (reshuffled each time the search opens).
+  List<FauBuilding> _randomPicks = const [];
+  DateTime _searchOpenedAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  void _onSearchFocusChanged() {
+    if (!mounted) return;
+    setState(() {
+      if (_searchFocus.hasFocus) {
+        _searchOpenedAt = DateTime.now();
+        _randomPicks = List<FauBuilding>.of(_campusBuildings)..shuffle();
+        // Show fresh suggestions; typing replaces the selected name.
+        _searchQuery = '';
+        _searchCtrl.selection = TextSelection(
+          baseOffset: 0,
+          extentOffset: _searchCtrl.text.length,
+        );
+      } else {
+        // Closing the list puts the current destination's name back.
+        _searchCtrl.text = _selectedBuilding?.name ?? '';
+        _searchQuery = '';
+      }
+    });
+  }
+
+  void _pickSuggestion(FauBuilding building) {
+    _onBuildingSelected(building); // first, so unfocus shows the new name
+    _searchFocus.unfocus();
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    Map<String, dynamic>? recommendedLot;
-    if (_currentRoute != null && _liveLots.containsKey(_currentRoute!.lotId)) {
-      recommendedLot = _liveLots[_currentRoute!.lotId];
-    } else if (_selectedBuilding != null) {
-      final instantBest = CampusPathfinder.findBestAvailableRoute(
-        buildingPos: _selectedBuilding!.position,
-        lots: _liveLots,
-      );
-      if (instantBest != null) {
-        recommendedLot = _liveLots[instantBest.lotId];
-      }
-    }
-
-    final bool isInsideCampus = _currentUserLocation != null &&
-        _fauBounds.contains(_currentUserLocation!);
+    final onCampus = _isOnCampus;
+    final navActive = _navTracking && onCampus;
+    final bottomInset = MediaQuery.of(context).padding.bottom;
 
     return Scaffold(
       appBar: AppBar(
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'FAU Campus Map',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
+            const Text('FAU Campus Map'),
             Text(
-              _isNavigationTracking && isInsideCampus
-                  ? ' Navigation Mode Active (${_currentHeading.round()}°)'
-                  : (_developerMode
-                      ? 'Dev Mode Actived'
-                      : 'Boca Raton Main Campus'),
-              style: TextStyle(
-                fontSize: 12,
-                color: (_isNavigationTracking && isInsideCampus)
-                    ? const Color(0xFFC6F24A)
-                    : (_developerMode
-                        ? Colors.cyanAccent
-                        : theme.colorScheme.onSurfaceVariant),
-                fontWeight: ((_isNavigationTracking && isInsideCampus) || _developerMode)
-                    ? FontWeight.bold
+              navActive
+                  ? 'Navigation Mode Active (${_heading.round()}°)'
+                  : (_devMode ? 'Dev Mode Active' : 'Boca Raton Main Campus'),
+              style: GoogleFonts.archivo(
+                fontSize: 12.5,
+                color: navActive ? kAccent : (_devMode ? kDev : kTextMuted),
+                fontWeight: (navActive || _devMode)
+                    ? FontWeight.w600
                     : FontWeight.normal,
               ),
             ),
@@ -1889,26 +4052,21 @@ void _smoothMoveAndRotate(LatLng targetPos, double targetBearing) {
         actions: [
           IconButton(
             icon: Icon(
-              _developerMode
-                  ? Icons.developer_mode
-                  : Icons.developer_mode_outlined,
-              color: _developerMode
-                  ? Colors.cyanAccent
-                  : theme.colorScheme.onSurfaceVariant,
+              _devMode ? Icons.developer_mode : Icons.developer_mode_outlined,
+              color: _devMode ? kDev : kTextMuted,
             ),
-            tooltip: _developerMode
-                ? 'Disable Developer Mode'
-                : 'Enable Developer Mode & Joystick',
-            onPressed: () {
-              setState(() {
-                _developerMode = !_developerMode;
-                if (!_developerMode) {
-                  _cursorLocation = null;
-                }
-              });
-            },
+            tooltip: _devMode ? 'Disable Developer Mode' : 'Enable Developer Mode',
+            onPressed: _toggleDevMode,
           ),
-          if (isInsideCampus)
+          IconButton(
+            icon: Icon(
+              _is3D ? Icons.view_in_ar : Icons.map_outlined,
+              color: _is3D ? kAccent : kTextMuted,
+            ),
+            tooltip: _is3D ? 'Switch to 2D view' : 'Switch to 3D view',
+            onPressed: _toggle3D,
+          ),
+          if (onCampus)
             IconButton(
               icon: _isLocating
                   ? const SizedBox(
@@ -1916,476 +4074,674 @@ void _smoothMoveAndRotate(LatLng targetPos, double targetBearing) {
                       height: 18,
                       child: CircularProgressIndicator(
                         strokeWidth: 2,
-                        color: Colors.white,
+                        color: kText,
                       ),
                     )
                   : Icon(
-                      _isNavigationTracking
-                          ? Icons.navigation
-                          : Icons.my_location,
-                      color: _isNavigationTracking
-                          ? const Color(0xFFC6F24A)
-                          : Colors.white,
+                      _navTracking ? Icons.navigation : Icons.my_location,
+                      color: _navTracking ? kAccent : kText,
                     ),
-              tooltip: _isNavigationTracking
+              tooltip: _navTracking
                   ? 'Disable Navigation Focus'
                   : 'Follow GPS Live (Turn-by-Turn Mode)',
-              onPressed: () {
-                if (_currentUserLocation != null) {
-                  setState(() {
-                    _isNavigationTracking = !_isNavigationTracking;
-                  });
-
-                  if (_isNavigationTracking) {
-                    _mapController.move(_currentUserLocation!, 18.2);
-                    _mapController.rotate(-_currentHeading);
-                  } else {
-                    _mapController.rotate(0);
-                    _mapController.move(_currentUserLocation!, 16.5);
-                  }
-                }
-              },
+              onPressed: _userPos == null
+                  ? null
+                  : () => _setNavTracking(!_navTracking),
             ),
           IconButton(
             icon: const Icon(Icons.center_focus_strong),
             tooltip: 'Reset Campus View',
-            onPressed: () {
-              setState(() {
-                _selectedBuilding = null;
-                _currentRoute = null;
-                _isNavigationTracking = false;
-              });
-              _mapController.rotate(0);
-              _mapController.move(_fauCenter, 15.3);
-            },
+            onPressed: _resetView,
           ),
         ],
       ),
       body: Stack(
         children: [
-          MouseRegion(
-            onHover: (PointerEvent event) {
-              if (_developerMode) {
-                try {
-                  final latLng =
-                      _mapController.camera.offsetToCrs(event.localPosition);
-                  setState(() {
-                    _cursorLocation = latLng;
-                  });
-                } catch (_) {}
-              }
-            },
-            onExit: (_) {
-              if (_developerMode) {
-                setState(() => _cursorLocation = null);
-              }
-            },
-            child: FlutterMap(
-              mapController: _mapController,
-              options: MapOptions(
-                initialCenter: _fauCenter,
-                initialZoom: 15.3,
-                minZoom: 15.0,
-                maxZoom: 19.5,
-                cameraConstraint:
-                    CameraConstraint.containCenter(bounds: _fauBounds),
-                onPositionChanged: (pos, hasGesture) {
-                  if (hasGesture && _isNavigationTracking) {
-                    setState(() {
-                      _isNavigationTracking = false;
-                    });
-                  }
-                },
-                interactionOptions: const InteractionOptions(
-                  flags: InteractiveFlag.pinchZoom |
-                      InteractiveFlag.drag |
-                      InteractiveFlag.doubleTapZoom |
-                      InteractiveFlag.scrollWheelZoom |
-                      InteractiveFlag.rotate,
-                ),
-              ),
-              children: [
-                TileLayer(
-                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                  userAgentPackageName: 'com.smartcurb.app',
-                  maxNativeZoom: 19,
-                  maxZoom: 20,
-                ),
-
-                if (_currentRoute != null && _currentRoute!.pathPoints.isNotEmpty)
-                  PolylineLayer(
-                    polylines: [
-                      Polyline(
-                        points: _currentRoute!.pathPoints,
-                        strokeWidth: 6.5,
-                        color: Colors.black87,
-                      ),
-                      Polyline(
-                        points: _currentRoute!.pathPoints,
-                        strokeWidth: 4.0,
-                        color: const Color(0xFFC6F24A),
-                      ),
-                    ],
-                  ),
-
-                MarkerLayer(
-                  markers: [
-                    // ⭐️ Heading Indicator Puck (Screen relative angle: heading - mapRotation)
-                    // ⭐️ Heading Indicator Puck (Locked to Guideline)
-                    if (_currentUserLocation != null)
-                      Marker(
-                        point: _currentUserLocation!,
-                        alignment: Alignment.center,
-                        width: 52,
-                        height: 52,
-                        rotate: true, // Prevents map drag/spin from turning the arrow
-                        child: Builder(
-                          builder: (context) {
-                            double angleDeg = _currentHeading;
-
-                            // Point strictly along the active front segment of the route
-                            if (_currentRoute != null && _currentRoute!.pathPoints.length >= 2) {
-                              angleDeg = _calculateBearing(
-                                _currentRoute!.pathPoints[0],
-                                _currentRoute!.pathPoints[1],
-                              );
-                            }
-
-                            return Transform.rotate(
-                              angle: angleDeg * (math.pi / 180.0),
-                              child: Stack(
-                                alignment: Alignment.center,
-                                children: [
-                                  Container(
-                                    width: 44,
-                                    height: 44,
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      color: const Color(0xFFC6F24A).withOpacity(0.25),
-                                    ),
-                                  ),
-                                  Container(
-                                    width: 34,
-                                    height: 34,
-                                    decoration: BoxDecoration(
-                                      color: Colors.black,
-                                      shape: BoxShape.circle,
-                                      border: Border.all(
-                                        color: const Color(0xFFC6F24A),
-                                        width: 2.5,
-                                      ),
-                                      boxShadow: const [
-                                        BoxShadow(
-                                          color: Colors.black54,
-                                          blurRadius: 6,
-                                        ),
-                                      ],
-                                    ),
-                                    child: const Center(
-                                      child: Icon(
-                                        Icons.navigation,
-                                        size: 18,
-                                        color: Colors.black54,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-
-                    // ⭐️ Campus Building Markers (rotate: true keeps them upright)
-                    ..._campusBuildings.map((bldg) {
-                      final isSelected = _selectedBuilding?.id == bldg.id;
-
-                      return Marker(
-                        point: bldg.position,
-                        alignment: Alignment.center,
-                        width: isSelected ? 120 : 80,
-                        height: isSelected ? 48 : 30,
-                        rotate: true,
-                        child: GestureDetector(
-                          onTap: () => _onBuildingSelected(bldg),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 6,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              color: isSelected
-                                  ? Colors.cyanAccent
-                                  : const Color(0xDD1F242A),
-                              borderRadius: BorderRadius.circular(6),
-                              border: Border.all(
-                                color: isSelected
-                                    ? Colors.white
-                                    : Colors.cyanAccent.withOpacity(0.7),
-                                width: isSelected ? 2 : 1,
-                              ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: (isSelected
-                                          ? Colors.cyanAccent
-                                          : Colors.black)
-                                      .withOpacity(0.4),
-                                  blurRadius: 4,
-                                ),
-                              ],
-                            ),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(
-                                  Icons.business,
-                                  size: isSelected ? 14 : 11,
-                                  color: isSelected
-                                      ? Colors.black
-                                      : Colors.cyanAccent,
-                                ),
-                                const SizedBox(width: 4),
-                                Flexible(
-                                  child: Text(
-                                    bldg.code,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      color: isSelected
-                                          ? Colors.black
-                                          : Colors.white,
-                                      fontSize: isSelected ? 11 : 9,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      );
-                    }),
-
-                    // ⭐️ Dynamic Parking Lot Badges (rotate: true keeps them upright)
-                    ..._liveLots.entries.map((entry) {
-                      final isBest = _currentRoute != null &&
-                          _currentRoute!.lotId == entry.key;
-
-                      return _buildLotMarker(
-                        point: entry.value['position'] as LatLng,
-                        name: entry.value['name'] as String,
-                        status: entry.value['status'] as String,
-                        badgeColor: isBest
-                            ? const Color(0xFFC6F24A)
-                            : entry.value['color'] as Color,
-                        isHighlighted: isBest,
-                      );
-                    }),
-                  ],
-                ),
-              ],
+          Positioned.fill(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                _mapHeight = constraints.maxHeight;
+                _mapWidth = constraints.maxWidth;
+                return _buildMap();
+              },
             ),
           ),
+          if (_devMode) _buildDevTapBadge(),
+          if (_devMode)
+            _buildDevControls(onCampus, bottomInset),
+          _buildLotPopup(),
+          _buildAttribution(bottomInset),
+          _buildGuidanceCard(onCampus, bottomInset),
+          // Last, so the suggestion list draws above the other overlays.
+          _buildSearchHeader(),
+        ],
+      ),
+    );
+  }
 
-          // Destination Search Header
-          Positioned(
-            top: 16,
-            left: 16,
-            right: 16,
-            child: GestureDetector(
-              onTap: _showBuildingSelector,
+  Widget _buildMap() {
+    // Listener sees raw touches before the native map does, so a drag
+    // cancels follow-mode just like Google Maps. (Mouse-wheel zoom and web,
+    // where the map gets the events first, are caught by _onCameraMove.)
+    return Listener(
+      onPointerDown: (e) {
+        _pointerDownAt = e.position;
+        _searchFocus.unfocus(); // touching the map closes the suggestions
+      },
+      onPointerMove: (e) {
+        final start = _pointerDownAt;
+        if (_navTracking &&
+            start != null &&
+            (e.position - start).distance > 12) {
+          _pointerDownAt = null;
+          _setNavTracking(false, userGesture: true);
+        }
+      },
+      onPointerUp: (_) => _pointerDownAt = null,
+      onPointerCancel: (_) => _pointerDownAt = null,
+      child: MapLibreMap(
+        styleString: _styleUrl,
+        initialCameraPosition: const CameraPosition(
+          target: _fauCenter,
+          zoom: 15.0,
+        ),
+        onMapCreated: (controller) => _map = controller,
+        onStyleLoadedCallback: _onStyleLoaded,
+        onMapClick: _onMapClick,
+        cameraTargetBounds: _cameraBounds,
+        minMaxZoomPreference: const MinMaxZoomPreference(14.5, 20.0),
+        compassEnabled: false,
+        rotateGesturesEnabled: true,
+        tiltGesturesEnabled: true,
+        myLocationEnabled: false,
+        trackCameraPosition: true, // needed for onCameraMove
+        onCameraMove: _onCameraMove,
+        onCameraIdle: _onCameraIdle,
+      ),
+    );
+  }
+
+  /// Google-style search: focusing shows every building (random order while
+  /// the box is empty, matches once you type) in a panel that fits
+  /// [_maxVisibleSuggestions] rows and scrolls for the rest.
+  Widget _buildSearchHeader() {
+    final selected = _selectedBuilding;
+    final focused = _searchFocus.hasFocus;
+    final hasText = _searchCtrl.text.isNotEmpty;
+
+    final List<FauBuilding> suggestions;
+    if (_searchQuery.trim().isEmpty) {
+      suggestions = _randomPicks;
+    } else {
+      final q = _searchQuery.trim().toLowerCase();
+      suggestions = _campusBuildings
+          .where((b) =>
+              b.code.toLowerCase().contains(q) ||
+              b.name.toLowerCase().contains(q))
+          .toList();
+    }
+    final scrolls = suggestions.length > _maxVisibleSuggestions;
+
+    const shadow = [
+      // Light shadow only so the panel separates from the bright map.
+      BoxShadow(color: Colors.black38, blurRadius: 6, offset: Offset(0, 2)),
+    ];
+
+    return Positioned(
+      top: 16,
+      left: 16,
+      right: 16,
+      // On web/desktop a TextField unfocuses on any mouse-down outside it,
+      // which removed the list before a suggestion's tap could land. The tap
+      // region makes the list count as part of the field.
+      child: _tapShield(TextFieldTapRegion(
+        // Slides down into place when the map opens.
+        child: FadeSlideIn(
+        offsetY: -14,
+        child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            decoration: BoxDecoration(
+              color: kCard,
+              borderRadius: BorderRadius.circular(kRadius),
+              border: Border.all(
+                color: (focused || selected != null) ? kAccent : kDivider,
+              ),
+              boxShadow: shadow,
+            ),
+            child: TextField(
+              controller: _searchCtrl,
+              focusNode: _searchFocus,
+              cursorColor: kAccent,
+              textAlignVertical: TextAlignVertical.center,
+              textInputAction: TextInputAction.search,
+              style: const TextStyle(
+                color: kText,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
+              onChanged: (v) => setState(() => _searchQuery = v),
+              onSubmitted: (_) {
+                if (suggestions.isNotEmpty) _pickSuggestion(suggestions.first);
+              },
+              decoration: InputDecoration(
+                border: InputBorder.none,
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(vertical: 15),
+                hintText: 'Search for destination...',
+                hintStyle: const TextStyle(color: kTextMuted, fontSize: 14),
+                prefixIcon: Icon(
+                  Icons.search,
+                  color: (focused || selected != null) ? kAccent : kTextMuted,
+                ),
+                suffixIcon: (hasText || selected != null)
+                    ? IconButton(
+                        icon: const Icon(Icons.cancel, size: 20),
+                        color: kTextMuted,
+                        tooltip: 'Clear',
+                        onPressed: () {
+                          _searchCtrl.clear();
+                          setState(() => _searchQuery = '');
+                          if (selected != null) _clearDestination();
+                        },
+                      )
+                    : null,
+              ),
+            ),
+          ),
+          // The suggestion panel unfolds from under the search bar and folds
+          // away again; its rows rise in one after another.
+          AnimatedSwitcher(
+            duration: kMotion,
+            switchInCurve: kEaseOut,
+            switchOutCurve: Curves.easeInCubic,
+            transitionBuilder: (child, anim) => FadeTransition(
+              opacity: anim,
+              child: SizeTransition(
+                sizeFactor: anim,
+                alignment: Alignment.topCenter,
+                child: child,
+              ),
+            ),
+            child: !focused
+                ? const SizedBox(key: ValueKey('closed'), width: double.infinity)
+                : Container(
+                    key: const ValueKey('open'),
+                    margin: const EdgeInsets.only(top: 6),
+                    decoration: BoxDecoration(
+                      color: kCard,
+                      borderRadius: BorderRadius.circular(kRadius),
+                      border: Border.all(color: kDivider),
+                      boxShadow: shadow,
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: AnimatedSize(
+                      duration: kMotion,
+                      curve: kEaseOut,
+                      alignment: Alignment.topCenter,
+                      child: suggestions.isEmpty
+                          ? Padding(
+                              padding: const EdgeInsets.all(16),
+                              child: Text(
+                                'No buildings match "${_searchQuery.trim()}".',
+                                style: const TextStyle(
+                                  color: kTextMuted,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            )
+                          // At most 5 rows tall; more scroll smoothly inside.
+                          : ConstrainedBox(
+                              constraints: const BoxConstraints(
+                                maxHeight: _suggestionRowHeight *
+                                        _maxVisibleSuggestions +
+                                    (_maxVisibleSuggestions - 1),
+                              ),
+                              child: StaggerScope(
+                                openedAt: _searchOpenedAt,
+                                child: SmoothScroll(
+                                  fade: scrolls ? 14 : 0,
+                                  alwaysShowThumb: scrolls,
+                                  child: ListView.separated(
+                                    shrinkWrap: true,
+                                    physics: scrolls
+                                        ? kScrollPhysics
+                                        : const NeverScrollableScrollPhysics(),
+                                    padding: EdgeInsets.zero,
+                                    itemCount: suggestions.length,
+                                    separatorBuilder: (_, _) =>
+                                        const Divider(height: 1),
+                                    itemBuilder: (context, i) => FadeSlideIn(
+                                      key: ValueKey('sug-${suggestions[i].id}'),
+                                      index: i,
+                                      offsetY: -8,
+                                      duration: kMotion,
+                                      child: _buildSuggestionRow(suggestions[i]),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                    ),
+                  ),
+          ),
+        ],
+      ),
+      ),
+      )),
+    );
+  }
+
+  Widget _buildSuggestionRow(FauBuilding bldg) {
+    final best = CampusPathfinder.findBestAvailableRoute(
+      buildingPos: bldg.position,
+      lots: _liveLots,
+    );
+    final lot = best != null ? _liveLots[best.lotId] : null;
+    final free =
+        lot == null ? 0 : (lot['capacity'] as int) - (lot['occupied'] as int);
+
+    return InkWell(
+      onTap: () => _pickSuggestion(bldg),
+      // Fixed height so the panel can size itself to exactly 5 rows.
+      child: Container(
+        height: _suggestionRowHeight,
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: kNavBg,
+                borderRadius: BorderRadius.circular(kRadius),
+              ),
+              child: Text(bldg.code, style: mono(fontSize: 11.5, color: kAccent)),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    bldg.name,
+                    style: const TextStyle(
+                      color: kText,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    lot != null
+                        ? 'Best lot: ${lot['name']} ($free free, ${formatDistance(best!.totalDistanceMeters)} walk)'
+                        : (_liveLots.isEmpty
+                            ? 'Loading parking data...'
+                            : 'All nearby lots full'),
+                    style: const TextStyle(color: kTextMuted, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDevTapBadge() {
+    return Positioned(
+      top: 80,
+      left: 20,
+      right: 20,
+      child: Center(
+        child: ValueListenableBuilder<LatLng?>(
+          valueListenable: _devTap,
+          builder: (context, tap, _) {
+            return _tapShield(GestureDetector(
+              onTap: () {
+                if (tap == null) return;
+                final str =
+                    'LatLng(${tap.latitude.toStringAsFixed(6)}, ${tap.longitude.toStringAsFixed(6)})';
+                Clipboard.setData(ClipboardData(text: str));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Copied to clipboard: $str'),
+                    duration: const Duration(seconds: 2),
+                  ),
+                );
+              },
               child: Container(
                 padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF171714),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: _selectedBuilding != null
-                        ? const Color(0xFFC6F24A)
-                        : Colors.white24,
-                    width: 1.5,
-                  ),
+                  color: const Color(0xEE0B1A24),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: kDev, width: 1.5),
                   boxShadow: const [
-                    BoxShadow(
-                      color: Colors.black54,
-                      blurRadius: 8,
-                      offset: Offset(0, 3),
-                    ),
+                    BoxShadow(color: Colors.black87, blurRadius: 8),
                   ],
                 ),
                 child: Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(
-                      Icons.search,
-                      color: _selectedBuilding != null
-                          ? const Color(0xFFC6F24A)
-                          : Colors.white70,
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
+                    const Icon(Icons.gps_fixed, color: kDev, size: 16),
+                    const SizedBox(width: 8),
+                    Flexible(
                       child: Text(
-                        _selectedBuilding != null
-                            ? 'Destination: ${_selectedBuilding!.name}'
-                            : 'Search for destination...',
-                        style: TextStyle(
-                          color: _selectedBuilding != null
-                              ? Colors.white
-                              : Colors.white60,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 14,
+                        tap != null
+                            ? 'Tapped: ${tap.latitude.toStringAsFixed(6)}, ${tap.longitude.toStringAsFixed(6)} (tap to copy)'
+                            : 'Tap the map to read coordinates',
+                        style: const TextStyle(
+                          color: kDev,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 0.5,
                         ),
-                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    if (_selectedBuilding != null)
-                      GestureDetector(
-                        onTap: () => setState(() {
-                          _selectedBuilding = null;
-                          _currentRoute = null;
-                        }),
-                        child: const Icon(
-                          Icons.cancel,
-                          color: Colors.white54,
-                          size: 20,
-                        ),
-                      ),
                   ],
+                ),
+              ),
+            ));
+          },
+        ),
+      ),
+    );
+  }
+
+  static Widget _popTransition(Widget child, Animation<double> anim) =>
+      FadeTransition(
+        opacity: anim,
+        child: ScaleTransition(
+          scale: Tween(begin: 0.85, end: 1.0)
+              .animate(CurvedAnimation(parent: anim, curve: kEaseOut)),
+          alignment: Alignment.centerRight,
+          child: child,
+        ),
+      );
+
+  Widget _buildDevControls(bool onCampus, double bottomInset) {
+    final canSimulate = onCampus && _fullRoute.length >= 2 && !_arrived;
+    // Parked, walking line showing, and not yet walked to the building.
+    final canWalk = _walkActive && !_isSimulating;
+    return Positioned(
+      right: 20,
+      bottom: 105 + bottomInset,
+      child: _tapShield(Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          // Blue toggle: tap-to-move the location arrow only while ON.
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: PressScale(
+              child: AnimatedContainer(
+                duration: kMotion,
+                curve: kEaseOut,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(kRadius),
+                  boxShadow: [
+                    BoxShadow(
+                      color: kDevBlue.withValues(alpha: _clickToMove ? 0.45 : 0),
+                      blurRadius: 14,
+                    ),
+                  ],
+                ),
+                child: ElevatedButton.icon(
+                  onPressed: () =>
+                      setState(() => _clickToMove = !_clickToMove),
+                  icon: Icon(
+                    _clickToMove ? Icons.touch_app : Icons.touch_app_outlined,
+                    size: 18,
+                  ),
+                  label: AnimatedText(
+                    'Click to move: ${_clickToMove ? 'ON' : 'OFF'}',
+                    style: GoogleFonts.archivo(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: _clickToMove ? Colors.white : kDevBlue,
+                    ),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _clickToMove ? kDevBlue : kCard,
+                    foregroundColor: _clickToMove ? Colors.white : kDevBlue,
+                    side: const BorderSide(color: kDevBlue),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 10,
+                    ),
+                  ),
                 ),
               ),
             ),
           ),
-
-          // Dev Mode: Cursor Coordinates Header
-          if (_developerMode)
-            Positioned(
-              top: 80,
-              left: 20,
-              right: 20,
-              child: Center(
-                child: GestureDetector(
-                  onTap: () {
-                    if (_cursorLocation != null) {
-                      final str =
-                          'LatLng(${_cursorLocation!.latitude.toStringAsFixed(6)}, ${_cursorLocation!.longitude.toStringAsFixed(6)})';
-                      Clipboard.setData(ClipboardData(text: str));
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('Copied to clipboard: $str'),
-                          duration: const Duration(seconds: 2),
-                        ),
-                      );
-                    }
-                  },
-                  child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: const Color(0xEE0B1A24),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: Colors.cyanAccent, width: 1.5),
-                      boxShadow: const [
-                        BoxShadow(color: Colors.black87, blurRadius: 8),
-                      ],
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.gps_fixed,
-                            color: Colors.cyanAccent, size: 16),
-                        const SizedBox(width: 8),
-                        Text(
-                          _cursorLocation != null
-                              ? 'Cursor GPS: Lat ${_cursorLocation!.latitude.toStringAsFixed(6)}, Lng ${_cursorLocation!.longitude.toStringAsFixed(6)} (Tap to copy)'
-                              : 'Move cursor over map to read coordinates',
-                          style: const TextStyle(
-                            color: Colors.cyanAccent,
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 0.5,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-
-    // ⭐️ Developer Route Controls: Instant Travel & 20 mph Run/Stop
-          if (_developerMode && _currentRoute != null)
-            Positioned(
-              right: 20,
-              bottom: 105,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  // Button 1: Instant Travel to FAU route start if not already there
-                  if (!isInsideCampus)
-                    ElevatedButton.icon(
-                      onPressed: _instantTravelToRouteStart,
+          // Buttons pop in/out, and Simulate <-> Stop morphs smoothly.
+          AnimatedSwitcher(
+            duration: kMotion,
+            transitionBuilder: _popTransition,
+            child: !onCampus
+                ? PressScale(
+                    key: const ValueKey('travel'),
+                    child: ElevatedButton.icon(
+                      onPressed: _teleportToCampus,
                       icon: const Icon(Icons.flight_takeoff, size: 18),
                       label: const Text('Travel to FAU'),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.cyanAccent,
-                        foregroundColor: Colors.black,
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        backgroundColor: kDev,
+                        foregroundColor: kOnAccent,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 10,
+                        ),
                       ),
                     ),
-
-                  const SizedBox(height: 8),
-
-                  // Button 2: Simulate 20 mph follow run/stop (when inside FAU)
-                  if (isInsideCampus)
-                    ElevatedButton.icon(
-                      onPressed: _toggleRouteSimulation,
-                      icon: Icon(_isSimulatingRoute ? Icons.pause : Icons.play_arrow, size: 20),
-                      label: Text(_isSimulatingRoute ? 'Stop (20 mph)' : 'Simulate Run'),
+                  )
+                : const SizedBox.shrink(key: ValueKey('no-travel')),
+          ),
+          AnimatedSwitcher(
+            duration: kMotion,
+            transitionBuilder: _popTransition,
+            child: (canSimulate || _isSimulating)
+                ? PressScale(
+                    key: ValueKey('sim-$_isSimulating'),
+                    child: ElevatedButton.icon(
+                      onPressed: _toggleSimulation,
+                      icon: Icon(
+                        _isSimulating ? Icons.pause : Icons.play_arrow,
+                        size: 20,
+                      ),
+                      label: Text(
+                        _isSimulating ? 'Stop (20 mph)' : 'Simulate Run',
+                      ),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: _isSimulatingRoute ? Colors.redAccent : const Color(0xFFC6F24A),
-                        foregroundColor: Colors.black,
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                        elevation: 6,
+                        backgroundColor: _isSimulating ? kRed : kAccent,
+                        foregroundColor: kOnAccent,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 10,
+                        ),
                       ),
                     ),
-                ],
-              ),
-            ),
+                  )
+                : const SizedBox.shrink(key: ValueKey('no-sim')),
+          ),
+          // After parking: walk the arrow to the building at a normal pace.
+          AnimatedSwitcher(
+            duration: kMotion,
+            transitionBuilder: _popTransition,
+            child: (canWalk || _isWalkSim)
+                ? Row(
+                    key: ValueKey('walk-$_isWalkSim'),
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Speed chip: tap to cycle 1x (real pace) / 3x / 8x.
+                      PressScale(
+                        child: OutlinedButton(
+                          onPressed: _cycleWalkSpeed,
+                          style: OutlinedButton.styleFrom(
+                            backgroundColor: kCard,
+                            foregroundColor: kText,
+                            minimumSize: const Size(0, 40),
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                          ),
+                          child: AnimatedText(
+                            '$_walkSpeedMult×',
+                            style: mono(fontSize: 13, color: kAccent),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      PressScale(
+                        child: ElevatedButton.icon(
+                          onPressed: _toggleWalkSimulation,
+                          icon: Icon(
+                            _isWalkSim ? Icons.pause : Icons.directions_walk,
+                            size: 20,
+                          ),
+                          label: Text(
+                            _isWalkSim ? 'Stop walk' : 'Simulate Walk',
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: _isWalkSim ? kRed : kAccent,
+                            foregroundColor: kOnAccent,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 10,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  )
+                : const SizedBox.shrink(key: ValueKey('no-walk')),
+          ),
+        ],
+      )),
+    );
+  }
 
-          // Bottom Guidance Card
-          Positioned(
-            bottom: 24,
-            left: 20,
-            right: 20,
-            child: Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: theme.cardColor,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: _selectedBuilding != null
-                      ? const Color(0xFFC6F24A)
-                      : theme.dividerColor,
-                  width: 1.5,
-                ),
-                boxShadow: const [
-                  BoxShadow(
-                    color: Colors.black54,
-                    blurRadius: 10,
-                    offset: Offset(0, 4),
-                  ),
-                ],
+  /// OpenStreetMap data requires visible attribution.
+  Widget _buildAttribution(double bottomInset) {
+    return Positioned(
+      left: 22,
+      bottom: 100 + bottomInset,
+      child: const IgnorePointer(
+        child: Text(
+          '© OpenStreetMap contributors · OpenFreeMap',
+          style: TextStyle(
+            fontSize: 9,
+            color: Color(0xFF3A3A33),
+            shadows: [Shadow(color: Colors.white, blurRadius: 3)],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGuidanceCard(bool onCampus, double bottomInset) {
+    final building = _selectedBuilding;
+    final walk = _walkResult;
+    final String title;
+    final String subtitle;
+    final String phase; // kind of message; the subtitle animates when it changes
+
+    if (building == null) {
+      title = 'FAU Boca Raton Main Campus';
+      subtitle = _userPos == null
+          ? _gpsStatus
+          : (onCampus
+              ? 'On Campus • Heading: ${_heading.round()}°'
+              : 'Outside Campus Area');
+      phase = _userPos == null ? 'gps' : (onCampus ? 'on' : 'off');
+    } else if (walk == null) {
+      title =
+          _liveLots.isEmpty ? 'Loading live parking data...' : 'No open lot';
+      subtitle = _liveLots.isEmpty
+          ? 'Waiting for sensor data'
+          : 'All nearby lots are currently full';
+      phase = 'nolot';
+    } else {
+      final lot = _liveLots[walk.lotId];
+      final free = lot == null
+          ? 0
+          : (lot['capacity'] as int) - (lot['occupied'] as int);
+      title = 'Best Lot: ${lot?['name'] ?? walk.lotId} ($free free)';
+      final walkText = formatDistance(walk.totalDistanceMeters);
+      if (_isWalkSim) {
+        subtitle =
+            'Walking • ${formatDistance(_walkRemaining)} to ${building.code}';
+        phase = 'walking';
+      } else if (_walkDone) {
+        subtitle = "You've arrived at ${building.code}";
+        phase = 'walkdone';
+      } else if (_arrived) {
+        // Counts down as you walk (and updates after a reroute).
+        final left = _walkPath.length >= 2 ? formatDistance(_walkRemaining) : walkText;
+        subtitle = 'Arrived • $left walk to ${building.code}';
+        phase = 'arrived';
+      } else if (_fullRoute.isEmpty) {
+        subtitle = 'Calculating driving route...';
+        phase = 'calc';
+      } else {
+        subtitle =
+            'Drive ${formatDistance(_routeRemaining)} • then walk $walkText';
+        phase = 'drive';
+      }
+    }
+
+    final routing =
+        _isRouting || (walk != null && _fullRoute.isEmpty && !_arrived);
+
+    return Positioned(
+      bottom: 24 + bottomInset,
+      left: 20,
+      right: 20,
+      child: _tapShield(FadeSlideIn(
+        index: 2,
+        offsetY: 24,
+        child: AnimatedContainer(
+          duration: kMotion,
+          curve: kEaseOut,
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: kCard,
+            borderRadius: BorderRadius.circular(kRadius),
+            border: Border.all(color: building != null ? kAccent : kDivider),
+            boxShadow: [
+              const BoxShadow(
+                color: Colors.black38,
+                blurRadius: 6,
+                offset: Offset(0, 2),
               ),
-              child: Row(
+              // Soft accent glow while a destination is active.
+              BoxShadow(
+                color: kAccent.withValues(alpha: building != null ? 0.12 : 0),
+                blurRadius: 16,
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
                 children: [
-                  Icon(
-                    _selectedBuilding != null
-                        ? Icons.assistant_direction
-                        : Icons.my_location,
-                    color: theme.primaryColor,
-                    size: 24,
+                  AnimatedSwitcher(
+                    duration: kMotion,
+                    transitionBuilder: (child, anim) => ScaleTransition(
+                      scale: anim,
+                      child: FadeTransition(opacity: anim, child: child),
+                    ),
+                    child: Icon(
+                      building != null
+                          ? Icons.assistant_direction
+                          : Icons.my_location,
+                      key: ValueKey(building != null),
+                      color: kAccent,
+                      size: 24,
+                    ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -2393,141 +4749,333 @@ void _smoothMoveAndRotate(LatLng targetPos, double targetBearing) {
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          _selectedBuilding != null
-                              ? 'Best Lot: ${recommendedLot?['name'] ?? 'Finding open lot...'}'
-                              : 'FAU Boca Raton Main Campus',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: theme.colorScheme.onSurface,
-                          ),
-                        ),
-                        Text(
-                          _selectedBuilding != null
-                              ? (recommendedLot != null
-                                  ? 'Routing from live GPS to ${recommendedLot['name']} (${_currentRoute?.totalDistanceMeters.round() ?? 0}m)'
-                                  : 'All nearby lots are currently full')
-                              : (_currentUserLocation == null
-                                  ? _gpsStatus
-                                  : (isInsideCampus
-                                      ? 'On Campus • Heading: ${_currentHeading.round()}°'
-                                      : 'Outside Campus Area')),
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
+                        AnimatedText(
+                          title,
+                          style: mono(fontSize: 14),
                           overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 2),
+                        Row(
+                          children: [
+                            // Connection quality: green / amber / red wifi.
+                            const ConnectionIndicator(size: 14),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: AnimatedText(
+                                subtitle,
+                                switchKey: phase,
+                                style: const TextStyle(
+                                  fontSize: 12.5,
+                                  color: kTextMuted,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
                   ),
                 ],
               ),
-            ),
+              // Thin indeterminate bar while the driving route is computed.
+              AnimatedSize(
+                duration: kMotion,
+                curve: kEaseOut,
+                child: routing
+                    ? Padding(
+                        padding: const EdgeInsets.only(top: 10),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(2),
+                          child: const LinearProgressIndicator(
+                            minHeight: 2,
+                            color: kAccent,
+                            backgroundColor: kDivider,
+                          ),
+                        ),
+                      )
+                    : const SizedBox(width: double.infinity),
+              ),
+            ],
           ),
-        ],
-      ),
+        ),
+      )),
     );
   }
 
-  
+  /// Small bubble that sits on top of the tapped lot's dot and moves with it
+  /// as the map is dragged, zoomed or rotated. Shows every spot as a chip,
+  /// 3 per row: green = available, red = occupied, gray = offline.
+  Widget _buildLotPopup() {
+    final id = _openLotId;
+    final lot = id == null ? null : _liveLots[id];
+    final anchor = _lotAnchor;
+    // Must stay Positioned even when hidden: a non-positioned child would
+    // make the map's Stack size itself to it (0x0) and hide everything.
+    const hidden = Positioned(left: 0, top: 0, child: SizedBox.shrink());
+    if (id == null || lot == null || anchor == null) return hidden;
 
-  Marker _buildLotMarker({
-    required LatLng point,
-    required String name,
-    required String status,
-    required Color badgeColor,
-    bool isHighlighted = false,
-  }) {
-    return Marker(
-      point: point,
-      alignment: Alignment.center,
-      width: isHighlighted ? 120 : 105,
-      height: isHighlighted ? 62 : 56,
-      rotate: true,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-        decoration: BoxDecoration(
-          color: const Color(0xFF0F0F0D),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: badgeColor,
-            width: isHighlighted ? 3 : 2,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: badgeColor.withOpacity(isHighlighted ? 0.6 : 0.25),
-              blurRadius: isHighlighted ? 12 : 6,
-              spreadRadius: isHighlighted ? 2 : 0,
+    final mapW = _mapWidth > 0 ? _mapWidth : MediaQuery.of(context).size.width;
+    final mapH = _mapHeight > 0 ? _mapHeight : MediaQuery.of(context).size.height;
+    // Hide while the dot is scrolled off screen.
+    if (anchor.dx < 0 || anchor.dx > mapW || anchor.dy < 0 || anchor.dy > mapH) {
+      return hidden;
+    }
+
+    final units = lot['units'] as List<Map<String, dynamic>>;
+    final free = (lot['capacity'] as int) - (lot['occupied'] as int);
+
+    const width = 190.0;
+    const arrowW = 12.0;
+    const arrowH = 7.0;
+    // Keep the bubble on screen near the edges; the arrow still points at
+    // the dot.
+    final left = (anchor.dx - width / 2)
+        .clamp(8.0, math.max(8.0, mapW - width - 8))
+        .toDouble();
+    final arrowX =
+        (anchor.dx - left - arrowW / 2).clamp(6.0, width - arrowW - 6).toDouble();
+
+    return Positioned(
+      left: left,
+      width: width,
+      // Clear of the dot (radius 6-8 plus its stroke).
+      bottom: mapH - anchor.dy + 12,
+      child: _tapShield(FadeSlideIn(
+        key: ValueKey(id),
+        offsetY: 8,
+        duration: kMotion,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.fromLTRB(8, 6, 4, 8),
+              decoration: BoxDecoration(
+                color: kCard,
+                borderRadius: BorderRadius.circular(kRadius),
+                border: Border.all(color: kDivider),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Colors.black45,
+                    blurRadius: 8,
+                    offset: Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '${lot['name']} • $free/${units.length} free',
+                          style: mono(fontSize: 11.5),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      InkWell(
+                        borderRadius: BorderRadius.circular(10),
+                        onTap: () => setState(() => _openLotId = null),
+                        child: const Padding(
+                          padding: EdgeInsets.all(2),
+                          child:
+                              Icon(Icons.close, size: 15, color: kTextMuted),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Padding(
+                    padding: const EdgeInsets.only(right: 4),
+                    child: units.isEmpty
+                        ? const Text(
+                            'No sensors yet',
+                            style: TextStyle(fontSize: 11, color: kTextMuted),
+                          )
+                        : ConstrainedBox(
+                            // About 4 rows; scroll for the rest.
+                            constraints: const BoxConstraints(maxHeight: 108),
+                            child: GridView.builder(
+                              shrinkWrap: true,
+                              padding: EdgeInsets.zero,
+                              itemCount: units.length,
+                              gridDelegate:
+                                  const SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: 3,
+                                mainAxisSpacing: 4,
+                                crossAxisSpacing: 4,
+                                mainAxisExtent: 24,
+                              ),
+                              itemBuilder: (context, i) {
+                                final u = units[i];
+                                return _SpotChip(
+                                  name: u['id'] as String,
+                                  online: u['online'] == true,
+                                  occupied: u['occupied'] == true,
+                                );
+                              },
+                            ),
+                          ),
+                  ),
+                ],
+              ),
+            ),
+            // Little pointer down to the dot.
+            Padding(
+              padding: EdgeInsets.only(left: arrowX),
+              child: CustomPaint(
+                size: const Size(arrowW, arrowH),
+                painter: _BubbleArrowPainter(),
+              ),
             ),
           ],
         ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: isHighlighted ? FontWeight.w900 : FontWeight.bold,
-                fontSize: 10.5,
-              ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              status,
-              maxLines: 1,
-              style: TextStyle(
-                color: badgeColor,
-                fontWeight: FontWeight.w800,
-                fontSize: 11,
-              ),
-            ),
-          ],
+      )),
+    );
+  }
+
+  /// Re-reads where the open lot's dot is on screen. Requests are coalesced:
+  /// while one is in flight, further camera moves just mark it dirty and a
+  /// single follow-up runs afterwards.
+  Future<void> _updateLotAnchor() async {
+    final m = _map;
+    final id = _openLotId;
+    final lot = id == null ? null : _liveLots[id];
+    if (m == null || lot == null) return;
+    if (_anchorBusy) {
+      _anchorDirty = true;
+      return;
+    }
+    _anchorBusy = true;
+    try {
+      final p = await m.toScreenLocation(lot['position'] as LatLng);
+      if (!mounted || _openLotId != id) return;
+      // Android reports physical pixels; iOS and web already use logical.
+      final scale = !kIsWeb && defaultTargetPlatform == TargetPlatform.android
+          ? MediaQuery.of(context).devicePixelRatio
+          : 1.0;
+      setState(() => _lotAnchor = Offset(p.x / scale, p.y / scale));
+    } catch (e) {
+      debugPrint('[map] $e');
+    } finally {
+      _anchorBusy = false;
+      if (_anchorDirty) {
+        _anchorDirty = false;
+        _updateLotAnchor();
+      }
+    }
+  }
+}
+
+/// One spot in the lot bubble: a small rectangle with the spot name,
+/// green = available, red = occupied, gray = offline.
+class _SpotChip extends StatelessWidget {
+  final String name;
+  final bool online;
+  final bool occupied;
+
+  const _SpotChip({
+    required this.name,
+    required this.online,
+    required this.occupied,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final (color, label) = !online
+        ? (kTextMuted, 'offline')
+        : occupied
+            ? (kRed, 'occupied')
+            : (kOpen, 'available');
+
+    // Fades to the new colour when a spot changes state.
+    return Semantics(
+      label: '$name, $label',
+      child: AnimatedContainer(
+        duration: kMotion,
+        alignment: Alignment.center,
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.18),
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: color, width: 1.2),
+        ),
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            name,
+            style: mono(fontSize: 11, fontWeight: FontWeight.w700, color: color),
+          ),
         ),
       ),
     );
   }
 }
 
+/// Downward triangle under the lot bubble, pointing at the lot's dot.
+class _BubbleArrowPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final path = Path()
+      ..moveTo(0, 0)
+      ..lineTo(size.width, 0)
+      ..lineTo(size.width / 2, size.height)
+      ..close();
+    canvas.drawPath(path, Paint()..color = kCard);
+    // Outline the two slanted sides only, so it joins the card's border.
+    final edge = Paint()
+      ..color = kDivider
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1;
+    canvas.drawLine(Offset.zero, Offset(size.width / 2, size.height), edge);
+    canvas.drawLine(
+        Offset(size.width, 0), Offset(size.width / 2, size.height), edge);
+  }
+
+  @override
+  bool shouldRepaint(_BubbleArrowPainter old) => false;
+}
+
 // ==========================================
 // TAB 2: VEHICLES
 // ==========================================
 
-class _VehicleTab extends StatelessWidget {
+class _VehicleTab extends StatefulWidget {
   const _VehicleTab();
 
-  void _openAddVehicleDialog(BuildContext context) {
-    showDialog(
+  @override
+  State<_VehicleTab> createState() => _VehicleTabState();
+}
+
+class _VehicleTabState extends State<_VehicleTab> {
+  late final String? _uid = FirebaseAuth.instance.currentUser?.uid;
+  late final Stream<DatabaseEvent>? _stream = _uid == null
+      ? null
+      : FirebaseDatabase.instance.ref('drivers/$_uid/vehicles').onValue;
+
+  void _openAddVehicleDialog() {
+    showAppDialog(
       context: context,
       barrierDismissible: true,
-      builder: (dialogCtx) => const _VehicleFormDialog(),
+      builder: (_) => const _VehicleFormDialog(),
     );
   }
 
-  void _showVehicleDetails(
-    BuildContext context,
-    Map<String, dynamic> data,
-    String key,
-  ) {
-    final theme = Theme.of(context);
-    showDialog(
+  void _showVehicleDetails(Map<String, dynamic> data, String key) {
+    showAppDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: theme.cardColor,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
           children: [
-            Icon(Icons.directions_car, color: theme.primaryColor),
+            const Icon(Icons.directions_car, color: kAccent),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
                 '${data['model'] ?? 'Vehicle'}',
-                style: TextStyle(color: theme.colorScheme.onSurface),
+                style: mono(fontSize: 17),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
@@ -2537,45 +5085,31 @@ class _VehicleTab extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             DetailInfoRow(
-              label: 'Plate Number',
-              value: data['plate']?.toString() ?? 'N/A',
-            ),
+                label: 'Plate Number', value: data['plate']?.toString() ?? 'N/A'),
             DetailInfoRow(
-              label: 'Manufacturer',
-              value: data['manufacturer']?.toString() ?? 'N/A',
-            ),
+                label: 'Manufacturer',
+                value: data['manufacturer']?.toString() ?? 'N/A'),
+            DetailInfoRow(label: 'Year', value: data['year']?.toString() ?? 'N/A'),
             DetailInfoRow(
-              label: 'Year',
-              value: data['year']?.toString() ?? 'N/A',
-            ),
-            DetailInfoRow(
-              label: 'Color',
-              value: data['color']?.toString() ?? 'N/A',
-            ),
+                label: 'Color', value: data['color']?.toString() ?? 'N/A'),
           ],
         ),
         actions: [
           TextButton(
             onPressed: () {
               Navigator.of(ctx).pop();
-              final uid = FirebaseAuth.instance.currentUser?.uid;
+              final uid = _uid;
               if (uid != null) {
                 FirebaseDatabase.instance
                     .ref('drivers/$uid/vehicles/$key')
                     .remove();
               }
             },
-            child: const Text(
-              'Delete Vehicle',
-              style: TextStyle(color: Colors.redAccent),
-            ),
+            style: TextButton.styleFrom(foregroundColor: kRed),
+            child: const Text('Delete Vehicle'),
           ),
           ElevatedButton(
             onPressed: () => Navigator.of(ctx).pop(),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: theme.primaryColor,
-              foregroundColor: Colors.black,
-            ),
             child: const Text('Close'),
           ),
         ],
@@ -2585,19 +5119,16 @@ class _VehicleTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return const Center(child: Text('User not signed in.'));
-
-    final theme = Theme.of(context);
+    if (_uid == null) return const Center(child: Text('User not signed in.'));
 
     return StreamBuilder<DatabaseEvent>(
-      stream: FirebaseDatabase.instance.ref('drivers/$uid/vehicles').onValue,
+      stream: _stream,
       builder: (context, snapshot) {
         if (snapshot.hasError) {
           return Center(
             child: Text(
               'Error: ${snapshot.error}',
-              style: const TextStyle(color: Colors.redAccent),
+              style: const TextStyle(color: kRed),
             ),
           );
         }
@@ -2606,85 +5137,155 @@ class _VehicleTab extends StatelessWidget {
         }
 
         final rawData = snapshot.data?.snapshot.value;
-        if (rawData == null) {
+        if (rawData is! Map) {
           return AnimatedAddCard(
             title: 'No Vehicle Found',
             subtitle: 'Tap to add a new vehicle to your account',
-            onTap: () => _openAddVehicleDialog(context),
+            onTap: _openAddVehicleDialog,
           );
         }
 
-        final vehiclesMap = Map<dynamic, dynamic>.from(rawData as Map);
-        final vehicleEntries = vehiclesMap.entries.toList();
-
-        return ListView(
-          padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0),
+        return _ListWithBottomAction(
+          actionTitle: 'Add more vehicle',
+          actionIcon: Icons.add,
+          onAction: _openAddVehicleDialog,
           children: [
-            ...vehicleEntries.map((entry) {
-              final key = entry.key.toString();
-              final data = Map<String, dynamic>.from(entry.value as Map);
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 12.0),
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(12),
-                  onTap: () => _showVehicleDetails(context, data, key),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 24,
-                      vertical: 20,
-                    ),
-                    decoration: BoxDecoration(
-                      color: theme.cardColor,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: theme.dividerColor, width: 2),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            for (final entry in rawData.entries)
+              if (entry.value is Map)
+                _buildVehicleCard(
+                  entry.key.toString(),
+                  Map<String, dynamic>.from(entry.value as Map),
+                ),
+          ],
+        );
+      },
+    );
+  }
+
+  /// Same layout as the profile cards: avatar + title row, then detail rows.
+  Widget _buildVehicleCard(String key, Map<String, dynamic> data) {
+    String field(String k) {
+      final v = data[k]?.toString().trim() ?? '';
+      return v.isEmpty ? 'N/A' : v;
+    }
+
+    final manufacturer = data['manufacturer']?.toString().trim() ?? '';
+    final model = data['model']?.toString().trim() ?? '';
+    final title = [manufacturer, model].where((s) => s.isNotEmpty).join(' ');
+
+    return Padding(
+      key: ValueKey('veh-$key'),
+      padding: const EdgeInsets.only(bottom: 12.0),
+      child: PressScale(
+        child: InkWell(
+        borderRadius: BorderRadius.circular(kRadius),
+        onTap: () => _showVehicleDetails(data, key),
+        child: Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: kCard,
+            borderRadius: BorderRadius.circular(kRadius),
+            border: Border.all(color: kDivider),
+          ),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  const CircleAvatar(
+                    radius: 30,
+                    backgroundColor: kNavBg,
+                    child: Icon(Icons.directions_car, size: 32, color: kAccent),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          data['model']?.toString() ?? 'Unknown Model',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: theme.colorScheme.onSurface,
-                          ),
+                          title.isEmpty ? 'Unknown Vehicle' : title,
+                          style: mono(fontSize: 17),
+                          overflow: TextOverflow.ellipsis,
                         ),
+                        const SizedBox(height: 4),
                         Text(
-                          data['plate']?.toString() ?? 'No Plate',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: theme.primaryColor,
+                          field('plate'),
+                          style: mono(
+                            fontSize: 13,
+                            color: kAccent,
+                            letterSpacing: 0.8,
                           ),
                         ),
                       ],
                     ),
                   ),
-                ),
-              );
-            }),
-            const SizedBox(height: 8),
-            OutlinedButton(
-              onPressed: () => _openAddVehicleDialog(context),
-              style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                side: BorderSide(color: theme.primaryColor, width: 1.5),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
+                ],
+              ),
+              const Divider(height: 28),
+              DetailInfoRow(label: 'Model', value: field('model')),
+              DetailInfoRow(label: 'Manufacturer', value: field('manufacturer')),
+              DetailInfoRow(label: 'Year', value: field('year')),
+              DetailInfoRow(label: 'Color', value: field('color')),
+            ],
+          ),
+        ),
+      ),
+      ),
+    );
+  }
+}
+
+/// Smooth-scrolling list of cards followed by a compact, centred action
+/// button. Shared by the Home, Vehicle and Profile tabs.
+class _ListWithBottomAction extends StatefulWidget {
+  final List<Widget> children;
+  final String actionTitle;
+  final IconData actionIcon;
+  final VoidCallback onAction;
+
+  const _ListWithBottomAction({
+    required this.children,
+    required this.actionTitle,
+    required this.actionIcon,
+    required this.onAction,
+  });
+
+  @override
+  State<_ListWithBottomAction> createState() => _ListWithBottomActionState();
+}
+
+class _ListWithBottomActionState extends State<_ListWithBottomAction> {
+  final DateTime _openedAt = DateTime.now();
+
+  @override
+  Widget build(BuildContext context) {
+    final children = widget.children;
+    // Rows rise in one after another when the tab opens; rows further down
+    // reveal themselves as they scroll into view (ListView builds lazily).
+    // Keyed rows keep their state, so only newly shown rows animate.
+    return SafeArea(
+      child: StaggerScope(
+        openedAt: _openedAt,
+        child: SmoothScroll(
+          child: ListView(
+            physics: kScrollPhysics,
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+            children: [
+              for (var i = 0; i < children.length; i++)
+                FadeSlideIn(key: children[i].key, index: i, child: children[i]),
+              const SizedBox(height: 8),
+              FadeSlideIn(
+                index: children.length,
+                child: PrimaryButton(
+                  title: widget.actionTitle,
+                  icon: widget.actionIcon,
+                  onPressed: widget.onAction,
+                  compact: true,
                 ),
               ),
-              child: Text(
-                'Add more vehicle',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: theme.primaryColor,
-                ),
-              ),
-            ),
-          ],
-        );
-      },
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -2718,9 +5319,7 @@ class _VehicleFormDialogState extends State<_VehicleFormDialog> {
     final plate = _plateCtrl.text.trim();
     if (model.isEmpty || plate.isEmpty) {
       showErrorSnackBar(
-        context,
-        'Please fill out at least Model and License Plate.',
-      );
+          context, 'Please fill out at least Model and License Plate.');
       return;
     }
 
@@ -2741,27 +5340,17 @@ class _VehicleFormDialogState extends State<_VehicleFormDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Dialog(
-      backgroundColor: theme.cardColor,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
       child: SingleChildScrollView(
-        padding: const EdgeInsets.all(24.0),
+        padding: const EdgeInsets.all(20.0),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  'Add New Vehicle',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: theme.colorScheme.onSurface,
-                  ),
-                ),
+                Text('Add New Vehicle', style: mono(fontSize: 17)),
                 IconButton(
                   icon: const Icon(Icons.close),
                   onPressed: () => Navigator.of(context).pop(),
@@ -2808,45 +5397,42 @@ class _VehicleFormDialogState extends State<_VehicleFormDialog> {
               ],
             ),
             const SizedBox(height: 24),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: theme.colorScheme.onSurface,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      side: BorderSide(color: theme.dividerColor),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                    ),
-                    child: const Text('Cancel'),
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: _submit,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: theme.primaryColor,
-                      foregroundColor: Colors.black,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                    ),
-                    child: const Text(
-                      'Confirm',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ),
-              ],
-            ),
+            _DialogButtons(onConfirm: _submit),
           ],
         ),
       ),
+    );
+  }
+}
+
+class _DialogButtons extends StatelessWidget {
+  final VoidCallback onConfirm;
+  const _DialogButtons({required this.onConfirm});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: OutlinedButton(
+            onPressed: () => Navigator.of(context).pop(),
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size.fromHeight(40),
+            ),
+            child: const Text('Cancel'),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: ElevatedButton(
+            onPressed: onConfirm,
+            style: ElevatedButton.styleFrom(
+              minimumSize: const Size.fromHeight(40),
+            ),
+            child: const Text('Confirm'),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -2855,51 +5441,49 @@ class _VehicleFormDialogState extends State<_VehicleFormDialog> {
 // TAB 3: PROFILE
 // ==========================================
 
-class _ProfileTab extends StatelessWidget {
+class _ProfileTab extends StatefulWidget {
   const _ProfileTab();
 
-  void _openContactDialog(BuildContext context, {Map<String, dynamic>? data}) {
-    showDialog(
+  @override
+  State<_ProfileTab> createState() => _ProfileTabState();
+}
+
+class _ProfileTabState extends State<_ProfileTab> {
+  late final User? _user = FirebaseAuth.instance.currentUser;
+  late final Stream<DatabaseEvent>? _stream = _user == null
+      ? null
+      : FirebaseDatabase.instance.ref('drivers/${_user!.uid}/profile').onValue;
+
+  void _openContactDialog({Map<String, dynamic>? data}) {
+    showAppDialog(
       context: context,
       barrierDismissible: true,
-      builder: (dialogCtx) => _ContactInfoDialog(existingData: data),
+      builder: (_) => _ContactInfoDialog(existingData: data),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final user = FirebaseAuth.instance.currentUser;
+    final user = _user;
     if (user == null) return const Center(child: Text('User not signed in.'));
 
-    final theme = Theme.of(context);
-
     return StreamBuilder<DatabaseEvent>(
-      stream: FirebaseDatabase.instance
-          .ref('drivers/${user.uid}/profile')
-          .onValue,
+      stream: _stream,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
         }
 
         final rawData = snapshot.data?.snapshot.value;
-        if (rawData == null) {
+        if (rawData is! Map || rawData['firstName'] == null) {
           return AnimatedAddCard(
             title: 'Profile Incomplete',
             subtitle: 'Tap to add your contact information',
-            onTap: () => _openContactDialog(context),
+            onTap: _openContactDialog,
           );
         }
 
-        final data = Map<String, dynamic>.from(rawData as Map);
-        if (data['firstName'] == null) {
-          return AnimatedAddCard(
-            title: 'Profile Incomplete',
-            subtitle: 'Tap to add your contact information',
-            onTap: () => _openContactDialog(context),
-          );
-        }
-
+        final data = Map<String, dynamic>.from(rawData);
         final middle = (data['middleName'] ?? '').toString().trim();
         final fullName = middle.isEmpty
             ? '${data['firstName']} ${data['lastName']}'
@@ -2907,54 +5491,42 @@ class _ProfileTab extends StatelessWidget {
 
         final addr2 = (data['address2'] ?? '').toString().trim();
         final zip = data['zipCode'] ?? '';
-        final fullAddress = addr2.isEmpty
-            ? '${data['address1']}\n${data['city']}, ${data['state']} $zip\n${data['country']}'
-            : '${data['address1']}, $addr2\n${data['city']}, ${data['state']} $zip\n${data['country']}';
+        final line1 =
+            addr2.isEmpty ? '${data['address1']}' : '${data['address1']}, $addr2';
+        final fullAddress =
+            '$line1\n${data['city']}, ${data['state']} $zip\n${data['country']}';
 
-        return SafeArea(
-          child: Column(
-            children: [
-              Expanded(
-                child: ListView(
-                  padding: const EdgeInsets.all(20.0),
-                  children: [
+        return _ListWithBottomAction(
+          actionTitle: 'Edit Information',
+          actionIcon: Icons.edit_outlined,
+          onAction: () => _openContactDialog(data: data),
+          children: [
                     Container(
-                      padding: const EdgeInsets.all(20),
+                      padding: const EdgeInsets.all(18),
                       decoration: BoxDecoration(
-                        color: theme.cardColor,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: theme.dividerColor),
+                        color: kCard,
+                        borderRadius: BorderRadius.circular(kRadius),
+                        border: Border.all(color: kDivider),
                       ),
                       child: Row(
                         children: [
-                          CircleAvatar(
+                          const CircleAvatar(
                             radius: 34,
-                            backgroundColor: theme.scaffoldBackgroundColor,
-                            child: Icon(
-                              Icons.person,
-                              size: 38,
-                              color: theme.primaryColor,
-                            ),
+                            backgroundColor: kNavBg,
+                            child: Icon(Icons.person, size: 38, color: kAccent),
                           ),
                           const SizedBox(width: 16),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(
-                                  fullName,
-                                  style: TextStyle(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.bold,
-                                    color: theme.colorScheme.onSurface,
-                                  ),
-                                ),
+                                Text(fullName, style: mono(fontSize: 18)),
                                 const SizedBox(height: 4),
                                 Text(
                                   user.email ?? '',
-                                  style: TextStyle(
+                                  style: const TextStyle(
                                     fontSize: 14,
-                                    color: theme.colorScheme.onSurfaceVariant,
+                                    color: kTextMuted,
                                   ),
                                 ),
                               ],
@@ -2965,17 +5537,21 @@ class _ProfileTab extends StatelessWidget {
                     ),
                     const SizedBox(height: 16),
                     Container(
-                      padding: const EdgeInsets.all(20),
+                      padding: const EdgeInsets.all(18),
                       decoration: BoxDecoration(
-                        color: theme.cardColor,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: theme.dividerColor),
+                        color: kCard,
+                        borderRadius: BorderRadius.circular(kRadius),
+                        border: Border.all(color: kDivider),
                       ),
                       child: Column(
                         children: [
                           DetailInfoRow(
                             label: 'Phone Number',
-                            value: data['phone']?.toString() ?? 'N/A',
+                            // Older saves were plain digits; show them
+                            // with dashes too.
+                            value: data['phone'] == null
+                                ? 'N/A'
+                                : formatPhone(data['phone'].toString()),
                           ),
                           const Divider(height: 20),
                           DetailInfoRow(
@@ -2987,22 +5563,8 @@ class _ProfileTab extends StatelessWidget {
                         ],
                       ),
                     ),
-                  ],
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 24.0,
-                  vertical: 16.0,
-                ),
-                child: PrimaryButton(
-                  title: 'Edit Information',
-                  icon: Icons.edit_outlined,
-                  onPressed: () => _openContactDialog(context, data: data),
-                ),
-              ),
-            ],
-          ),
+                    const SizedBox(height: 12),
+          ],
         );
       },
     );
@@ -3018,6 +5580,8 @@ class _ContactInfoDialog extends StatefulWidget {
 }
 
 class _ContactInfoDialogState extends State<_ContactInfoDialog> {
+  static const List<String> _genders = ['Male', 'Female', 'Other'];
+
   late final TextEditingController _phoneCtrl;
   late final TextEditingController _firstCtrl;
   late final TextEditingController _lastCtrl;
@@ -3034,47 +5598,58 @@ class _ContactInfoDialogState extends State<_ContactInfoDialog> {
   void initState() {
     super.initState();
     final d = widget.existingData;
-    _phoneCtrl = TextEditingController(text: d?['phone']?.toString() ?? '');
-    _firstCtrl = TextEditingController(text: d?['firstName']?.toString() ?? '');
-    _lastCtrl = TextEditingController(text: d?['lastName']?.toString() ?? '');
-    _middleCtrl =
-        TextEditingController(text: d?['middleName']?.toString() ?? '');
-    _addr1Ctrl = TextEditingController(text: d?['address1']?.toString() ?? '');
-    _addr2Ctrl = TextEditingController(text: d?['address2']?.toString() ?? '');
-    _cityCtrl = TextEditingController(text: d?['city']?.toString() ?? '');
-    _stateCtrl = TextEditingController(text: d?['state']?.toString() ?? '');
-    _zipCtrl = TextEditingController(text: d?['zipCode']?.toString() ?? '');
-    _countryCtrl =
-        TextEditingController(text: d?['country']?.toString() ?? '');
-    _gender = d?['gender']?.toString();
+    String v(String k) => d?[k]?.toString() ?? '';
+    _phoneCtrl = TextEditingController(text: formatPhone(v('phone')));
+    _firstCtrl = TextEditingController(text: v('firstName'));
+    _lastCtrl = TextEditingController(text: v('lastName'));
+    _middleCtrl = TextEditingController(text: v('middleName'));
+    _addr1Ctrl = TextEditingController(text: v('address1'));
+    _addr2Ctrl = TextEditingController(text: v('address2'));
+    _cityCtrl = TextEditingController(text: v('city'));
+    _stateCtrl = TextEditingController(text: v('state'));
+    _zipCtrl = TextEditingController(text: v('zipCode'));
+    _countryCtrl = TextEditingController(text: v('country'));
+    // Guard: an unexpected stored value would crash the dropdown.
+    final g = d?['gender']?.toString();
+    _gender = _genders.contains(g) ? g : null;
   }
 
   @override
   void dispose() {
-    _phoneCtrl.dispose();
-    _firstCtrl.dispose();
-    _lastCtrl.dispose();
-    _middleCtrl.dispose();
-    _addr1Ctrl.dispose();
-    _addr2Ctrl.dispose();
-    _cityCtrl.dispose();
-    _stateCtrl.dispose();
-    _zipCtrl.dispose();
-    _countryCtrl.dispose();
+    for (final c in [
+      _phoneCtrl,
+      _firstCtrl,
+      _lastCtrl,
+      _middleCtrl,
+      _addr1Ctrl,
+      _addr2Ctrl,
+      _cityCtrl,
+      _stateCtrl,
+      _zipCtrl,
+      _countryCtrl,
+    ]) {
+      c.dispose();
+    }
     super.dispose();
   }
 
   void _submit() {
-    if (_phoneCtrl.text.trim().isEmpty ||
-        _firstCtrl.text.trim().isEmpty ||
-        _lastCtrl.text.trim().isEmpty ||
-        _gender == null ||
-        _addr1Ctrl.text.trim().isEmpty ||
-        _cityCtrl.text.trim().isEmpty ||
-        _stateCtrl.text.trim().isEmpty ||
-        _zipCtrl.text.trim().isEmpty ||
-        _countryCtrl.text.trim().isEmpty) {
+    final required = [
+      _phoneCtrl,
+      _firstCtrl,
+      _lastCtrl,
+      _addr1Ctrl,
+      _cityCtrl,
+      _stateCtrl,
+      _zipCtrl,
+      _countryCtrl,
+    ];
+    if (_gender == null || required.any((c) => c.text.trim().isEmpty)) {
       showErrorSnackBar(context, 'Please fill in all required fields.');
+      return;
+    }
+    if (_phoneCtrl.text.replaceAll(RegExp(r'\D'), '').length != 10) {
+      showErrorSnackBar(context, 'Please enter a 10-digit phone number.');
       return;
     }
 
@@ -3086,7 +5661,7 @@ class _ContactInfoDialogState extends State<_ContactInfoDialog> {
         'firstName': _firstCtrl.text.trim(),
         'lastName': _lastCtrl.text.trim(),
         'middleName': _middleCtrl.text.trim(),
-        'phone': _phoneCtrl.text.trim(),
+        'phone': formatPhone(_phoneCtrl.text), // saved as xxx-xxx-xxxx
         'gender': _gender,
         'address1': _addr1Ctrl.text.trim(),
         'address2': _addr2Ctrl.text.trim(),
@@ -3101,15 +5676,12 @@ class _ContactInfoDialogState extends State<_ContactInfoDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Dialog(
-      backgroundColor: theme.cardColor,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 500),
         child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24.0),
+          padding: const EdgeInsets.all(20.0),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -3120,11 +5692,7 @@ class _ContactInfoDialogState extends State<_ContactInfoDialog> {
                     widget.existingData == null
                         ? 'Add Contact Info'
                         : 'Edit Contact Info',
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: theme.colorScheme.onSurface,
-                    ),
+                    style: mono(fontSize: 17),
                   ),
                   IconButton(
                     icon: const Icon(Icons.close),
@@ -3161,43 +5729,39 @@ class _ContactInfoDialogState extends State<_ContactInfoDialog> {
               const SizedBox(height: 12),
               AppTextField(
                 controller: _phoneCtrl,
-                hintText: 'Phone Number *',
+                hintText: 'Phone Number * (xxx-xxx-xxxx)',
                 icon: Icons.phone_outlined,
                 keyboardType: TextInputType.phone,
+                inputFormatters: [PhoneInputFormatter()],
               ),
               const SizedBox(height: 12),
               Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 4,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
                 decoration: BoxDecoration(
-                  color: theme.cardColor,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: theme.dividerColor),
+                  color: kCard,
+                  borderRadius: BorderRadius.circular(kRadius),
+                  border: Border.all(color: kDivider),
                 ),
                 child: DropdownButtonHideUnderline(
                   child: DropdownButton<String>(
                     value: _gender,
                     isExpanded: true,
-                    hint: Row(
+                    hint: const Row(
                       children: [
-                        Icon(Icons.transgender, color: theme.primaryColor),
-                        const SizedBox(width: 12),
+                        Icon(Icons.transgender, color: kTextMuted, size: 20),
+                        SizedBox(width: 12),
                         Text(
                           'Gender *',
-                          style: TextStyle(
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
+                          style: TextStyle(color: kTextMuted, fontSize: 14),
                         ),
                       ],
                     ),
-                    dropdownColor: theme.cardColor,
-                    icon: Icon(Icons.arrow_drop_down, color: theme.primaryColor),
-                    items: const [
-                      DropdownMenuItem(value: 'Male', child: Text('Male')),
-                      DropdownMenuItem(value: 'Female', child: Text('Female')),
-                      DropdownMenuItem(value: 'Other', child: Text('Other')),
+                    dropdownColor: kCard,
+                    borderRadius: BorderRadius.circular(kRadius),
+                    icon: const Icon(Icons.arrow_drop_down, color: kTextMuted),
+                    items: [
+                      for (final g in _genders)
+                        DropdownMenuItem(value: g, child: Text(g)),
                     ],
                     onChanged: (val) => setState(() => _gender = val),
                   ),
@@ -3257,42 +5821,7 @@ class _ContactInfoDialogState extends State<_ContactInfoDialog> {
                 ],
               ),
               const SizedBox(height: 24),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: theme.colorScheme.onSurface,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        side: BorderSide(color: theme.dividerColor),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                      ),
-                      child: const Text('Cancel'),
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: _submit,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: theme.primaryColor,
-                        foregroundColor: Colors.black,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                      ),
-                      child: const Text(
-                        'Confirm',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+              _DialogButtons(onConfirm: _submit),
             ],
           ),
         ),
@@ -3302,8 +5831,611 @@ class _ContactInfoDialogState extends State<_ContactInfoDialog> {
 }
 
 // ==========================================
+// MOTION — mirrors the admin dashboard (motion.js / index.css):
+// staggered fade-up entrances, press feedback, live pulse, flashes.
+// Everything honours the OS "reduce motion" setting.
+// ==========================================
+
+const Duration kMotionFast = Duration(milliseconds: 160);
+const Duration kMotion = Duration(milliseconds: 280);
+const Duration kMotionSlow = Duration(milliseconds: 450);
+const Curve kEaseOut = Curves.easeOutCubic;
+
+/// True when the user asked the OS to reduce motion.
+bool reduceMotion(BuildContext context) =>
+    MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+
+/// Fades and rises its child into place once, like the dashboard's
+/// `.sws-enter`. [index] staggers siblings (each one starts a bit later).
+class FadeSlideIn extends StatefulWidget {
+  final Widget child;
+  final int index;
+  final double offsetY; // start this many px lower (negative = higher)
+  final Duration duration;
+
+  const FadeSlideIn({
+    super.key,
+    required this.child,
+    this.index = 0,
+    this.offsetY = 14,
+    this.duration = kMotionSlow,
+  });
+
+  @override
+  State<FadeSlideIn> createState() => _FadeSlideInState();
+}
+
+class _FadeSlideInState extends State<FadeSlideIn>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c =
+      AnimationController(vsync: this, duration: widget.duration);
+  late final Animation<double> _t = CurvedAnimation(parent: _c, curve: kEaseOut);
+  Timer? _delay;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_c.status != AnimationStatus.dismissed || _delay != null) return;
+    if (reduceMotion(context)) {
+      _c.value = 1;
+      return;
+    }
+    // Stagger only during a list's opening moment. Items revealed later by
+    // scrolling animate straight away instead of waiting their turn.
+    final scope = StaggerScope.maybeOf(context);
+    final opening = scope == null || scope.isOpening;
+    final ms = opening ? 45 * widget.index.clamp(0, 8) : 0;
+    _delay = Timer(Duration(milliseconds: ms), () {
+      if (mounted) _c.forward();
+    });
+  }
+
+  @override
+  void dispose() {
+    _delay?.cancel();
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _t,
+      child: widget.child,
+      builder: (context, child) => Opacity(
+        opacity: _t.value,
+        child: Transform.translate(
+          offset: Offset(0, widget.offsetY * (1 - _t.value)),
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
+/// Marks when a list first appeared, so [FadeSlideIn] can tell the opening
+/// stagger apart from items that scroll into view later.
+class StaggerScope extends InheritedWidget {
+  final DateTime openedAt;
+
+  const StaggerScope({super.key, required this.openedAt, required super.child});
+
+  bool get isOpening =>
+      DateTime.now().difference(openedAt) < const Duration(milliseconds: 700);
+
+  static StaggerScope? maybeOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<StaggerScope>();
+
+  @override
+  bool updateShouldNotify(StaggerScope old) => old.openedAt != openedAt;
+}
+
+/// Smooth, springy scrolling (iOS-style bounce on every platform), always
+/// scrollable so the bounce works even when the content fits.
+const ScrollPhysics kScrollPhysics = BouncingScrollPhysics(
+  parent: AlwaysScrollableScrollPhysics(),
+  decelerationRate: ScrollDecelerationRate.fast,
+);
+
+/// Polished scroll container: slim themed scrollbar plus soft fades at the
+/// top and bottom edges so content melts away instead of being cut off.
+class SmoothScroll extends StatelessWidget {
+  final Widget child; // a scroll view
+  final double fade;
+  final bool alwaysShowThumb;
+
+  const SmoothScroll({
+    super.key,
+    required this.child,
+    this.fade = 18,
+    this.alwaysShowThumb = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Scrollbar(
+      thumbVisibility: alwaysShowThumb,
+      child: ShaderMask(
+        blendMode: BlendMode.dstIn,
+        shaderCallback: (rect) {
+          final f = rect.height <= 0 ? 0.0 : (fade / rect.height).clamp(0.0, 0.5);
+          return LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: const [
+              Colors.transparent,
+              Colors.black,
+              Colors.black,
+              Colors.transparent,
+            ],
+            stops: [0, f, 1 - f, 1],
+          ).createShader(rect);
+        },
+        child: child,
+      ),
+    );
+  }
+}
+
+/// Lets mouse and trackpad drag-scroll lists too (handy on web/desktop).
+class AppScrollBehavior extends MaterialScrollBehavior {
+  const AppScrollBehavior();
+
+  @override
+  Set<ui.PointerDeviceKind> get dragDevices =>
+      ui.PointerDeviceKind.values.toSet();
+}
+
+/// Shrinks its child slightly while pressed (tactile feedback). It only
+/// listens to the pointer, so taps still reach the InkWell/button inside.
+class PressScale extends StatefulWidget {
+  final Widget child;
+  final double pressedScale;
+
+  const PressScale({super.key, required this.child, this.pressedScale = 0.97});
+
+  @override
+  State<PressScale> createState() => _PressScaleState();
+}
+
+class _PressScaleState extends State<PressScale> {
+  bool _down = false;
+
+  void _set(bool v) {
+    if (_down != v) setState(() => _down = v);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Listener(
+      onPointerDown: (_) => _set(true),
+      onPointerUp: (_) => _set(false),
+      onPointerCancel: (_) => _set(false),
+      child: AnimatedScale(
+        scale: _down && !reduceMotion(context) ? widget.pressedScale : 1,
+        duration: kMotionFast,
+        curve: kEaseOut,
+        child: widget.child,
+      ),
+    );
+  }
+}
+
+/// Pulsing dot that signals live data (the dashboard's `.sws-live-dot`).
+class LiveDot extends StatefulWidget {
+  final Color color;
+  final double size;
+
+  const LiveDot({super.key, this.color = kOpen, this.size = 7});
+
+  @override
+  State<LiveDot> createState() => _LiveDotState();
+}
+
+class _LiveDotState extends State<LiveDot> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1600),
+  );
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (reduceMotion(context)) {
+      _c.stop();
+    } else if (!_c.isAnimating) {
+      _c.repeat();
+    }
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = widget.size;
+    return SizedBox(
+      width: s * 2.6,
+      height: s * 2.6,
+      child: AnimatedBuilder(
+        animation: _c,
+        builder: (context, _) {
+          final t = _c.value;
+          return Stack(
+            alignment: Alignment.center,
+            children: [
+              // Expanding, fading ring.
+              Container(
+                width: s * (1 + 1.6 * t),
+                height: s * (1 + 1.6 * t),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: widget.color.withValues(alpha: 0.45 * (1 - t)),
+                ),
+              ),
+              Container(
+                width: s,
+                height: s,
+                decoration:
+                    BoxDecoration(shape: BoxShape.circle, color: widget.color),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+// ==========================================
+// CONNECTION QUALITY
+// ==========================================
+
+enum NetQuality { checking, good, unstable, bad, offline }
+
+/// Watches the connection to the parking database and grades it.
+///
+/// Two signals: Firebase's own `.info/connected` flag (reacts the moment the
+/// socket drops or comes back) and a tiny timed request every few seconds.
+/// The last [_window] requests decide the grade:
+///  * good     – median under 300 ms, nothing failed
+///  * unstable – median 300–1000 ms, or one request failed
+///  * bad      – median over 1000 ms, or two or more failed
+///  * offline  – Firebase reports no connection, or every request failed
+class ConnectionMonitor extends ChangeNotifier {
+  static const Duration _interval = Duration(seconds: 5);
+  static const Duration _timeout = Duration(seconds: 4);
+  static const int _window = 4;
+
+  final http.Client _client = http.Client(); // keep-alive: measures real RTT
+  final List<int?> _samples = []; // ms per ping; null = failed
+  StreamSubscription<DatabaseEvent>? _connSub;
+  Timer? _timer;
+  bool _firebaseConnected = true;
+  bool _disposed = false;
+
+  NetQuality quality = NetQuality.checking;
+  int? latencyMs; // median of recent successful pings
+
+  Uri get _pingUri {
+    final base = DefaultFirebaseOptions.currentPlatform.databaseURL ??
+        'https://smartcurb-d174e-default-rtdb.firebaseio.com';
+    // A path that holds nothing: the reply is a few bytes either way.
+    return Uri.parse('$base/_ping.json');
+  }
+
+  void start() {
+    _connSub = FirebaseDatabase.instance
+        .ref('.info/connected')
+        .onValue
+        .listen((e) {
+      _firebaseConnected = e.snapshot.value == true;
+      _grade();
+      if (_firebaseConnected) _ping(); // re-measure right after reconnecting
+    });
+    _ping();
+    _timer = Timer.periodic(_interval, (_) => _ping());
+  }
+
+  Future<void> _ping() async {
+    final sw = Stopwatch()..start();
+    int? ms;
+    try {
+      await _client.get(_pingUri).timeout(_timeout);
+      ms = sw.elapsedMilliseconds;
+    } catch (_) {
+      ms = null; // timed out or no network
+    }
+    if (_disposed) return;
+    _samples.add(ms);
+    if (_samples.length > _window) _samples.removeAt(0);
+    _grade();
+  }
+
+  void _grade() {
+    if (_disposed) return;
+    final ok = _samples.whereType<int>().toList()..sort();
+    final failed = _samples.length - ok.length;
+    latencyMs = ok.isEmpty ? null : ok[ok.length ~/ 2];
+
+    final NetQuality q;
+    if (!_firebaseConnected ||
+        (_samples.isNotEmpty && ok.isEmpty && _samples.length >= 2)) {
+      q = NetQuality.offline;
+    } else if (_samples.isEmpty) {
+      q = NetQuality.checking;
+    } else if (failed >= 2 || (latencyMs ?? 99999) > 1000) {
+      q = NetQuality.bad;
+    } else if (failed == 1 || latencyMs! > 300) {
+      q = NetQuality.unstable;
+    } else {
+      q = NetQuality.good;
+    }
+    quality = q;
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _timer?.cancel();
+    _connSub?.cancel();
+    _client.close();
+    super.dispose();
+  }
+}
+
+/// Wi-Fi style signal icon for the connection: green = good, amber =
+/// unstable, red = bad, red "no wifi" = offline. Tap or hover for details.
+/// It owns its own monitor, so it can be dropped anywhere.
+class ConnectionIndicator extends StatefulWidget {
+  final double size;
+
+  const ConnectionIndicator({super.key, this.size = 16});
+
+  @override
+  State<ConnectionIndicator> createState() => _ConnectionIndicatorState();
+}
+
+class _ConnectionIndicatorState extends State<ConnectionIndicator> {
+  final ConnectionMonitor _monitor = ConnectionMonitor();
+
+  @override
+  void initState() {
+    super.initState();
+    _monitor.start();
+  }
+
+  @override
+  void dispose() {
+    _monitor.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: _monitor,
+      builder: (context, _) {
+        final q = _monitor.quality;
+        final ms = _monitor.latencyMs;
+        final (IconData icon, Color color, String label) = switch (q) {
+          NetQuality.checking => (Icons.wifi, kTextMuted, 'Checking connection…'),
+          NetQuality.good => (Icons.wifi, kOpen, 'Connection good'),
+          NetQuality.unstable =>
+            (Icons.wifi_2_bar, kAmber, 'Connection unstable'),
+          NetQuality.bad => (Icons.wifi_1_bar, kRed, 'Connection poor'),
+          NetQuality.offline => (Icons.wifi_off, kRed, 'Offline'),
+        };
+        final detail = (ms != null && q != NetQuality.offline)
+            ? '$label · $ms ms'
+            : label;
+
+        return Tooltip(
+          message: detail,
+          triggerMode: TooltipTriggerMode.tap,
+          child: Semantics(
+            label: detail,
+            child: AnimatedSwitcher(
+              duration: kMotion,
+              transitionBuilder: (child, anim) => FadeTransition(
+                opacity: anim,
+                child: ScaleTransition(scale: anim, child: child),
+              ),
+              child: Icon(
+                icon,
+                key: ValueKey(q),
+                size: widget.size,
+                color: color,
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// showDialog with a modern entrance: fade + gentle scale-up from 95%.
+Future<T?> showAppDialog<T>({
+  required BuildContext context,
+  required WidgetBuilder builder,
+  bool barrierDismissible = true,
+}) {
+  return showGeneralDialog<T>(
+    context: context,
+    barrierDismissible: barrierDismissible,
+    barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
+    barrierColor: Colors.black.withValues(alpha: 0.6),
+    transitionDuration: reduceMotion(context) ? Duration.zero : kMotion,
+    pageBuilder: (ctx, _, _) => builder(ctx),
+    transitionBuilder: (ctx, anim, _, child) {
+      final t = CurvedAnimation(
+        parent: anim,
+        curve: kEaseOut,
+        reverseCurve: Curves.easeInCubic,
+      );
+      return FadeTransition(
+        opacity: t,
+        child: ScaleTransition(
+          scale: Tween(begin: 0.95, end: 1.0).animate(t),
+          child: child,
+        ),
+      );
+    },
+  );
+}
+
+/// Like IndexedStack (keeps every tab alive), but the newly selected tab
+/// fades and rises in instead of appearing instantly.
+class FadeIndexedStack extends StatefulWidget {
+  final int index;
+  final List<Widget> children;
+
+  const FadeIndexedStack({
+    super.key,
+    required this.index,
+    required this.children,
+  });
+
+  @override
+  State<FadeIndexedStack> createState() => _FadeIndexedStackState();
+}
+
+class _FadeIndexedStackState extends State<FadeIndexedStack>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c =
+      AnimationController(vsync: this, duration: kMotion, value: 1);
+  late final Animation<double> _t = CurvedAnimation(parent: _c, curve: kEaseOut);
+
+  @override
+  void didUpdateWidget(FadeIndexedStack old) {
+    super.didUpdateWidget(old);
+    if (old.index != widget.index && !reduceMotion(context)) {
+      _c.forward(from: 0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _t,
+      builder: (context, child) => Opacity(
+        opacity: _t.value,
+        child: Transform.translate(
+          offset: Offset(0, 10 * (1 - _t.value)),
+          child: child,
+        ),
+      ),
+      child: IndexedStack(index: widget.index, children: widget.children),
+    );
+  }
+}
+
+/// Swaps text with a quick fade + slide whenever its content changes.
+/// Pass [switchKey] to animate only when that changes (e.g. the kind of
+/// message), so a value that updates every second just updates in place.
+class AnimatedText extends StatelessWidget {
+  final String text;
+  final TextStyle? style;
+  final TextOverflow? overflow;
+  final Object? switchKey;
+
+  const AnimatedText(
+    this.text, {
+    super.key,
+    this.style,
+    this.overflow,
+    this.switchKey,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedSwitcher(
+      duration: kMotion,
+      switchInCurve: kEaseOut,
+      switchOutCurve: Curves.easeInCubic,
+      layoutBuilder: (current, previous) => Stack(
+        alignment: Alignment.centerLeft,
+        children: [...previous, ?current],
+      ),
+      transitionBuilder: (child, anim) => FadeTransition(
+        opacity: anim,
+        child: SlideTransition(
+          position: Tween(begin: const Offset(0, 0.35), end: Offset.zero)
+              .animate(anim),
+          child: child,
+        ),
+      ),
+      child: Text(
+        text,
+        key: ValueKey(switchKey ?? text),
+        style: style,
+        overflow: overflow,
+        maxLines: 1,
+      ),
+    );
+  }
+}
+
+// ==========================================
 // REUSABLE PRESENTATIONAL WIDGETS
 // ==========================================
+
+/// Formats a US phone number as xxx-xxx-xxxx. Partial numbers are formatted
+/// as far as they go ("97170" -> "971-70"). Anything that isn't 1–10 digits
+/// (e.g. an international number) is returned unchanged.
+String formatPhone(String input) {
+  final digits = input.replaceAll(RegExp(r'\D'), '');
+  if (digits.isEmpty || digits.length > 10) return input.trim();
+  if (digits.length <= 3) return digits;
+  if (digits.length <= 6) {
+    return '${digits.substring(0, 3)}-${digits.substring(3)}';
+  }
+  return '${digits.substring(0, 3)}-${digits.substring(3, 6)}-'
+      '${digits.substring(6)}';
+}
+
+/// Live phone formatting while typing: digits only, at most 10, dashes added
+/// automatically, and the cursor stays next to the digit you just typed.
+class PhoneInputFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    final digits = newValue.text.replaceAll(RegExp(r'\D'), '');
+    final capped = digits.length > 10 ? digits.substring(0, 10) : digits;
+    final text = formatPhone(capped);
+
+    // Where the cursor should land: after the same number of digits.
+    final cursor = newValue.selection.end.clamp(0, newValue.text.length);
+    final digitsBefore = newValue.text
+        .substring(0, cursor)
+        .replaceAll(RegExp(r'\D'), '')
+        .length
+        .clamp(0, capped.length);
+    var offset = 0;
+    var seen = 0;
+    while (offset < text.length && seen < digitsBefore) {
+      if (RegExp(r'\d').hasMatch(text[offset])) seen++;
+      offset++;
+    }
+    return TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: offset),
+    );
+  }
+}
 
 class AppTextField extends StatelessWidget {
   final TextEditingController controller;
@@ -3311,6 +6443,8 @@ class AppTextField extends StatelessWidget {
   final IconData icon;
   final bool obscureText;
   final TextInputType keyboardType;
+  final ValueChanged<String>? onChanged;
+  final List<TextInputFormatter>? inputFormatters;
 
   const AppTextField({
     super.key,
@@ -3319,34 +6453,42 @@ class AppTextField extends StatelessWidget {
     required this.icon,
     this.obscureText = false,
     this.keyboardType = TextInputType.text,
+    this.onChanged,
+    this.inputFormatters,
   });
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    // Matches the dashboard inputs: 44px tall, panel fill, 1px line, 6px radius.
+    // Height comes from the padding (14px text + 2×13px ≈ 44px), not a fixed
+    // box, so the text stays vertically centred next to the icon.
     return Container(
       decoration: BoxDecoration(
-        color: theme.cardColor,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: theme.dividerColor),
+        color: kCard,
+        borderRadius: BorderRadius.circular(kRadius),
+        border: Border.all(color: kDivider),
       ),
       child: TextField(
         controller: controller,
         obscureText: obscureText,
         keyboardType: keyboardType,
-        style: TextStyle(color: theme.colorScheme.onSurface),
+        inputFormatters: inputFormatters,
+        onChanged: onChanged,
+        cursorColor: kAccent,
+        textAlignVertical: TextAlignVertical.center,
+        style: const TextStyle(color: kText, fontSize: 14),
         decoration: InputDecoration(
           border: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 16,
-            vertical: 16,
-          ),
+          isDense: true,
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
           hintText: hintText,
-          hintStyle: TextStyle(
-            color: theme.colorScheme.onSurfaceVariant,
-            fontSize: 14,
-          ),
-          prefixIcon: Icon(icon, color: theme.primaryColor, size: 20),
+          hintStyle: const TextStyle(color: kTextMuted, fontSize: 14),
+          prefixIcon: Icon(icon, color: kTextMuted, size: 18),
+          // Default prefix box is 48×48, which made the field taller than
+          // its text and pushed the text off-centre.
+          prefixIconConstraints:
+              const BoxConstraints(minWidth: 40, minHeight: 0),
         ),
       ),
     );
@@ -3359,56 +6501,75 @@ class PrimaryButton extends StatelessWidget {
   final bool isLoading;
   final IconData? icon;
 
+  /// Compact: a smaller button sized to its label and centred, instead of
+  /// full width (used under the card lists).
+  final bool compact;
+
   const PrimaryButton({
     super.key,
     required this.title,
     required this.onPressed,
     this.isLoading = false,
     this.icon,
+    this.compact = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return SizedBox(
-      width: double.infinity,
-      child: ElevatedButton(
-        onPressed: isLoading ? null : onPressed,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: theme.primaryColor,
-          foregroundColor: const Color(0xFF12110F),
-          padding: const EdgeInsets.symmetric(vertical: 16),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-          elevation: 0,
-        ),
-        child: isLoading
-            ? const SizedBox(
-                height: 20,
-                width: 20,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: Color(0xFF12110F),
-                ),
-              )
-            : Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  if (icon != null) ...[
-                    Icon(icon, size: 20),
-                    const SizedBox(width: 8),
-                  ],
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 0.5,
-                    ),
-                  ),
-                ],
+    final button = PressScale(
+      child: SizedBox(
+        width: compact ? null : double.infinity,
+        height: compact ? 38 : 46,
+        child: ElevatedButton(
+          onPressed: isLoading ? null : onPressed,
+          style: ElevatedButton.styleFrom(
+            disabledBackgroundColor: kAccent.withValues(alpha: 0.6),
+            disabledForegroundColor: kOnAccent,
+            padding: compact
+                ? const EdgeInsets.symmetric(horizontal: 18)
+                : null,
+            textStyle: compact
+                ? GoogleFonts.archivo(fontSize: 13, fontWeight: FontWeight.w600)
+                : null,
+          ),
+          // Label and spinner cross-fade with a small scale.
+          child: AnimatedSwitcher(
+            duration: kMotionFast,
+            transitionBuilder: (child, anim) => FadeTransition(
+              opacity: anim,
+              child: ScaleTransition(
+                scale: Tween(begin: 0.8, end: 1.0).animate(anim),
+                child: child,
               ),
+            ),
+            child: isLoading
+                ? const SizedBox(
+                    key: ValueKey('loading'),
+                    height: 20,
+                    width: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: kOnAccent,
+                    ),
+                  )
+                : Row(
+                    key: const ValueKey('label'),
+                    mainAxisSize:
+                        compact ? MainAxisSize.min : MainAxisSize.max,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      if (icon != null) ...[
+                        Icon(icon, size: compact ? 16 : 18),
+                        SizedBox(width: compact ? 6 : 8),
+                      ],
+                      Text(title),
+                    ],
+                  ),
+          ),
+        ),
       ),
     );
+    return compact ? Center(child: button) : button;
   }
 }
 
@@ -3420,28 +6581,21 @@ class DetailInfoRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6.0),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            label,
-            style: TextStyle(
-              color: theme.colorScheme.onSurfaceVariant,
-              fontSize: 14,
-            ),
-          ),
+          Text(label, style: const TextStyle(color: kTextMuted, fontSize: 13)),
           const SizedBox(width: 8),
           Flexible(
             child: Text(
               value,
               textAlign: TextAlign.right,
-              style: TextStyle(
-                color: theme.colorScheme.onSurface,
-                fontWeight: FontWeight.bold,
-                fontSize: 14,
+              style: const TextStyle(
+                color: kText,
+                fontWeight: FontWeight.w600,
+                fontSize: 13.5,
               ),
             ),
           ),
@@ -3467,14 +6621,37 @@ class AnimatedAddCard extends StatefulWidget {
   State<AnimatedAddCard> createState() => _AnimatedAddCardState();
 }
 
-class _AnimatedAddCardState extends State<AnimatedAddCard> {
+class _AnimatedAddCardState extends State<AnimatedAddCard>
+    with SingleTickerProviderStateMixin {
   bool _isPressed = false;
+
+  /// Slow "breathing" of the + icon, inviting a tap.
+  late final AnimationController _breath = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1800),
+  );
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (reduceMotion(context)) {
+      _breath.stop();
+    } else if (!_breath.isAnimating) {
+      _breath.repeat(reverse: true);
+    }
+  }
+
+  @override
+  void dispose() {
+    _breath.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Center(
-      child: Padding(
+      child: FadeSlideIn(
+        child: Padding(
         padding: const EdgeInsets.all(24.0),
         child: GestureDetector(
           onTapDown: (_) => setState(() => _isPressed = true),
@@ -3483,74 +6660,69 @@ class _AnimatedAddCardState extends State<AnimatedAddCard> {
             widget.onTap();
           },
           onTapCancel: () => setState(() => _isPressed = false),
-          child: AnimatedContainer(
+          child: AnimatedScale(
+            scale: _isPressed ? 0.95 : 1.0,
             duration: const Duration(milliseconds: 150),
             curve: Curves.easeInOut,
-            width: double.infinity,
-            height: 220,
-            transform: Matrix4.identity()..scale(_isPressed ? 0.95 : 1.0),
-            transformAlignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: theme.cardColor,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color: _isPressed
-                    ? theme.primaryColor.withOpacity(0.6)
-                    : theme.dividerColor,
-                width: 2,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              curve: Curves.easeInOut,
+              width: double.infinity,
+              height: 220,
+              // Flat panel; on press the border turns accent and an accent
+              // ring flashes, like the dashboard's .sws-hover / .sws-flash.
+              decoration: BoxDecoration(
+                color: kCard,
+                borderRadius: BorderRadius.circular(kRadius),
+                border: Border.all(color: _isPressed ? kAccent : kDivider),
+                boxShadow: [
+                  BoxShadow(
+                    color: kAccent.withValues(alpha: _isPressed ? 0.35 : 0),
+                    spreadRadius: _isPressed ? 4 : 0,
+                  ),
+                ],
               ),
-              boxShadow: _isPressed
-                  ? [
-                      BoxShadow(
-                        color: theme.primaryColor.withOpacity(0.15),
-                        blurRadius: 20,
-                        spreadRadius: 2,
-                      ),
-                    ]
-                  : null,
-            ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 150),
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: theme.scaffoldBackgroundColor,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: _isPressed
-                            ? theme.primaryColor.withOpacity(0.4)
-                            : theme.primaryColor.withOpacity(0.1),
-                        blurRadius: _isPressed ? 25 : 15,
-                        spreadRadius: _isPressed ? 8 : 5,
-                      ),
-                    ],
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  AnimatedBuilder(
+                    animation: _breath,
+                    builder: (context, child) {
+                      final t = Curves.easeInOut.transform(_breath.value);
+                      return Transform.scale(
+                        scale: 1 + 0.06 * t,
+                        child: Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: kNavBg,
+                            borderRadius: BorderRadius.circular(kRadius),
+                            boxShadow: [
+                              BoxShadow(
+                                color: kAccent.withValues(alpha: 0.18 * t),
+                                blurRadius: 18,
+                                spreadRadius: 1,
+                              ),
+                            ],
+                          ),
+                          child: child,
+                        ),
+                      );
+                    },
+                    child: const Icon(Icons.add, size: 36, color: kAccent),
                   ),
-                  child: Icon(Icons.add, size: 40, color: theme.primaryColor),
-                ),
-                const SizedBox(height: 20),
-                Text(
-                  widget.title,
-                  style: TextStyle(
-                    color: theme.colorScheme.onSurface,
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
+                  const SizedBox(height: 18),
+                  Text(widget.title, style: mono(fontSize: 16)),
+                  const SizedBox(height: 6),
+                  Text(
+                    widget.subtitle,
+                    style: const TextStyle(color: kTextMuted, fontSize: 12.5),
                   ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  widget.subtitle,
-                  style: TextStyle(
-                    color: theme.colorScheme.onSurfaceVariant,
-                    fontSize: 14,
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
+      ),
       ),
     );
   }
@@ -3560,59 +6732,83 @@ class _AnimatedAddCardState extends State<AnimatedAddCard> {
 // STATIC USER PAGES
 // ==========================================
 
-class UserSettingsPage extends StatelessWidget {
+class UserSettingsPage extends StatefulWidget {
   const UserSettingsPage({super.key});
 
   @override
+  State<UserSettingsPage> createState() => _UserSettingsPageState();
+}
+
+class _UserSettingsPageState extends State<UserSettingsPage> {
+  late final String? _uid = FirebaseAuth.instance.currentUser?.uid;
+  late final DatabaseReference? _notifRef = _uid == null
+      ? null
+      : FirebaseDatabase.instance.ref('drivers/$_uid/settings/notifications');
+  late final Stream<DatabaseEvent>? _notifStream = _notifRef?.onValue;
+
+  void _showContactDialog() {
+    showAppDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Contact Us', style: mono(fontSize: 17)),
+        content: SelectableText(
+          kSupportEmail,
+          style: mono(fontSize: 14, color: kAccent),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Clipboard.setData(const ClipboardData(text: kSupportEmail));
+              Navigator.pop(ctx);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Email copied to clipboard')),
+              );
+            },
+            child: const Text('Copy email'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            style: TextButton.styleFrom(foregroundColor: kTextMuted),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: ListView(
         padding: const EdgeInsets.all(16.0),
         children: [
-          ListTile(
-            leading: Icon(Icons.dark_mode, color: theme.primaryColor),
-            title: Text(
-              'Dark Mode',
-              style: TextStyle(color: theme.colorScheme.onSurface),
-            ),
-            trailing: Switch(
-              value: themeNotifier.value == ThemeMode.dark,
-              onChanged: (val) =>
-                  themeNotifier.value = val ? ThemeMode.dark : ThemeMode.light,
-              activeColor: theme.scaffoldBackgroundColor,
-              activeTrackColor: theme.primaryColor,
-            ),
+          StreamBuilder<DatabaseEvent>(
+            stream: _notifStream,
+            builder: (context, snapshot) {
+              // Default ON until the user turns it off.
+              final enabled = snapshot.data?.snapshot.value != false;
+              return ListTile(
+                leading: const Icon(Icons.notifications_active, color: kAccent),
+                title:
+                    const Text('Notifications', style: TextStyle(color: kText)),
+                trailing: Switch(
+                  value: enabled,
+                  onChanged:
+                      _notifRef == null ? null : (val) => _notifRef!.set(val),
+                ),
+              );
+            },
           ),
           ListTile(
-            leading: Icon(
-              Icons.notifications_active,
-              color: theme.primaryColor,
-            ),
-            title: Text(
-              'Notifications',
-              style: TextStyle(color: theme.colorScheme.onSurface),
-            ),
-            trailing: Switch(
-              value: true,
-              onChanged: (_) {},
-              activeColor: theme.scaffoldBackgroundColor,
-              activeTrackColor: theme.primaryColor,
-            ),
-          ),
-          ListTile(
-            leading: Icon(Icons.mail_outline, color: theme.primaryColor),
-            title: Text(
-              'Contact Us',
-              style: TextStyle(color: theme.colorScheme.onSurface),
-            ),
-            trailing: Icon(
+            leading: const Icon(Icons.mail_outline, color: kAccent),
+            title: const Text('Contact Us', style: TextStyle(color: kText)),
+            trailing: const Icon(
               Icons.arrow_forward_ios,
-              color: theme.colorScheme.onSurfaceVariant,
+              color: kTextMuted,
               size: 16,
             ),
-            onTap: () {},
+            onTap: _showContactDialog,
           ),
         ],
       ),
@@ -3625,33 +6821,87 @@ class UserAboutPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    const body = TextStyle(color: kNavText, height: 1.6, fontSize: 14.5);
+
     return Scaffold(
       appBar: AppBar(title: const Text('About App')),
-      body: Padding(
+      body: SingleChildScrollView(
+        physics: kScrollPhysics,
         padding: const EdgeInsets.all(24.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(Icons.radar, color: theme.primaryColor, size: 60),
-            const SizedBox(height: 20),
-            Text(
-              'Smart Curb is an intelligent IoT parking sensing application designed to monitor space availability and manage vehicles for individual users.',
-              style: TextStyle(
-                color: theme.colorScheme.onSurfaceVariant,
-                height: 1.5,
-                fontSize: 16,
+            // Logo on the left; app name and version on the right.
+            FadeSlideIn(
+              child: Row(
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(14),
+                    child: Image.asset(
+                      'assets/logo.png',
+                      width: 76,
+                      height: 76,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) =>
+                          const Icon(Icons.radar, size: 60, color: kAccent),
+                    ),
+                  ),
+                  const SizedBox(width: 18),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const _BrandTitle(fontSize: 28),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Version 1.0.8',
+                          style: mono(
+                            fontSize: 13,
+                            color: kTextMuted,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(height: 30),
-            Divider(color: theme.dividerColor),
-            const SizedBox(height: 10),
-            Text(
-              'Version: 1.0.0 (Beta)',
-              style: TextStyle(
-                color: theme.primaryColor,
-                fontWeight: FontWeight.bold,
-                fontSize: 14,
+            const SizedBox(height: 24),
+            const FadeSlideIn(index: 1, child: Divider(color: kDivider)),
+            const SizedBox(height: 20),
+            const FadeSlideIn(
+              index: 2,
+              child: Text(
+                'Smart Curb takes the guesswork out of campus parking. Smart '
+                'curb sensors in each parking space report in real time '
+                'whether the spot is free, so the app always knows how full '
+                'every lot is.',
+                style: body,
+              ),
+            ),
+            const SizedBox(height: 14),
+            const FadeSlideIn(
+              index: 3,
+              child: Text(
+                'Choose the building you are heading to and Smart Curb finds '
+                'the closest lot that still has space, measured by the real '
+                'walking distance to your door. It then guides you there '
+                'with live turn-by-turn navigation and shows how far you '
+                'will walk once you park. If that lot fills up on the way, '
+                'your route updates automatically.',
+                style: body,
+              ),
+            ),
+            const SizedBox(height: 14),
+            const FadeSlideIn(
+              index: 4,
+              child: Text(
+                'Keep your vehicles and contact details in one place, save '
+                'the campuses you visit, and see every lot at a glance: '
+                'green has plenty of space, amber is filling up and red is '
+                'almost full.',
+                style: body,
               ),
             ),
           ],
@@ -3665,14 +6915,15 @@ class UserAboutPage extends StatelessWidget {
 void showErrorSnackBar(BuildContext context, String message) {
   ScaffoldMessenger.of(context).showSnackBar(
     SnackBar(
+      // Dashboard errors are busy-red text, not a red block.
       content: Text(
         message,
-        style: const TextStyle(
-          color: Colors.white,
-          fontWeight: FontWeight.bold,
+        style: GoogleFonts.archivo(
+          color: kRed,
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
         ),
       ),
-      backgroundColor: Colors.redAccent,
     ),
   );
 }
