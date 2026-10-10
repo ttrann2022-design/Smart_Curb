@@ -7,18 +7,30 @@ import Icon from "../components/Icon";
 import { PageHeader, Button, Input } from "../components/ui";
 import { useAlertSettings, batteryText, isLowBattery, cleanText } from "../units";
 
-const suggestions = [
-  "Where should I park right now?",
-  "Which lot is the busiest?",
-  "How many spots are open in Lot 20?",
-  "Any curbs with low battery?",
-  "What needs attention?",
-];
+// Examples use a lot and a curb that actually exist, so every suggestion gets a real answer.
+function suggestionsFor(lotNames, unitIds) {
+  return [
+    "Where should I park right now?",
+    "Which lot is the busiest?",
+    lotNames[0] ? `How many spots are open in ${lotNames[0]}?` : "How many spots are open?",
+    unitIds[0] ? `What's the status of ${unitIds[0]}?` : "Any curbs with low battery?",
+    "What needs attention?",
+  ];
+}
 
-const HELP = "I can answer questions like:\n• Where should I park right now?\n• Which lot is the busiest?\n• How many spots are open in Lot 12?\n• Which curbs have low battery?\n• Which curbs are offline?\n• What's the status of C-012?\n• What needs attention?";
+function helpText(lots, units) {
+  const lot = lotMain(Object.values(lots)[0]?.name) || "Lot 12";
+  const unit = Object.keys(units).sort()[0] || "C-012";
+  return `I can answer questions like:\n• Where should I park right now?\n• Which lot is the busiest?\n• How many spots are open in ${lot}?\n• Which curbs have low battery?\n• Which curbs are offline?\n• What's the status of ${unit}?\n• What needs attention?`;
+}
 
 function lotMain(name) {
   return (name || "").split(" — ")[0];
+}
+
+// Short lot name for a curb, even when its lot field doesn't match a real lot.
+function lotOf(lots, u) {
+  return lotMain(lots[u.lot]?.name) || "an unassigned lot";
 }
 
 function buildStats(lots, units) {
@@ -55,21 +67,21 @@ function answer(raw, lots, units, alerts) {
     const status = !u.online ? "offline" : u.occupied ? "occupied" : "open";
     const color = cleanText(u.ledColor);
     const led = color ? `${color}${u.panelText ? `, showing "${u.panelText}"` : ""}` : "not set";
-    return `Curb ${id} is in ${lots[u.lot]?.name || u.lot}.\nStatus: ${status}\nBattery: ${batteryText(u)}\nLED: ${led}`;
+    return `Curb ${id} is in ${lots[u.lot]?.name || "an unassigned lot"}.\nStatus: ${status}\nBattery: ${batteryText(u)}\nLED: ${led}`;
   }
 
   if (/(battery|charge|charging|power)/.test(q)) {
     const low = entries.filter(([, u]) => isLowBattery(u, alerts)).sort(([, a], [, b]) => a.battery - b.battery);
     if (low.length === 0) return `No curbs are low on battery. Every measured unit is at ${alerts.lowBattery}% or above.`;
     return `${low.length} curb${low.length > 1 ? "s are" : " is"} low on battery:\n` +
-      low.map(([id, u]) => `• ${id} in ${lotMain(lots[u.lot]?.name)}: ${u.battery}%`).join("\n");
+      low.map(([id, u]) => `• ${id} in ${lotOf(lots, u)}: ${u.battery}%`).join("\n");
   }
 
   if (/(offline|not reporting|disconnected|down)/.test(q)) {
     const off = entries.filter(([, u]) => !u.online);
     if (off.length === 0) return "Every curb is online and reporting.";
     return `${off.length} curb${off.length > 1 ? "s are" : " is"} offline:\n` +
-      off.map(([id, u]) => `• ${id} in ${lotMain(lots[u.lot]?.name)}`).join("\n");
+      off.map(([id, u]) => `• ${id} in ${lotOf(lots, u)}`).join("\n");
   }
 
   if (/(attention|problem|issue|alert|wrong|broken)/.test(q)) {
@@ -77,8 +89,8 @@ function answer(raw, lots, units, alerts) {
     const low = entries.filter(([, u]) => u.online && isLowBattery(u, alerts));
     if (off.length === 0 && low.length === 0) return "Nothing needs attention right now. All curbs are online with healthy batteries.";
     const lines = [
-      ...off.map(([id, u]) => `• ${id} in ${lotMain(lots[u.lot]?.name)} is offline`),
-      ...low.map(([id, u]) => `• ${id} in ${lotMain(lots[u.lot]?.name)} is at ${u.battery}% battery`),
+      ...off.map(([id, u]) => `• ${id} in ${lotOf(lots, u)} is offline`),
+      ...low.map(([id, u]) => `• ${id} in ${lotOf(lots, u)} is at ${u.battery}% battery`),
     ];
     return `${lines.length} thing${lines.length > 1 ? "s need" : " needs"} attention:\n` + lines.join("\n");
   }
@@ -108,9 +120,9 @@ function answer(raw, lots, units, alerts) {
       stats.map((s) => `• ${s.short}: ${s.open} open`).join("\n");
   }
 
-  if (/(help|what can you|hello|hi\b|hey)/.test(q)) return HELP;
+  if (/(help|what can you|hello|hi\b|hey)/.test(q)) return helpText(lots, units);
 
-  return "I'm not sure how to answer that yet.\n\n" + HELP;
+  return "I'm not sure how to answer that yet.\n\n" + helpText(lots, units);
 }
 
 function Assistant() {
@@ -122,10 +134,17 @@ function Assistant() {
   const data = useRef({ lots: {}, units: {} });
   const endRef = useRef(null);
   const alerts = useAlertSettings();
+  const [examples, setExamples] = useState({ lots: [], units: [] });
 
   useEffect(() => {
-    const stopLots = onValue(ref(database, dataPath("lots")), (s) => { data.current.lots = s.val() || {}; });
-    const stopUnits = onValue(ref(database, dataPath("units")), (s) => { data.current.units = s.val() || {}; });
+    const stopLots = onValue(ref(database, dataPath("lots")), (s) => {
+      data.current.lots = s.val() || {};
+      setExamples((e) => ({ ...e, lots: Object.values(data.current.lots).map((l) => lotMain(l.name)).filter(Boolean) }));
+    });
+    const stopUnits = onValue(ref(database, dataPath("units")), (s) => {
+      data.current.units = s.val() || {};
+      setExamples((e) => ({ ...e, units: Object.keys(data.current.units).sort() }));
+    });
     return () => { stopLots(); stopUnits(); };
   }, []);
 
@@ -185,7 +204,7 @@ function Assistant() {
         </div>
 
         <div className="sws-chips" aria-label="Suggested questions">
-          {suggestions.map((s) => (
+          {suggestionsFor(examples.lots, examples.units).map((s) => (
             <button key={s} type="button" className="sws-chip" style={{ borderRadius: 16 }} onClick={() => ask(s)} disabled={thinking}>
               {s}
             </button>

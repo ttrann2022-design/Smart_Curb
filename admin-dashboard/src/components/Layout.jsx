@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { onAuthStateChanged, signOut } from "firebase/auth";
-import { ref, get, set, update, remove, onValue } from "firebase/database";
+import { ref, get, set, update, remove, onValue, serverTimestamp } from "firebase/database";
 import { auth, database, emailKey } from "../firebase";
 import { c, mono } from "../theme";
 import logo from "../assets/smartcurb-logo.jpg";
@@ -93,12 +93,14 @@ function Layout() {
           await set(userRef, {
             email: user.email,
             role: invite.val().role || "viewer",
-            createdAt: Date.now(),
-            lastActive: Date.now(),
+            // Server time, so the rules' "not in the future" check never trips on clock skew.
+            createdAt: serverTimestamp(),
+            lastActive: serverTimestamp(),
           });
           await remove(inviteRef);
         } else {
-          await update(userRef, { lastActive: Date.now() });
+          // Bookkeeping only: never block sign-in if this write fails.
+          update(userRef, { lastActive: serverTimestamp() }).catch(() => {});
         }
         if (cancelled) return;
 

@@ -9,6 +9,7 @@ import { useFlash } from "../motion";
 const mono = "'IBM Plex Mono', monospace";
 
 function statusColor(open, total) {
+  if (!total) return "#5F5E56";
   if (open === 0) return "#FF4D3D";
   if (total && open / total < 0.15) return "#FFB020";
   return "#9BF04A";
@@ -27,7 +28,8 @@ function SignRow({ row }) {
         className={pop ? "sws-pop" : ""}
         style={{ fontSize: "min(8vw, 11vh)", fontWeight: 700, color, textShadow: `0 0 2.5vh ${color}55`, transition: "color 0.4s, text-shadow 0.4s" }}
       >
-        {row.open === 0 ? "FULL" : <AnimatedNumber value={row.open} />}
+        {/* A lot with no reporting curbs isn't full; it just has nothing to show. */}
+        {!row.total ? "—" : row.open === 0 ? "FULL" : <AnimatedNumber value={row.open} />}
       </div>
     </div>
   );

@@ -189,7 +189,7 @@ select.sws-input {
 .sws-th { font-size: 11px; font-weight: 700; letter-spacing: 0.7px; color: var(--dim); text-transform: uppercase; white-space: nowrap; }
 button.sws-th { background: none; border: none; padding: 0; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; text-align: left; }
 button.sws-th:hover { color: var(--text); }
-button.sws-th[aria-sort="ascending"], button.sws-th[aria-sort="descending"] { color: var(--accent); }
+button.sws-th[data-active] { color: var(--accent); }
 .sws-tbody .sws-trow { transition: background-color 0.12s; }
 .sws-tbody .sws-trow:hover { background: rgba(255, 255, 255, 0.022); }
 
