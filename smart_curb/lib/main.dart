@@ -1036,6 +1036,33 @@ class Geo {
     if (d > 180.0) d -= 360.0;
     return d;
   }
+
+  /// The point [along] meters from the start of [pts] (at least 2 points),
+  /// and the segment it lies on. [suffix] holds each point's distance to the
+  /// end of the path, so this is a binary search, cheap enough to run every
+  /// animation frame.
+  static ({int seg, LatLng point}) pointAlong(
+    List<LatLng> pts,
+    List<double> suffix,
+    double along,
+  ) {
+    final total = suffix.first;
+    final rest = (total - along).clamp(0.0, total); // meters left to the end
+    // The last point that still has at least `rest` to go.
+    var lo = 0;
+    var hi = pts.length - 2;
+    while (lo < hi) {
+      final mid = (lo + hi + 1) >> 1;
+      if (suffix[mid] >= rest) {
+        lo = mid;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    final len = suffix[lo] - suffix[lo + 1];
+    final t = len > 0 ? ((suffix[lo] - rest) / len).clamp(0.0, 1.0) : 0.0;
+    return (seg: lo, point: lerp(pts[lo], pts[lo + 1], t));
+  }
 }
 
 // ==========================================
@@ -1394,40 +1421,64 @@ class CampusPathfinder {
 class RealRoadRouter {
   static final http.Client _client = http.Client(); // reuse connections
 
+  /// Driving route from [start] to [destination]; a straight line if
+  /// routing fails. [startHeading] is the car's direction of travel while
+  /// it's moving. Without it OSRM starts the route on whichever road is
+  /// nearest the GPS fix, which on a divided road can be the side going the
+  /// other way (a route that opens with a U-turn).
   static Future<List<LatLng>> getRoadRoute({
     required LatLng start,
     required LatLng destination,
+    double? startHeading,
   }) async {
-    final url = Uri.parse(
-      'https://router.project-osrm.org/route/v1/driving/'
-      '${start.longitude},${start.latitude};'
-      '${destination.longitude},${destination.latitude}'
-      '?overview=full&geometries=geojson',
-    );
-
     try {
-      final response =
-          await _client.get(url).timeout(const Duration(seconds: 10));
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        final routes = data['routes'] as List<dynamic>?;
-        if (routes != null && routes.isNotEmpty) {
-          final coords = routes[0]['geometry']['coordinates'] as List<dynamic>;
-          final pts = coords
-              .map((pt) => LatLng(
-                    (pt[1] as num).toDouble(),
-                    (pt[0] as num).toDouble(),
-                  ))
-              .toList();
-          if (pts.length >= 2) return pts;
-        }
-      } else {
-        debugPrint('OSRM returned status ${response.statusCode}');
+      if (startHeading != null) {
+        final route = await _fetch(start, destination, startHeading);
+        if (route != null) return route;
+        // No road matched that direction: ask again without it.
       }
+      final route = await _fetch(start, destination, null);
+      if (route != null) return route;
     } catch (e) {
       debugPrint('OSRM routing error: $e');
     }
     return [start, destination];
+  }
+
+  /// One OSRM request. Null when the server answered without a usable
+  /// route; throws on network errors and timeouts.
+  static Future<List<LatLng>?> _fetch(
+    LatLng start,
+    LatLng destination,
+    double? heading,
+  ) async {
+    // Only roads within 45° of the heading at the start; any at the end.
+    final bearings =
+        heading == null ? '' : '&bearings=${heading.round() % 360},45;';
+    final url = Uri.parse(
+      'https://router.project-osrm.org/route/v1/driving/'
+      '${start.longitude},${start.latitude};'
+      '${destination.longitude},${destination.latitude}'
+      '?overview=full&geometries=geojson$bearings',
+    );
+
+    final response =
+        await _client.get(url).timeout(const Duration(seconds: 10));
+    if (response.statusCode != 200) {
+      debugPrint('OSRM returned status ${response.statusCode}');
+      return null;
+    }
+    final data = jsonDecode(response.body);
+    final routes = data['routes'] as List<dynamic>?;
+    if (routes == null || routes.isEmpty) return null;
+    final coords = routes[0]['geometry']['coordinates'] as List<dynamic>;
+    final pts = coords
+        .map((pt) => LatLng(
+              (pt[1] as num).toDouble(),
+              (pt[0] as num).toDouble(),
+            ))
+        .toList();
+    return pts.length >= 2 ? pts : null;
   }
 }
 
@@ -1562,6 +1613,15 @@ class _FauMapScreenState extends State<FauMapScreen> {
   static const double _arrivalMeters = 10.0;
   static const double _maxGpsAccuracyForReroute = 30.0;
   static const Duration _rerouteCooldown = Duration(seconds: 6);
+
+  /// GPS course is only trusted above this speed (slower, it wanders).
+  static const double _minCourseSpeed = 3.0; // m/s, about 7 mph
+
+  /// The arrow is drawn on the route only while you're heading along it:
+  /// within this of the road's direction where you are (or just before or
+  /// after, so following the route around a corner counts). Turning off it
+  /// (~90°) or the other side of a divided road (~180°) doesn't.
+  static const double _snapMaxHeadingDiff = 60.0;
   static const Duration _simTick = Duration(milliseconds: 50);
   static const double _simMetersPerTick = 0.447; // 20 mph at 50 ms ticks
 
@@ -1988,6 +2048,12 @@ class _FauMapScreenState extends State<FauMapScreen> {
   Duration _glideDuration = Duration.zero;
   DateTime _lastFixAt = DateTime.fromMillisecondsSinceEpoch(0);
   int _glideFrameCount = 0;
+  // On the route the arrow glides along it (around corners, not across
+  // them): distances from the start of _glideRoute.
+  List<LatLng>? _glideRoute;
+  double? _glideFromAlong;
+  double? _glideToAlong;
+  double? _shownAlong; // where _shownPos is on _glideRoute (null = unknown)
 
   // ---- detecting the user moving the map in focus mode ----
   // The app always knows where its own camera should be: the target of an
@@ -2064,6 +2130,10 @@ class _FauMapScreenState extends State<FauMapScreen> {
   LatLng? _userPos;
   double _heading = 0;
   DateTime _lastGpsHeadingAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// Last GPS course while clearly moving (see [_minCourseSpeed]), and when.
+  double _gpsCourse = 0;
+  DateTime _gpsCourseAt = DateTime.fromMillisecondsSinceEpoch(0);
   bool _isLocating = false;
   String _gpsStatus = 'Searching for GPS...';
 
@@ -2104,7 +2174,10 @@ class _FauMapScreenState extends State<FauMapScreen> {
   List<LatLng> _displayRoute = const [];
   int _routeSeg = 0;
   double _routeRemaining = 0;
-  double _distToRoute = 0;
+
+  /// While you're following the route: the point on it that matches your
+  /// position, where the arrow is drawn. Null = drawn at the raw position.
+  LatLng? _routeSnap;
   bool _arrived = false;
   int _routeRequestId = 0;
   bool _isRouting = false;
@@ -2951,10 +3024,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
       }
 
       _positionSub = geo.Geolocator.getPositionStream(
-        locationSettings: const geo.LocationSettings(
-          accuracy: geo.LocationAccuracy.bestForNavigation,
-          distanceFilter: 2,
-        ),
+        locationSettings: _streamSettings(),
       ).listen(
         _handlePosition,
         onError: (Object e) => fail('GPS stream error: $e'),
@@ -2964,6 +3034,23 @@ class _FauMapScreenState extends State<FauMapScreen> {
     }
   }
 
+  /// Live GPS stream settings. Without an interval, Android delivers a fix
+  /// only every 5 s (the plugin's default): 100 m apart at 45 mph, so the
+  /// arrow lagged far behind the car and jumped. Ask for one a second.
+  static geo.LocationSettings _streamSettings() {
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      return geo.AndroidSettings(
+        accuracy: geo.LocationAccuracy.bestForNavigation,
+        distanceFilter: 2,
+        intervalDuration: const Duration(seconds: 1),
+      );
+    }
+    return const geo.LocationSettings(
+      accuracy: geo.LocationAccuracy.bestForNavigation,
+      distanceFilter: 2,
+    );
+  }
+
   void _handlePosition(geo.Position p) {
     if (!mounted) return;
     if (_isSimulating || _devLocationOverride) return;
@@ -2971,11 +3058,12 @@ class _FauMapScreenState extends State<FauMapScreen> {
     final loc = LatLng(p.latitude, p.longitude);
     final onCampus = _inCampus(loc);
     final hasCourse = p.speed > 1.0 && p.heading >= 0;
+    final steadyCourse = p.speed >= _minCourseSpeed && p.heading >= 0;
     var progress = _Progress.none;
     final wasTracking = _navTracking;
+    var shown = loc;
 
     setState(() {
-      _userPos = loc;
       _isLocating = false;
       _gpsStatus =
           'Live GPS: ${p.latitude.toStringAsFixed(4)}, ${p.longitude.toStringAsFixed(4)}';
@@ -2983,13 +3071,27 @@ class _FauMapScreenState extends State<FauMapScreen> {
         _heading = p.heading;
         _lastGpsHeadingAt = DateTime.now();
       }
-      progress = _updateRouteProgress(loc);
+      if (steadyCourse) {
+        _gpsCourse = p.heading;
+        _gpsCourseAt = DateTime.now();
+      }
+      progress = _updateRouteProgress(
+        loc,
+        course: steadyCourse ? p.heading : null,
+      );
+      // Following the route: draw the arrow on the road, like a nav app.
+      // A phone fix is usually 5-15 m from the road's centre line (your
+      // lane plus GPS error), which at street-level zoom put the arrow
+      // beside the road.
+      shown = _routeSnap ?? loc;
+      _userPos = shown;
     });
 
     if (wasTracking && !onCampus) {
       _setNavTracking(false);
     }
-    _startGlide(loc); // moves the arrow (and nav camera) smoothly to the fix
+    // Moves the arrow (and nav camera) smoothly to the new position.
+    _startGlide(shown, along: _snapAlong);
 
     if (progress == _Progress.arrived) _onArrived();
     // Parked and walking: follow the walking line (and reroute if needed).
@@ -3002,31 +3104,63 @@ class _FauMapScreenState extends State<FauMapScreen> {
 
   /// Starts (or retargets) the arrow glide toward a new position (a GPS fix,
   /// or the next simulated position). In focus mode the camera eases along
-  /// with it over the same time.
-  void _startGlide(LatLng target) {
+  /// with it over the same time. [along] is the target's distance along the
+  /// driving route when it's on the route; the arrow then follows the road
+  /// around corners instead of cutting straight across them.
+  void _startGlide(LatLng target, {double? along}) {
     final now = DateTime.now();
     final from = _shownPos ?? _userPos;
     final sinceLastFix = now.difference(_lastFixAt);
     _lastFixAt = now;
 
-    // First fix, or a jump too big to be driving: just place the arrow.
+    // First fix, or a jump too big to be driving: just place the arrow
+    // (and draw it there, so the next position glides on from it).
     if (from == null || Geo.meters(from, target) > _glideSnapMeters) {
       _stopGlide();
+      _shownPos = target;
+      _shownAlong = along;
+      _glideRoute = _fullRoute;
       _pushPuck();
       _pushRoute();
       if (_navTracking) _jumpNavCamera(target);
       return;
     }
 
-    _glideFrom = from;
-    _glideTo = target;
-    _glideStart = now;
     // Glide for about as long as fixes are arriving, so the arrow is still
     // moving when the next one lands instead of stopping and restarting.
     final ms = sinceLastFix.inMilliseconds.clamp(300, 1500);
-    _glideDuration = Duration(milliseconds: ms);
-    _glideTimer ??= Timer.periodic(_glideFrame, (_) => _glideStep());
+    // Nothing drawn yet means the arrow is at _userPos, which callers have
+    // already set to [target].
+    final fromAlong = _shownPos == null
+        ? along
+        : (identical(_glideRoute, _fullRoute) ? _shownAlong : null);
+    _glideBetween(
+      from,
+      target,
+      Duration(milliseconds: ms),
+      fromAlong: fromAlong,
+      toAlong: along,
+    );
     if (_navTracking) _easeNavCamera(target, _glideDuration);
+  }
+
+  /// Glides the arrow from [from] to [to] over [d]: along the current route
+  /// when both ends' distances along it are known, otherwise straight.
+  void _glideBetween(
+    LatLng from,
+    LatLng to,
+    Duration d, {
+    double? fromAlong,
+    double? toAlong,
+  }) {
+    _glideFrom = from;
+    _glideTo = to;
+    _glideRoute = _fullRoute;
+    _glideFromAlong = fromAlong;
+    _glideToAlong = toAlong;
+    _glideStart = DateTime.now();
+    _glideDuration = d;
+    _glideTimer ??= Timer.periodic(_glideFrame, (_) => _glideStep());
   }
 
   void _glideStep() {
@@ -3038,13 +3172,35 @@ class _FauMapScreenState extends State<FauMapScreen> {
     }
     final elapsed = DateTime.now().difference(_glideStart).inMilliseconds;
     final t = (elapsed / _glideDuration.inMilliseconds).clamp(0.0, 1.0);
-    final pos = Geo.lerp(from, to, t);
+
+    // Along the road when both ends are on the route (and it hasn't been
+    // replaced since); otherwise in a straight line.
+    final fa = _glideFromAlong;
+    final ta = _glideToAlong;
+    final sameRoute =
+        identical(_glideRoute, _fullRoute) && _fullRoute.length >= 2;
+    final LatLng pos;
+    int? seg;
+    if (sameRoute && fa != null && ta != null) {
+      final s = fa + (ta - fa) * t;
+      final at = Geo.pointAlong(_fullRoute, _routeSuffix, s);
+      pos = at.point;
+      seg = at.seg;
+      _shownAlong = s;
+    } else {
+      pos = Geo.lerp(from, to, t);
+      _shownAlong = (t >= 1 && sameRoute) ? ta : null;
+    }
     _shownPos = pos;
     _glideFrameCount++;
 
-    // Keep the route line attached to the arrow instead of the latest fix.
-    if (_displayRoute.length >= 2) {
-      _displayRoute = [pos, ..._displayRoute.skip(1)];
+    // Keep the route line attached to the arrow while it's on the route.
+    // Off it, the line stays where you left it until the reroute, instead
+    // of a diagonal from the arrow to a point of the old route.
+    if (_routeSnap != null && _displayRoute.length >= 2) {
+      _displayRoute = seg != null
+          ? [pos, ..._fullRoute.sublist(seg + 1)]
+          : [pos, ..._displayRoute.skip(1)];
       if (_glideFrameCount % 3 == 0 || t >= 1) _pushRoute(); // ~10 Hz
     }
     _pushPuck(); // the camera is already easing along on its own
@@ -3065,7 +3221,10 @@ class _FauMapScreenState extends State<FauMapScreen> {
     _glideTimer = null;
     _glideFrom = null;
     _glideTo = null;
+    _glideFromAlong = null;
+    _glideToAlong = null;
     _shownPos = null;
+    _shownAlong = null;
   }
 
   CameraPosition _navCamera(LatLng target, double bearing) => CameraPosition(
@@ -3318,8 +3477,11 @@ class _FauMapScreenState extends State<FauMapScreen> {
     final start = _userPos ?? await _quickFix() ?? _campusEntrance;
     if (!mounted || reqId != _routeRequestId) return;
 
-    final road =
-        await RealRoadRouter.getRoadRoute(start: start, destination: lotPos);
+    final road = await RealRoadRouter.getRoadRoute(
+      start: start,
+      destination: lotPos,
+      startHeading: _routeStartHeading(),
+    );
     if (!mounted || reqId != _routeRequestId) return;
 
     setState(() {
@@ -3328,21 +3490,33 @@ class _FauMapScreenState extends State<FauMapScreen> {
       _fullRoute = road;
       _routeSuffix = _suffixLengths(road);
       _routeSeg = 0;
-      _distToRoute = 0;
+      _routeSnap = null;
       _arrived = false;
       _walkDone = false;
       _displayRoute = List<LatLng>.of(road);
       _routeRemaining = _routeSuffix.first;
     });
+
+    // Match where you are to the new route right away (which way the arrow
+    // points, and in focus mode the camera turns to face the route).
+    final pos = _userPos;
+    var progress = _Progress.none;
+    if (pos != null) setState(() => progress = _updateRouteProgress(pos));
     _pushRoute();
     _pushPuck();
-
-    // Already navigating: turn the camera to face the new route right away.
-    final pos = _userPos;
+    if (progress == _Progress.arrived) _onArrived();
     if (_navTracking && pos != null) {
-      setState(() => _updateRouteProgress(pos));
       _refreshNavCamera(const Duration(milliseconds: 600));
     }
+  }
+
+  /// The car's direction of travel for a route request: a GPS course from
+  /// the last few seconds while clearly moving, otherwise null.
+  double? _routeStartHeading() {
+    if (_devLocationOverride) return null;
+    final fresh =
+        DateTime.now().difference(_gpsCourseAt) < const Duration(seconds: 3);
+    return fresh ? _gpsCourse : null;
   }
 
   void _maybeReroute() {
@@ -3358,7 +3532,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
     _displayRoute = const [];
     _routeSeg = 0;
     _routeRemaining = 0;
-    _distToRoute = 0;
+    _routeSnap = null;
     _arrived = false;
     _walkDone = false;
   }
@@ -3376,7 +3550,14 @@ class _FauMapScreenState extends State<FauMapScreen> {
   }
 
   /// Mutates state only — call inside setState.
-  _Progress _updateRouteProgress(LatLng pos) {
+  ///
+  /// Matches [pos] to the route. While you're on it, [_routeSnap] becomes
+  /// the matching point on the road, where the arrow is drawn. [course] (the
+  /// GPS course, when moving fast enough to trust it) must roughly agree
+  /// with the road's direction, so a car on the other side of a divided road
+  /// is never drawn on the route facing backwards.
+  _Progress _updateRouteProgress(LatLng pos, {double? course}) {
+    _routeSnap = null;
     final route = _fullRoute;
     if (route.length < 2 || _arrived) return _Progress.none;
 
@@ -3385,7 +3566,6 @@ class _FauMapScreenState extends State<FauMapScreen> {
       math.max(0, _routeSeg - 2),
       math.min(route.length - 2, _routeSeg + 25),
     );
-    _distToRoute = proj.dist;
     if (proj.dist > _offRouteMeters) return _Progress.offRoute;
 
     _routeSeg = proj.seg;
@@ -3397,9 +3577,30 @@ class _FauMapScreenState extends State<FauMapScreen> {
       _displayRoute = const [];
       return _Progress.arrived;
     }
-    _displayRoute = [pos, ...route.sublist(proj.seg + 1)];
+    // The line starts on the road where you are, not at the raw fix (that
+    // drew a diagonal from the arrow to the next bend of the route).
+    _displayRoute = [proj.point, ...route.sublist(proj.seg + 1)];
+
+    bool alongSegment(int i) {
+      if (i < 0 || i > route.length - 2) return false;
+      final a = route[i];
+      final b = route[i + 1];
+      return Geo.meters(a, b) < 1 || // too short to have a direction
+          Geo.shortestAngle(course!, Geo.bearing(a, b)).abs() <=
+              _snapMaxHeadingDiff;
+    }
+
+    final headingOk = course == null ||
+        alongSegment(proj.seg) ||
+        alongSegment(proj.seg - 1) ||
+        alongSegment(proj.seg + 1);
+    if (headingOk) _routeSnap = proj.point;
     return _Progress.onRoute;
   }
+
+  /// How far along the route the arrow is when it's drawn on it.
+  double? get _snapAlong =>
+      _routeSnap == null ? null : _routeSuffix.first - _routeRemaining;
 
   void _onArrived() {
     if (!mounted) return;
@@ -3570,6 +3771,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
       _devLocationOverride = true;
       _userPos = onRoute ? proj.point : _fullRoute.first;
       _routeSeg = onRoute ? proj.seg : 0;
+      _routeSnap = _userPos;
     });
     _simTimer = Timer.periodic(_simTick, (_) => _simStep());
   }
@@ -3604,6 +3806,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
       setState(() {
         _userPos = route.last;
         _arrived = true;
+        _routeSnap = null;
         _displayRoute = const [];
         _routeRemaining = 0;
         _gpsStatus = 'Simulation finished';
@@ -3620,9 +3823,9 @@ class _FauMapScreenState extends State<FauMapScreen> {
     // Per-tick state is updated WITHOUT setState; Flutter widgets only
     // refresh a few times a second.
     _userPos = cur;
+    _routeSnap = cur; // the simulated car is always on the route
     _routeSeg = seg;
     _heading = bearing;
-    _distToRoute = 0;
     _displayRoute = [cur, ...route.sublist(seg + 1)];
     _routeRemaining = Geo.meters(cur, route[seg + 1]) + _routeSuffix[seg + 1];
 
@@ -3633,7 +3836,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
     // Feed the simulated car through the same glide as live GPS (a "fix"
     // every 0.5 s): the arrow, the route line and the focus-mode camera all
     // move exactly as they do when driving for real.
-    if (_simTickCount % 10 == 1) _startGlide(cur);
+    if (_simTickCount % 10 == 1) _startGlide(cur, along: _snapAlong);
   }
 
   void _stopSimulation() {
@@ -3809,30 +4012,32 @@ class _FauMapScreenState extends State<FauMapScreen> {
       _gpsStatus = 'Dev location (tap the map to move)';
     });
 
+    // Route logic first: near the route the arrow lands on the road, the
+    // same as a real GPS fix.
+    _applyDevFix(p);
+    final target = _userPos ?? p;
+
     const moveTime = Duration(milliseconds: 450);
     if (from == null || reduceMotion(context)) {
       _pushPuck();
-      if (_navTracking) _jumpNavCamera(p);
+      if (_navTracking) _jumpNavCamera(target);
     } else {
       // Quick glide from where the arrow was; the lines follow the arrow
       // the same way they do for real GPS.
       _shownPos = from;
-      _glideFrom = from;
-      _glideTo = p;
-      _glideStart = DateTime.now();
-      _glideDuration = moveTime;
-      _glideTimer = Timer.periodic(_glideFrame, (_) => _glideStep());
-      if (_navTracking) _easeNavCamera(p, moveTime);
+      _glideBetween(from, target, moveTime, toAlong: _snapAlong);
+      if (_navTracking) _easeNavCamera(target, moveTime);
     }
-
-    _applyDevFix(p);
   }
 
   /// Runs a dev-moved position through the same route logic as a GPS fix.
   void _applyDevFix(LatLng p) {
     // Driving: progress along the route, arrival, or leaving it.
     var progress = _Progress.none;
-    setState(() => progress = _updateRouteProgress(p));
+    setState(() {
+      progress = _updateRouteProgress(p);
+      _userPos = _routeSnap ?? p;
+    });
     _pushRoute();
     if (progress == _Progress.arrived) {
       _onArrived();
@@ -3974,8 +4179,9 @@ class _FauMapScreenState extends State<FauMapScreen> {
   // ==========================================
 
   double _puckBearing() {
-    if (_displayRoute.length >= 2 &&
-        _distToRoute < 15 &&
+    // Drawn on the route: point along the road (GPS course jitters).
+    if (_routeSnap != null &&
+        _displayRoute.length >= 2 &&
         _routeSeg < _fullRoute.length - 1) {
       return Geo.bearing(_fullRoute[_routeSeg], _fullRoute[_routeSeg + 1]);
     }
