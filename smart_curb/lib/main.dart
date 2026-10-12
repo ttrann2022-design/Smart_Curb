@@ -1030,6 +1030,15 @@ class Geo {
     return (math.atan2(y, x) / _deg + 360.0) % 360.0;
   }
 
+  /// The point [meters] from [p] in compass direction [bearing].
+  static LatLng offset(LatLng p, double bearing, double meters) {
+    final b = bearing * _deg;
+    final dLat = meters * math.cos(b) / _earthR;
+    final dLng =
+        meters * math.sin(b) / (_earthR * math.cos(p.latitude * _deg));
+    return LatLng(p.latitude + dLat / _deg, p.longitude + dLng / _deg);
+  }
+
   /// Signed shortest rotation (-180..180] from one angle to another.
   static double shortestAngle(double from, double to) {
     var d = (to - from) % 360.0; // Dart % is always >= 0 here
@@ -1511,10 +1520,23 @@ Map<String, dynamic> _pointFeature(LatLng p, Map<String, dynamic> props) => {
 String _hex(Color c) =>
     '#${(c.toARGB32() & 0xFFFFFF).toRadixString(16).padLeft(6, '0')}';
 
-/// Draws the navigation arrow once and caches the PNG bytes.
-final Future<Uint8List> _puckIconBytes = _drawPuckIcon();
+/// The location marker, drawn once and cached as PNG bytes: with the
+/// navigation arrow (driving) or as a plain dot (the rest of the time).
+final Future<Uint8List> _puckArrowBytes = _drawPuckIcon(arrow: true);
+final Future<Uint8List> _puckDotBytes = _drawPuckIcon(arrow: false);
 
-Future<Uint8List> _drawPuckIcon() async {
+/// The faded "which way the device faces" cone, in a few widths: narrow
+/// when the compass is accurate, wider when it's less sure.
+const Map<String, double> _coneSpreads = {
+  'sc-cone-narrow': 50,
+  'sc-cone-mid': 70,
+  'sc-cone-wide': 95,
+};
+final Map<String, Future<Uint8List>> _coneBytes = {
+  for (final e in _coneSpreads.entries) e.key: _drawConeIcon(e.value),
+};
+
+Future<Uint8List> _drawPuckIcon({required bool arrow}) async {
   const s = 96.0;
   final recorder = ui.PictureRecorder();
   final canvas = Canvas(recorder);
@@ -1529,18 +1551,108 @@ Future<Uint8List> _drawPuckIcon() async {
       ..strokeWidth = 6
       ..color = kAccent,
   );
-  final arrow = Path()
-    ..moveTo(s / 2, s / 2 - 19)
-    ..lineTo(s / 2 + 13, s / 2 + 15)
-    ..lineTo(s / 2, s / 2 + 7)
-    ..lineTo(s / 2 - 13, s / 2 + 15)
-    ..close();
-  canvas.drawPath(arrow, Paint()..color = kAccent);
+  if (arrow) {
+    final path = Path()
+      ..moveTo(s / 2, s / 2 - 19)
+      ..lineTo(s / 2 + 13, s / 2 + 15)
+      ..lineTo(s / 2, s / 2 + 7)
+      ..lineTo(s / 2 - 13, s / 2 + 15)
+      ..close();
+    canvas.drawPath(path, Paint()..color = kAccent);
+  }
 
+  return _toPng(recorder, s);
+}
+
+/// A wedge [spreadDeg] wide pointing up (north before rotation), its tip at
+/// the image centre so it fans out from the location dot, fading out with
+/// distance.
+Future<Uint8List> _drawConeIcon(double spreadDeg) async {
+  const s = 256.0;
+  const radius = 124.0;
+  final recorder = ui.PictureRecorder();
+  final canvas = Canvas(recorder);
+  const center = Offset(s / 2, s / 2);
+  final half = spreadDeg / 2 * math.pi / 180;
+
+  final wedge = Path()
+    ..moveTo(center.dx, center.dy)
+    ..arcTo(
+      Rect.fromCircle(center: center, radius: radius),
+      -math.pi / 2 - half, // up is -90° on the canvas
+      2 * half,
+      false,
+    )
+    ..close();
+  canvas.drawPath(
+    wedge,
+    Paint()
+      ..shader = ui.Gradient.radial(
+        center,
+        radius,
+        [kAccent.withValues(alpha: 0.6), kAccent.withValues(alpha: 0)],
+      ),
+  );
+
+  return _toPng(recorder, s);
+}
+
+Future<Uint8List> _toPng(ui.PictureRecorder recorder, double s) async {
   final image = await recorder.endRecording().toImage(s.toInt(), s.toInt());
   final data = await image.toByteData(format: ui.ImageByteFormat.png);
   image.dispose();
   return data!.buffer.asUint8List();
+}
+
+/// Smooths live GPS by how accurate each fix is (a simple Kalman filter).
+/// Indoors or between buildings a phone's fixes wander 10-40 m; standing
+/// still, such a fix barely moves the estimate. Moving, the estimate is
+/// first carried forward by the speed and direction the phone reports, so
+/// the arrow keeps up with you instead of trailing behind.
+class GpsSmoother {
+  /// Below this speed (m/s) the reported direction is noise.
+  static const double _minMovingSpeed = 0.8;
+
+  LatLng? _pos;
+  double _variance = 0; // m², how unsure the estimate is
+  DateTime? _at;
+
+  /// Adds a fix with its reported [accuracy] (m), [speed] (m/s, 0 when
+  /// unknown) and [heading] (direction of travel, degrees) and returns the
+  /// smoothed position.
+  LatLng add(
+    LatLng fix, {
+    required double accuracy,
+    required double speed,
+    required double heading,
+    required DateTime at,
+  }) {
+    // Some devices report 0 for an unknown accuracy.
+    final acc = accuracy > 0 ? math.max(accuracy, 3.0) : 10.0;
+    var prev = _pos;
+    final prevAt = _at;
+    _at = at;
+    if (prev == null || prevAt == null) {
+      _pos = fix;
+      _variance = acc * acc;
+      return fix;
+    }
+    final dt = math.max(0, at.difference(prevAt).inMilliseconds) / 1000.0;
+    // Where you'd be now if you kept going the way the phone says you're
+    // moving; standing still, where you were.
+    if (speed >= _minMovingSpeed && heading >= 0) {
+      prev = Geo.offset(prev, heading, speed * dt);
+    }
+    // How far off that guess may be: about a metre a second standing or
+    // walking, more at speed (turns, braking).
+    final drift = (1.0 + 0.5 * speed) * dt;
+    _variance += drift * drift;
+    final k = _variance / (_variance + acc * acc);
+    final next = Geo.lerp(prev, fix, k);
+    _pos = next;
+    _variance *= 1 - k;
+    return next;
+  }
 }
 
 /// Coalesces GeoJSON updates per source: while one update is in flight,
@@ -1622,6 +1734,12 @@ class _FauMapScreenState extends State<FauMapScreen> {
   /// after, so following the route around a corner counts). Turning off it
   /// (~90°) or the other side of a divided road (~180°) doesn't.
   static const double _snapMaxHeadingDiff = 60.0;
+
+  /// Like Google Maps, the arrow is put on the road only while driving the
+  /// route: after moving faster than [_minCourseSpeed], and still through
+  /// stops (red lights) for this long. Standing, walking or parked, it's
+  /// always at your real GPS position.
+  static const Duration _drivingSnapHold = Duration(seconds: 60);
   static const Duration _simTick = Duration(milliseconds: 50);
   static const double _simMetersPerTick = 0.447; // 20 mph at 50 ms ticks
 
@@ -1636,6 +1754,12 @@ class _FauMapScreenState extends State<FauMapScreen> {
   static const LatLng _fauCenter = LatLng(26.3745, -80.1030);
   static final CameraTargetBounds _cameraBounds =
       CameraTargetBounds(LatLngBounds(southwest: _sw, northeast: _ne));
+  static const double _minCampusZoom = 14.5;
+  static const MinMaxZoomPreference _campusZoom =
+      MinMaxZoomPreference(_minCampusZoom, 20.0);
+  // Dev mode: no campus box and no minimum zoom, to follow live GPS anywhere.
+  static const MinMaxZoomPreference _freeRoamZoom =
+      MinMaxZoomPreference(null, 20.0);
 
   static bool _inCampus(LatLng p) =>
       p.latitude >= _sw.latitude &&
@@ -1650,7 +1774,8 @@ class _FauMapScreenState extends State<FauMapScreen> {
   static const String _srcBuildings = 'sc-buildings';
   static const String _srcPuck = 'sc-puck';
   static const String _layerBuildings3d = 'sc-buildings-3d';
-  static const String _puckImage = 'sc-puck-arrow';
+  static const String _puckArrowImage = 'sc-puck-arrow';
+  static const String _puckDotImage = 'sc-puck-dot';
   static const List<String> _fonts = ['Noto Sans Regular'];
 
   static final Map<String, LatLng> _lotPositions = {
@@ -2029,6 +2154,17 @@ class _FauMapScreenState extends State<FauMapScreen> {
   StreamSubscription<geo.Position>? _positionSub;
   StreamSubscription<DatabaseEvent>? _parkingSub;
   StreamSubscription<CompassEvent>? _compassSub;
+
+  /// Whether the device compass gives real readings (null = not known yet).
+  /// Without a compass sensor the plugin sends nothing, or on Android a
+  /// constant 0° (north), which would pin the arrow pointing north.
+  bool? _compassWorks;
+  Timer? _compassCheckTimer;
+
+  /// Which way the device points (compass, degrees) and how sure it is
+  /// (± degrees, null = unknown): the facing cone on the location dot.
+  double _compassHeading = 0;
+  double? _compassAccuracy;
   Timer? _simTimer;
 
   // ---- smooth arrow + camera (live GPS and Simulate Run) ----
@@ -2129,17 +2265,26 @@ class _FauMapScreenState extends State<FauMapScreen> {
   // ---- location ----
   LatLng? _userPos;
   double _heading = 0;
-  DateTime _lastGpsHeadingAt = DateTime.fromMillisecondsSinceEpoch(0);
 
   /// Last GPS course while clearly moving (see [_minCourseSpeed]), and when.
+  /// Slower (walking, standing), the compass sets the direction instead.
   double _gpsCourse = 0;
   DateTime _gpsCourseAt = DateTime.fromMillisecondsSinceEpoch(0);
   bool _isLocating = false;
   String _gpsStatus = 'Searching for GPS...';
 
+  /// How accurate the last live fix was (m), shown in dev mode.
+  double? _gpsAccuracy;
+  final GpsSmoother _gpsSmoother = GpsSmoother();
+
   // ---- modes ----
   bool _navTracking = false;
   bool _devMode = false;
+
+  /// The campus limits on the map (pan box, minimum zoom) are lifted. On
+  /// with dev mode; when dev mode ends they come back once the view is back
+  /// on campus (see [_restoreCampusLimits]).
+  bool _freeRoam = false;
 
   /// Dev: when on, a map tap moves the location arrow there.
   bool _clickToMove = false;
@@ -2175,9 +2320,13 @@ class _FauMapScreenState extends State<FauMapScreen> {
   int _routeSeg = 0;
   double _routeRemaining = 0;
 
-  /// While you're following the route: the point on it that matches your
-  /// position, where the arrow is drawn. Null = drawn at the raw position.
+  /// While you're following the route: the point on it nearest to you,
+  /// where the route line joins the road. Null when you're off the route.
   LatLng? _routeSnap;
+
+  /// The live arrow is drawn on the road at [_routeSnap] (only while
+  /// driving the route, see [_drivingSnapHold]).
+  bool _arrowOnRoute = false;
   bool _arrived = false;
   int _routeRequestId = 0;
   bool _isRouting = false;
@@ -2195,6 +2344,9 @@ class _FauMapScreenState extends State<FauMapScreen> {
   bool _anchorDirty = false;
 
   bool get _isOnCampus => _userPos != null && _inCampus(_userPos!);
+
+  /// Focus mode follows you on campus, or anywhere in dev mode.
+  bool get _canFocus => _isOnCampus || _devMode;
 
   // ==========================================
   // LIFECYCLE
@@ -2217,6 +2369,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
     _walkSimTimer?.cancel();
     _positionSub?.cancel();
     _compassSub?.cancel();
+    _compassCheckTimer?.cancel();
     _parkingSub?.cancel();
     _devTap.dispose();
     _searchFocus.dispose();
@@ -2554,7 +2707,35 @@ class _FauMapScreenState extends State<FauMapScreen> {
       ),
     );
 
-    // ---- user puck: flat glow + arrow that lies on the tilted map ----
+    // ---- user puck: facing cone, flat glow, then the dot or arrow ----
+    // All lie flat on the tilted map. The cone (compass only) is drawn
+    // first so it fans out from under the dot.
+    await safe('puck images', () async {
+      await m.addImage(_puckArrowImage, await _puckArrowBytes);
+      await m.addImage(_puckDotImage, await _puckDotBytes);
+      for (final e in _coneBytes.entries) {
+        await m.addImage(e.key, await e.value);
+      }
+      return null;
+    });
+    await safe(
+      'puck cone',
+      () => m.addSymbolLayer(
+        _srcPuck,
+        'sc-puck-cone',
+        const SymbolLayerProperties(
+          iconImage: ['get', 'cone'],
+          iconSize: 0.5,
+          iconRotate: ['get', 'facing'],
+          iconRotationAlignment: 'map',
+          iconPitchAlignment: 'map',
+          iconAllowOverlap: true,
+          iconIgnorePlacement: true,
+        ),
+        filter: ['has', 'cone'],
+        enableInteraction: false,
+      ),
+    );
     await safe(
       'puck glow',
       () => m.addCircleLayer(
@@ -2569,17 +2750,13 @@ class _FauMapScreenState extends State<FauMapScreen> {
         enableInteraction: false,
       ),
     );
-    await safe('puck icon', () async {
-      await m.addImage(_puckImage, await _puckIconBytes);
-      return null;
-    });
     await safe(
-      'puck arrow',
+      'puck marker',
       () => m.addSymbolLayer(
         _srcPuck,
         'sc-puck-arrow',
         const SymbolLayerProperties(
-          iconImage: _puckImage,
+          iconImage: ['get', 'icon'],
           iconSize: 0.5,
           iconRotate: ['get', 'bearing'],
           iconRotationAlignment: 'map',
@@ -2751,14 +2928,43 @@ class _FauMapScreenState extends State<FauMapScreen> {
 
   void _pushPuck() {
     final p = _shownPos ?? _userPos;
+    if (p == null) {
+      _sync.push(_srcPuck, _fc(const <Map<String, dynamic>>[]));
+      return;
+    }
+    // Driving a route: the navigation arrow, like Google/Apple Maps. The
+    // rest of the time: a dot, plus a cone showing which way the device
+    // faces when it has a compass.
+    final arrow = _drivingRoute;
     _sync.push(
       _srcPuck,
-      _fc(p == null
-          ? const <Map<String, dynamic>>[]
-          : [
-              _pointFeature(p, {'bearing': _puckBearing()}),
-            ]),
+      _fc([
+        _pointFeature(p, {
+          'icon': arrow ? _puckArrowImage : _puckDotImage,
+          'bearing': _puckBearing(),
+          if (!arrow && _compassWorks == true) ...{
+            'cone': _coneImage(),
+            'facing': _compassHeading,
+          },
+        }),
+      ]),
     );
+  }
+
+  /// Driving along a route right now (or simulating it).
+  bool get _drivingRoute =>
+      _isSimulating ||
+      (_fullRoute.length >= 2 &&
+          !_arrived &&
+          DateTime.now().difference(_gpsCourseAt) < _drivingSnapHold);
+
+  /// Cone width from the compass accuracy: narrow when it's sure.
+  String _coneImage() {
+    final acc = _compassAccuracy;
+    if (acc == null) return 'sc-cone-mid';
+    if (acc <= 20) return 'sc-cone-narrow';
+    if (acc <= 35) return 'sc-cone-mid';
+    return 'sc-cone-wide';
   }
 
   // ==========================================
@@ -2957,27 +3163,53 @@ class _FauMapScreenState extends State<FauMapScreen> {
   // ==========================================
 
   void _startCompassTracking() {
+    // A real compass always wobbles a little, so no reading other than
+    // exactly 0° within a few seconds means there's no compass sensor.
+    _compassCheckTimer = Timer(const Duration(seconds: 5), () {
+      if (mounted && _compassWorks == null) {
+        setState(() => _compassWorks = false);
+      }
+    });
     _compassSub = FlutterCompass.events?.listen((event) {
+      final reading = event.heading;
+      if (!mounted || reading == null) return;
+      if (reading != 0 && _compassWorks != true) {
+        setState(() => _compassWorks = true);
+      }
+      // Exactly 0° before any real reading: no sensor, don't point north.
+      if (_compassWorks != true) return;
+
+      // `heading` is where the top of the device points. (On Android the
+      // plugin never fills in headingForCameraMode and sends 0, which
+      // pinned the arrow to north; `heading` already allows for how the
+      // device is tilted.)
+      final h = reading % 360.0;
+      _compassAccuracy = event.accuracy;
+
+      // The facing cone always shows which way the device really points.
+      if (Geo.shortestAngle(_compassHeading, h).abs() >= 1.5) {
+        _compassHeading = h;
+        if (_devMode) {
+          setState(() {}); // the dev readout shows the compass value
+        }
+        _pushPuck();
+      }
+
       // While the position is dev-controlled (Simulate Run/Walk, tap-move,
       // teleport) the direction comes from that movement. The device compass
       // must not steer it: on a computer it often reports 0° (north), which
       // fought the walk's direction and made the arrow/camera flip back and
       // forth.
-      if (!mounted || _isSimulating || _isWalkSim || _devLocationOverride) {
-        return;
-      }
-      if (DateTime.now().difference(_lastGpsHeadingAt) <
+      if (_isSimulating || _isWalkSim || _devLocationOverride) return;
+      if (DateTime.now().difference(_gpsCourseAt) <
           const Duration(seconds: 3)) {
         return; // GPS course wins while driving
       }
-      final raw = event.headingForCameraMode ?? event.heading;
-      if (raw == null) return;
-      final h = raw % 360.0;
       if (Geo.shortestAngle(_heading, h).abs() < 2.0) return;
 
       setState(() => _heading = h);
       _pushPuck();
-      if (_navTracking && _isOnCampus) {
+      if (_navTracking && _canFocus) {
         // On a route the camera stays course-up; the compass only steers it
         // when there is no route to follow.
         _refreshNavCamera(const Duration(milliseconds: 300));
@@ -3034,20 +3266,51 @@ class _FauMapScreenState extends State<FauMapScreen> {
     }
   }
 
+  /// Where the arrow should glide to for a new fix (and its distance along
+  /// the route when it's on the road). The glide takes about as long as the
+  /// gap between fixes, so aiming at the fix itself always showed where you
+  /// were a second ago. Moving, it aims at where you'll be by the time it
+  /// gets there (your speed and direction, along the road when driving the
+  /// route), like Google Maps; standing still, at the fix itself.
+  (LatLng, double?) _leadTarget(geo.Position p) {
+    final pos = _userPos!;
+    final along = _arrowOnRoute ? _snapAlong : null;
+    final moving = p.speed >= GpsSmoother._minMovingSpeed && p.heading >= 0;
+    if (!moving) return (pos, along);
+
+    // About the glide's length (the gap between fixes), capped so a burst
+    // of speed or a long gap can't throw the arrow far ahead.
+    final gapMs = DateTime.now()
+        .difference(_lastFixAt)
+        .inMilliseconds
+        .clamp(300, 1500);
+    final ahead = math.min(p.speed * gapMs / 1000, 40.0);
+
+    if (along != null) {
+      final s = math.min(along + ahead, _routeSuffix.first);
+      return (Geo.pointAlong(_fullRoute, _routeSuffix, s).point, s);
+    }
+    return (Geo.offset(pos, p.heading, ahead), null);
+  }
+
   /// Live GPS stream settings. Without an interval, Android delivers a fix
   /// only every 5 s (the plugin's default): 100 m apart at 45 mph, so the
-  /// arrow lagged far behind the car and jumped. Ask for one a second.
+  /// arrow lagged far behind the car and jumped. Ask for them as often as
+  /// the phone can deliver.
+  /// No minimum distance: at walking pace a 2 m minimum meant a fix only
+  /// every ~1.5 s (GpsSmoother keeps standing-still jitter off the map).
   static geo.LocationSettings _streamSettings() {
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
       return geo.AndroidSettings(
         accuracy: geo.LocationAccuracy.bestForNavigation,
-        distanceFilter: 2,
-        intervalDuration: const Duration(seconds: 1),
+        distanceFilter: 0,
+        // As often as the phone can; most GPS chips give one a second.
+        intervalDuration: const Duration(milliseconds: 500),
       );
     }
     return const geo.LocationSettings(
       accuracy: geo.LocationAccuracy.bestForNavigation,
-      distanceFilter: 2,
+      distanceFilter: 0,
     );
   }
 
@@ -3055,22 +3318,33 @@ class _FauMapScreenState extends State<FauMapScreen> {
     if (!mounted) return;
     if (_isSimulating || _devLocationOverride) return;
 
-    final loc = LatLng(p.latitude, p.longitude);
+    // Weighted by the fix's accuracy, so a poor fix (indoors, between
+    // buildings) doesn't throw the arrow around.
+    final loc = _gpsSmoother.add(
+      LatLng(p.latitude, p.longitude),
+      accuracy: p.accuracy,
+      speed: p.speed,
+      heading: p.heading,
+      at: DateTime.now(),
+    );
     final onCampus = _inCampus(loc);
-    final hasCourse = p.speed > 1.0 && p.heading >= 0;
+    // Direction of travel from GPS only at driving speed; walking or
+    // standing, the compass shows which way you face (like Google Maps).
     final steadyCourse = p.speed >= _minCourseSpeed && p.heading >= 0;
+    // No compass on this device: walking, the direction you're moving is
+    // the best guess at which way you face.
+    final walkingCourse = _compassWorks == false &&
+        p.speed >= GpsSmoother._minMovingSpeed &&
+        p.heading >= 0;
     var progress = _Progress.none;
     final wasTracking = _navTracking;
-    var shown = loc;
 
     setState(() {
       _isLocating = false;
+      _gpsAccuracy = p.accuracy > 0 ? p.accuracy : null;
       _gpsStatus =
           'Live GPS: ${p.latitude.toStringAsFixed(4)}, ${p.longitude.toStringAsFixed(4)}';
-      if (hasCourse) {
-        _heading = p.heading;
-        _lastGpsHeadingAt = DateTime.now();
-      }
+      if (steadyCourse || walkingCourse) _heading = p.heading;
       if (steadyCourse) {
         _gpsCourse = p.heading;
         _gpsCourseAt = DateTime.now();
@@ -3079,19 +3353,22 @@ class _FauMapScreenState extends State<FauMapScreen> {
         loc,
         course: steadyCourse ? p.heading : null,
       );
-      // Following the route: draw the arrow on the road, like a nav app.
-      // A phone fix is usually 5-15 m from the road's centre line (your
-      // lane plus GPS error), which at street-level zoom put the arrow
-      // beside the road.
-      shown = _routeSnap ?? loc;
-      _userPos = shown;
+      // Driving the route: the arrow sits on the road (phone GPS is a few
+      // meters off, your lane plus GPS error). Otherwise it's exactly where
+      // GPS says you are, e.g. at home after picking a building.
+      _arrowOnRoute = _routeSnap != null &&
+          DateTime.now().difference(_gpsCourseAt) < _drivingSnapHold;
+      _userPos = _arrowOnRoute ? _routeSnap! : loc;
     });
 
-    if (wasTracking && !onCampus) {
+    // Leaving campus ends focus mode (dev mode keeps following you).
+    if (wasTracking && !onCampus && !_devMode) {
       _setNavTracking(false);
     }
-    // Moves the arrow (and nav camera) smoothly to the new position.
-    _startGlide(shown, along: _snapAlong);
+    // Moves the arrow (and nav camera) smoothly to the new position; on the
+    // road it follows the road around corners.
+    final (target, targetAlong) = _leadTarget(p);
+    _startGlide(target, along: targetAlong);
 
     if (progress == _Progress.arrived) _onArrived();
     // Parked and walking: follow the walking line (and reroute if needed).
@@ -3129,11 +3406,12 @@ class _FauMapScreenState extends State<FauMapScreen> {
     // Glide for about as long as fixes are arriving, so the arrow is still
     // moving when the next one lands instead of stopping and restarting.
     final ms = sinceLastFix.inMilliseconds.clamp(300, 1500);
-    // Nothing drawn yet means the arrow is at _userPos, which callers have
-    // already set to [target].
-    final fromAlong = _shownPos == null
-        ? along
-        : (identical(_glideRoute, _fullRoute) ? _shownAlong : null);
+    // Where the drawn arrow is along the route, if known. (Nothing drawn
+    // yet: it's at _userPos, which may not be [target] when aiming ahead,
+    // so that first glide goes straight.)
+    final fromAlong = _shownPos != null && identical(_glideRoute, _fullRoute)
+        ? _shownAlong
+        : null;
     _glideBetween(
       from,
       target,
@@ -3194,9 +3472,10 @@ class _FauMapScreenState extends State<FauMapScreen> {
     _shownPos = pos;
     _glideFrameCount++;
 
-    // Keep the route line attached to the arrow while it's on the route.
-    // Off it, the line stays where you left it until the reroute, instead
-    // of a diagonal from the arrow to a point of the old route.
+    // Keep the route line starting at the arrow while you're on the route
+    // (arrow -> nearest point of the road -> on to the lot). Off it, the
+    // line stays where you left it until the reroute, instead of a diagonal
+    // from the arrow to a point of the old route.
     if (_routeSnap != null && _displayRoute.length >= 2) {
       _displayRoute = seg != null
           ? [pos, ..._fullRoute.sublist(seg + 1)]
@@ -3533,6 +3812,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
     _routeSeg = 0;
     _routeRemaining = 0;
     _routeSnap = null;
+    _arrowOnRoute = false;
     _arrived = false;
     _walkDone = false;
   }
@@ -3551,11 +3831,12 @@ class _FauMapScreenState extends State<FauMapScreen> {
 
   /// Mutates state only — call inside setState.
   ///
-  /// Matches [pos] to the route. While you're on it, [_routeSnap] becomes
-  /// the matching point on the road, where the arrow is drawn. [course] (the
-  /// GPS course, when moving fast enough to trust it) must roughly agree
-  /// with the road's direction, so a car on the other side of a divided road
-  /// is never drawn on the route facing backwards.
+  /// Matches [pos] to the route (progress, arrival, leaving it). It never
+  /// moves the arrow. While you're on the route, [_routeSnap] is the nearest
+  /// point of it, where the route line joins the road. [course] (the GPS
+  /// course, when moving fast enough to trust it) must roughly agree with
+  /// the road's direction; on the other side of a divided road the arrow
+  /// keeps its own direction instead of the route's.
   _Progress _updateRouteProgress(LatLng pos, {double? course}) {
     _routeSnap = null;
     final route = _fullRoute;
@@ -3577,9 +3858,10 @@ class _FauMapScreenState extends State<FauMapScreen> {
       _displayRoute = const [];
       return _Progress.arrived;
     }
-    // The line starts on the road where you are, not at the raw fix (that
-    // drew a diagonal from the arrow to the next bend of the route).
-    _displayRoute = [proj.point, ...route.sublist(proj.seg + 1)];
+    // The line goes from you to the nearest point of the road, then along
+    // it (not straight from you to the next bend of the route, which drew
+    // a diagonal across the map).
+    _displayRoute = [pos, proj.point, ...route.sublist(proj.seg + 1)];
 
     bool alongSegment(int i) {
       if (i < 0 || i > route.length - 2) return false;
@@ -3638,13 +3920,21 @@ class _FauMapScreenState extends State<FauMapScreen> {
     _updateNavigationRoute();
 
     final m = _map;
-    if (m != null && !_navTracking) {
-      _clearNavPadding();
-      _guard(() => m.animateCamera(
-            CameraUpdate.newLatLngZoom(building.position, 17.0),
-            duration: const Duration(milliseconds: 900),
-          ));
+    if (m == null || _navTracking) return; // already following you
+    // Picking a destination starts guidance from where you are: the camera
+    // goes to your live position in focus mode (the route appears as soon
+    // as it's calculated).
+    if (_userPos != null && _canFocus) {
+      _setNavTracking(true);
+      return;
     }
+    // Nothing to follow here (no GPS fix yet, or off campus outside dev
+    // mode, where the map can't go): show the destination instead.
+    _clearNavPadding();
+    _guard(() => m.animateCamera(
+          CameraUpdate.newLatLngZoom(building.position, 17.0),
+          duration: const Duration(milliseconds: 900),
+        ));
   }
 
   void _clearDestination() {
@@ -4012,21 +4302,18 @@ class _FauMapScreenState extends State<FauMapScreen> {
       _gpsStatus = 'Dev location (tap the map to move)';
     });
 
-    // Route logic first: near the route the arrow lands on the road, the
-    // same as a real GPS fix.
     _applyDevFix(p);
-    final target = _userPos ?? p;
 
     const moveTime = Duration(milliseconds: 450);
     if (from == null || reduceMotion(context)) {
       _pushPuck();
-      if (_navTracking) _jumpNavCamera(target);
+      if (_navTracking) _jumpNavCamera(p);
     } else {
       // Quick glide from where the arrow was; the lines follow the arrow
       // the same way they do for real GPS.
       _shownPos = from;
-      _glideBetween(from, target, moveTime, toAlong: _snapAlong);
-      if (_navTracking) _easeNavCamera(target, moveTime);
+      _glideBetween(from, p, moveTime);
+      if (_navTracking) _easeNavCamera(p, moveTime);
     }
   }
 
@@ -4036,7 +4323,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
     var progress = _Progress.none;
     setState(() {
       progress = _updateRouteProgress(p);
-      _userPos = _routeSnap ?? p;
+      _arrowOnRoute = false; // a dev move is placed exactly where tapped
     });
     _pushRoute();
     if (progress == _Progress.arrived) {
@@ -4163,6 +4450,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
     setState(() {
       _devMode = !_devMode;
       if (turningOff) _clickToMove = false; // always starts off
+      if (!turningOff) _freeRoam = true; // roam anywhere, follow live GPS
     });
     if (turningOff) {
       _stopSimulation();
@@ -4171,7 +4459,39 @@ class _FauMapScreenState extends State<FauMapScreen> {
         _devLocationOverride = false;
         _resyncRealGps();
       }
+      _restoreCampusLimits();
     }
+  }
+
+  /// Dev mode ended: puts the campus limits back. Focus mode ends if you're
+  /// off campus, and if the view is off campus (or zoomed out past the
+  /// limit) it flies back first, so the limits never snap the map.
+  void _restoreCampusLimits() {
+    if (!_freeRoam) return;
+    if (_navTracking && !_isOnCampus) _setNavTracking(false);
+
+    final cam = _map?.cameraPosition;
+    final viewOnCampus = cam == null ||
+        (_inCampus(cam.target) && cam.zoom >= _minCampusZoom);
+    if (viewOnCampus) {
+      setState(() => _freeRoam = false);
+      return;
+    }
+
+    const flyBack = Duration(milliseconds: 1200);
+    _animateTo(
+      CameraPosition(
+        target: _fauCenter,
+        zoom: _overviewZoom,
+        bearing: 0,
+        tilt: _is3D ? _overviewTilt : 0,
+      ),
+      flyBack,
+    );
+    Future.delayed(flyBack, () {
+      // Still out of dev mode (it may have been switched back on).
+      if (mounted && !_devMode) setState(() => _freeRoam = false);
+    });
   }
 
   // ==========================================
@@ -4179,8 +4499,10 @@ class _FauMapScreenState extends State<FauMapScreen> {
   // ==========================================
 
   double _puckBearing() {
-    // Drawn on the route: point along the road (GPS course jitters).
-    if (_routeSnap != null &&
+    // Arrow on the road: point along it (steadier than GPS course).
+    // Otherwise _heading: the compass, or GPS course when moving fast.
+    if ((_isSimulating || _arrowOnRoute) &&
+        _routeSnap != null &&
         _displayRoute.length >= 2 &&
         _routeSeg < _fullRoute.length - 1) {
       return Geo.bearing(_fullRoute[_routeSeg], _fullRoute[_routeSeg + 1]);
@@ -4228,7 +4550,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
   @override
   Widget build(BuildContext context) {
     final onCampus = _isOnCampus;
-    final navActive = _navTracking && onCampus;
+    final navActive = _navTracking && _canFocus;
     final bottomInset = MediaQuery.of(context).padding.bottom;
 
     return Scaffold(
@@ -4272,7 +4594,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
             tooltip: _is3D ? 'Switch to 2D view' : 'Switch to 3D view',
             onPressed: _toggle3D,
           ),
-          if (onCampus)
+          if (_canFocus)
             IconButton(
               icon: _isLocating
                   ? const SizedBox(
@@ -4354,8 +4676,9 @@ class _FauMapScreenState extends State<FauMapScreen> {
         onMapCreated: (controller) => _map = controller,
         onStyleLoadedCallback: _onStyleLoaded,
         onMapClick: _onMapClick,
-        cameraTargetBounds: _cameraBounds,
-        minMaxZoomPreference: const MinMaxZoomPreference(14.5, 20.0),
+        cameraTargetBounds:
+            _freeRoam ? CameraTargetBounds.unbounded : _cameraBounds,
+        minMaxZoomPreference: _freeRoam ? _freeRoamZoom : _campusZoom,
         compassEnabled: false,
         rotateGesturesEnabled: true,
         tiltGesturesEnabled: true,
@@ -4901,6 +5224,22 @@ class _FauMapScreenState extends State<FauMapScreen> {
     final routing =
         _isRouting || (walk != null && _fullRoute.isEmpty && !_arrived);
 
+    // Dev mode: how good live GPS and the compass are right now (these
+    // update in place). GPS ±m = how far off the phone says its position may
+    // be; turning the device should change the compass value.
+    final accuracy = _gpsAccuracy;
+    final devInfo = [
+      if (accuracy != null && !_devLocationOverride)
+        'GPS ±${accuracy.round()} m',
+      switch (_compassWorks) {
+        true => 'Compass ${_compassHeading.round()}°',
+        false => 'No compass sensor detected',
+        null => 'Checking compass…',
+      },
+    ];
+    final shownSubtitle =
+        _devMode ? [subtitle, ...devInfo].join(' • ') : subtitle;
+
     return Positioned(
       bottom: 24 + bottomInset,
       left: 20,
@@ -4968,7 +5307,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
                             const SizedBox(width: 6),
                             Expanded(
                               child: AnimatedText(
-                                subtitle,
+                                shownSubtitle,
                                 switchKey: phase,
                                 style: const TextStyle(
                                   fontSize: 12.5,
