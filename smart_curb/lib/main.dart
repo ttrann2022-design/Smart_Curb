@@ -10,6 +10,7 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart' show Ticker;
 import 'package:flutter/services.dart';
 import 'package:flutter_compass/flutter_compass.dart';
 import 'package:geolocator/geolocator.dart' as geo;
@@ -1694,7 +1695,8 @@ class FauMapScreen extends StatefulWidget {
   State<FauMapScreen> createState() => _FauMapScreenState();
 }
 
-class _FauMapScreenState extends State<FauMapScreen> {
+class _FauMapScreenState extends State<FauMapScreen>
+    with SingleTickerProviderStateMixin {
   // ---- map style ----
   /// Bright, detailed OpenStreetMap style (free, no API key).
   static const String _styleUrl = 'https://tiles.openfreemap.org/styles/liberty';
@@ -2144,7 +2146,6 @@ class _FauMapScreenState extends State<FauMapScreen> {
   bool _is3D = true;
   late final _SourceSync _sync = _SourceSync(_sendSource);
   Offset? _pointerDownAt;
-  double _camBearing = 0;
 
   /// Size of the map area (below the app bar), set by the LayoutBuilder.
   double _mapHeight = 0;
@@ -2169,21 +2170,40 @@ class _FauMapScreenState extends State<FauMapScreen> {
 
   // ---- smooth arrow + camera (live GPS and Simulate Run) ----
   // Positions arrive about once a second (GPS) or every 0.5 s (simulation).
-  // The arrow glides from where it is to each new position over about the
-  // time between positions. In focus mode the camera makes ONE linear ease per
-  // position with the same timing, so arrow and camera stay locked together
-  // while the map only gets about one camera command a second. (Moving the
-  // camera every frame cancelled the user's drag and wheel-zoom gestures.)
-  static const Duration _glideFrame = Duration(milliseconds: 33); // ~30 fps
+  // The arrow glides from where it is to each new position. One loop, run
+  // once per screen frame, moves the arrow and (in focus mode) puts the
+  // camera exactly on it, facing one smoothed direction shared by both. So
+  // the arrow stays pinned on screen, turns are fluid, and the two can never
+  // drift apart or stutter against each other.
   static const double _glideSnapMeters = 100; // bigger jumps don't animate
-  Timer? _glideTimer;
+
+  /// A glide lasts a bit longer than the gap between fixes, so the arrow is
+  /// still moving when the next fix lands instead of stopping and starting.
+  static const double _glideStretch = 1.2;
+
+  /// How fast the shown direction follows a new one: about 63% of the way
+  /// every this many seconds. Smooth turns; compass jitter and the route's
+  /// corners are evened out.
+  static const double _turnSmoothing = 0.3;
+
+  /// The same for zoom and tilt (switching 2D/3D in focus mode).
+  static const double _zoomSmoothing = 0.25;
+  static const Duration _focusEntryTime = Duration(milliseconds: 800);
+
+  /// The route line is redrawn (attached to the arrow) this often.
+  static const Duration _routePushEvery = Duration(milliseconds: 100);
+  static const Duration _revealFrame = Duration(milliseconds: 33);
+
+  late final Ticker _frameTicker = createTicker(_onFrame);
+  Duration? _lastFrameAt;
+  bool _gliding = false;
   LatLng? _shownPos; // where the arrow is drawn; null = draw at _userPos
   LatLng? _glideFrom;
   LatLng? _glideTo;
   DateTime _glideStart = DateTime.fromMillisecondsSinceEpoch(0);
   Duration _glideDuration = Duration.zero;
   DateTime _lastFixAt = DateTime.fromMillisecondsSinceEpoch(0);
-  int _glideFrameCount = 0;
+  DateTime _lastRoutePushAt = DateTime.fromMillisecondsSinceEpoch(0);
   // On the route the arrow glides along it (around corners, not across
   // them): distances from the start of _glideRoute.
   List<LatLng>? _glideRoute;
@@ -2191,66 +2211,36 @@ class _FauMapScreenState extends State<FauMapScreen> {
   double? _glideToAlong;
   double? _shownAlong; // where _shownPos is on _glideRoute (null = unknown)
 
+  /// The direction the arrow is drawn (and the focus camera faces), easing
+  /// toward [_puckBearing]; and the cone's, easing toward the compass.
+  double _shownBearing = 0;
+  double _shownFacing = 0;
+
+  // ---- focus-mode camera ----
+  // Placed every frame (no native camera animation to fight with). Turning
+  // focus mode on, it blends from where it was onto the moving arrow.
+  bool _followReady = false;
+  CameraPosition? _focusEntryFrom;
+  DateTime _focusEntryAt = DateTime.fromMillisecondsSinceEpoch(0);
+  double _followZoom = _navZoom3D;
+  double _followTilt = _navTilt;
+  CameraPosition? _lastSentCam;
+  bool _camBusy = false;
+  CameraPosition? _camPending;
+
   // ---- detecting the user moving the map in focus mode ----
-  // The app always knows where its own camera should be: the target of an
-  // instant move, or a point along a linear ease. If the map reports
-  // anything else, the user dragged, zoomed, rotated or tilted it, so focus
-  // mode turns off and the camera stays exactly where it is.
-  /// Deliberate animations (focus-mode intro, 2D/3D switch) pause the check.
+  // Every camera the app sends is remembered for a moment. A camera report
+  // that matches none of them means the user dragged, zoomed, rotated or
+  // tilted the map, so focus mode turns off and the camera stays put.
+  static const int _sentCamMemory = 30; // about half a second of frames
+  final List<CameraPosition> _sentCams = [];
+
+  /// Deliberate animations (intro, padding shift) pause the check.
   DateTime _camAnimUntil = DateTime.fromMillisecondsSinceEpoch(0);
-  LatLng? _cmdTarget; // where the latest camera command ends up
-  double _cmdBearing = 0;
-  // The command before that: a camera report can arrive just after the next
-  // command was sent, so matching it also counts as "ours".
-  LatLng? _prevCmdTarget;
-  double _prevCmdBearing = 0;
-  // Start of the current linear ease (null = instant move, no ease).
-  LatLng? _easeFrom;
-  double _easeFromBearing = 0;
-  DateTime _easeStart = DateTime.fromMillisecondsSinceEpoch(0);
-  Duration _easeDuration = Duration.zero;
 
   /// The "arrow low on screen" padding stays on after focus mode ends, so the
   /// view doesn't jump; it is removed right before the next app animation.
   bool _navPaddingOn = false;
-
-  void _setCameraCommand(
-    LatLng target,
-    double bearing, {
-    LatLng? easeFrom,
-    double easeFromBearing = 0,
-    Duration easeDuration = Duration.zero,
-  }) {
-    _prevCmdTarget = _cmdTarget;
-    _prevCmdBearing = _cmdBearing;
-    _cmdTarget = target;
-    _cmdBearing = bearing;
-    _easeFrom = easeFrom;
-    _easeFromBearing = easeFromBearing;
-    _easeStart = DateTime.now();
-    _easeDuration = easeDuration;
-  }
-
-  /// 0..1 progress of the current ease (1 when there is none).
-  double get _easeT {
-    if (_easeFrom == null || _easeDuration == Duration.zero) return 1;
-    final elapsed = DateTime.now().difference(_easeStart).inMilliseconds;
-    return (elapsed / _easeDuration.inMilliseconds).clamp(0.0, 1.0);
-  }
-
-  /// Where the app's camera should be right now.
-  LatLng? _expectedCamTarget() {
-    final cmd = _cmdTarget;
-    final from = _easeFrom;
-    if (cmd == null || from == null) return cmd;
-    return Geo.lerp(from, cmd, _easeT);
-  }
-
-  double _expectedCamBearing() {
-    if (_easeFrom == null) return _cmdBearing;
-    final d = Geo.shortestAngle(_easeFromBearing, _cmdBearing);
-    return (_easeFromBearing + d * _easeT) % 360;
-  }
 
   int _simTickCount = 0;
 
@@ -2363,8 +2353,8 @@ class _FauMapScreenState extends State<FauMapScreen> {
 
   @override
   void dispose() {
+    _frameTicker.dispose();
     _simTimer?.cancel();
-    _glideTimer?.cancel();
     _walkRevealTimer?.cancel();
     _walkSimTimer?.cancel();
     _positionSub?.cancel();
@@ -2908,7 +2898,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
     }
     final total = Geo.pathLength(pts);
     final start = DateTime.now();
-    _walkRevealTimer = Timer.periodic(_glideFrame, (timer) {
+    _walkRevealTimer = Timer.periodic(_revealFrame, (timer) {
       if (!mounted) {
         timer.cancel();
         return;
@@ -2927,6 +2917,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
   }
 
   void _pushPuck() {
+    _wake(); // the arrow and cone ease into their (maybe new) directions
     final p = _shownPos ?? _userPos;
     if (p == null) {
       _sync.push(_srcPuck, _fc(const <Map<String, dynamic>>[]));
@@ -2941,10 +2932,10 @@ class _FauMapScreenState extends State<FauMapScreen> {
       _fc([
         _pointFeature(p, {
           'icon': arrow ? _puckArrowImage : _puckDotImage,
-          'bearing': _puckBearing(),
+          'bearing': _shownBearing,
           if (!arrow && _compassWorks == true) ...{
             'cone': _coneImage(),
-            'facing': _compassHeading,
+            'facing': _shownFacing,
           },
         }),
       ]),
@@ -2977,10 +2968,8 @@ class _FauMapScreenState extends State<FauMapScreen> {
     // Outside focus mode, drop the leftover "arrow low" padding first; the
     // animation that follows hides the shift.
     if (!_navTracking) _clearNavPadding();
-    // Don't mistake our own animation for the user moving the map, and keep
-    // focus-mode camera updates from cutting it off.
+    // Don't mistake our own animation for the user moving the map.
     _camAnimUntil = DateTime.now().add(d + const Duration(milliseconds: 150));
-    _setCameraCommand(p.target, p.bearing);
     _guard(() => m.animateCamera(CameraUpdate.newCameraPosition(p), duration: d));
   }
 
@@ -3010,45 +2999,34 @@ class _FauMapScreenState extends State<FauMapScreen> {
   void _onCameraMove(CameraPosition cam) {
     // Keep the lot bubble on top of its dot while the map moves.
     if (_openLotId != null) _updateLotAnchor();
-    if (!_navTracking) return;
+    if (!_navTracking || _sentCams.isEmpty) return;
     if (DateTime.now().isBefore(_camAnimUntil)) {
       _camOffCount = 0;
       return;
     }
-    final expected = _expectedCamTarget();
-    if (expected == null) return;
-
-    bool near(LatLng? target, double bearing) =>
-        target != null &&
-        Geo.meters(cam.target, target) <= 2.0 &&
-        Geo.shortestAngle(cam.bearing, bearing).abs() <= 4;
-
-    // The app never changes zoom or tilt in focus mode outside the paused
-    // animations, so any change at all there is the user (catches the very
-    // first frame of a mouse-wheel zoom).
-    final zoomOrTilt = (cam.zoom - _navZoom).abs() > 0.01 ||
-        (cam.tilt - (_is3D ? _navTilt : 0)).abs() > 0.5;
-    final positionOk = near(expected, _expectedCamBearing()) ||
-        near(_cmdTarget, _cmdBearing) ||
-        near(_prevCmdTarget, _prevCmdBearing);
-    if (!zoomOrTilt && positionOk) {
+    // The app changes zoom and tilt only in its own (remembered) steps, so
+    // a zoom or tilt that none of them had is the user, straight away
+    // (catches the very first frame of a mouse-wheel zoom).
+    final zoomTiltOurs = _sentCams.any((c) =>
+        (c.zoom - cam.zoom).abs() <= 0.02 && (c.tilt - cam.tilt).abs() <= 0.5);
+    if (!zoomTiltOurs) {
+      _setNavTracking(false, userGesture: true);
+      return;
+    }
+    final ours = _sentCams.any((c) =>
+        Geo.meters(c.target, cam.target) <= 2.0 &&
+        Geo.shortestAngle(c.bearing, cam.bearing).abs() <= 3);
+    if (ours) {
       _camOffCount = 0;
       return;
     }
-    // A real drag or zoom sends a stream of camera reports, so needing two
-    // in a row still reacts instantly but ignores a single stray report
-    // (e.g. one that arrives late on a phone).
+    // A real drag sends a stream of camera reports, so needing two in a row
+    // still reacts instantly but ignores a single stray report.
     if (++_camOffCount >= 2) {
       _camOffCount = 0;
       _setNavTracking(false, userGesture: true);
     }
   }
-
-  /// Direction the nav camera should face: exactly where the car's arrow
-  /// points (the road segment it is on, or the GPS/compass heading off-route),
-  /// so the arrow always points straight up and the camera turns only as
-  /// much as the car does.
-  double _navCameraBearing() => _puckBearing();
 
   /// Shifts the map's focal point down so the arrow sits at [_navPuckY].
   /// Applied instantly (not animated): an animated padding change is
@@ -3077,64 +3055,43 @@ class _FauMapScreenState extends State<FauMapScreen> {
   /// Turns focus mode on or off.
   ///
   /// Turning it off never moves the camera: it stays at the same place, zoom
-  /// and angle and simply stops following the arrow. [userGesture] means the
-  /// user is dragging/zooming right now, so the app must not touch the camera
-  /// at all (any camera call would cancel their gesture). Otherwise an ease
-  /// that is still running is stopped where it is.
+  /// and angle and simply stops following the arrow (so it never fights a
+  /// gesture that turned it off). Turning it on, the camera blends from
+  /// where it is onto the arrow, which may be moving, over [_focusEntryTime].
   Future<void> _setNavTracking(bool on, {bool userGesture = false}) async {
-    final pos = _shownPos ?? _userPos;
     final m = _map;
     if (_navTracking == on) return;
     setState(() => _navTracking = on);
-    if (m == null) return;
-
     if (!on) {
-      final cam = m.cameraPosition;
-      if (!userGesture && _easeT < 1 && cam != null) {
-        // Freeze the camera exactly where it is now.
-        _guard(() => m.moveCamera(CameraUpdate.newCameraPosition(cam)));
-      }
-      _easeFrom = null;
+      _followReady = false;
+      _focusEntryFrom = null;
+      _camPending = null;
       return;
     }
+    if (m == null) return;
 
-    if (pos == null) return;
-    final bearing = _navCameraBearing();
-    _camBearing = bearing;
     // The padding shift below also reports a camera move; ignore it.
-    _camAnimUntil = DateTime.now().add(const Duration(seconds: 1));
-    _cmdTarget = null;
-    _prevCmdTarget = null;
-    _easeFrom = null;
+    _camAnimUntil = DateTime.now().add(const Duration(milliseconds: 400));
+    _sentCams.clear();
+    _lastSentCam = null;
     await _applyNavPadding(m);
     if (!mounted || !_navTracking) return;
-    _animateTo(
-      CameraPosition(
-        target: pos,
-        zoom: _navZoom,
-        bearing: bearing,
-        tilt: _is3D ? _navTilt : 0,
-      ),
-      const Duration(milliseconds: 800),
-    );
+    _followZoom = _navZoom;
+    _followTilt = _is3D ? _navTilt : 0;
+    _focusEntryFrom = m.cameraPosition;
+    _focusEntryAt = DateTime.now();
+    _followReady = true;
+    _wake();
   }
 
   void _toggle3D() {
     final m = _map;
     setState(() => _is3D = !_is3D);
     if (m == null) return;
-    final pos = _userPos;
-    if (_navTracking && pos != null) {
-      // Navigating: switch zoom and tilt together, keep facing the route.
-      _animateTo(
-        CameraPosition(
-          target: pos,
-          zoom: _navZoom,
-          bearing: _camBearing,
-          tilt: _is3D ? _navTilt : 0,
-        ),
-        const Duration(milliseconds: 700),
-      );
+    if (_navTracking) {
+      // Focus mode: the camera eases to the new zoom and tilt every frame
+      // while it keeps following the arrow.
+      _wake();
       return;
     }
     final tilt = _is3D ? _overviewTilt : 0.0;
@@ -3174,6 +3131,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
       final reading = event.heading;
       if (!mounted || reading == null) return;
       if (reading != 0 && _compassWorks != true) {
+        _shownFacing = reading % 360.0; // the cone starts out pointing right
         setState(() => _compassWorks = true);
       }
       // Exactly 0° before any real reading: no sensor, don't point north.
@@ -3186,13 +3144,14 @@ class _FauMapScreenState extends State<FauMapScreen> {
       final h = reading % 360.0;
       _compassAccuracy = event.accuracy;
 
-      // The facing cone always shows which way the device really points.
+      // The facing cone always shows which way the device really points
+      // (the frame loop turns it there smoothly).
       if (Geo.shortestAngle(_compassHeading, h).abs() >= 1.5) {
         _compassHeading = h;
         if (_devMode) {
           setState(() {}); // the dev readout shows the compass value
         }
-        _pushPuck();
+        _wake();
       }
 
       // While the position is dev-controlled (Simulate Run/Walk, tap-move,
@@ -3207,13 +3166,10 @@ class _FauMapScreenState extends State<FauMapScreen> {
       }
       if (Geo.shortestAngle(_heading, h).abs() < 2.0) return;
 
+      // The arrow (and in focus mode the camera) turns toward it smoothly in
+      // the frame loop; no camera animation is restarted per reading.
       setState(() => _heading = h);
-      _pushPuck();
-      if (_navTracking && _canFocus) {
-        // On a route the camera stays course-up; the compass only steers it
-        // when there is no route to follow.
-        _refreshNavCamera(const Duration(milliseconds: 300));
-      }
+      _wake();
     });
   }
 
@@ -3278,13 +3234,10 @@ class _FauMapScreenState extends State<FauMapScreen> {
     final moving = p.speed >= GpsSmoother._minMovingSpeed && p.heading >= 0;
     if (!moving) return (pos, along);
 
-    // About the glide's length (the gap between fixes), capped so a burst
-    // of speed or a long gap can't throw the arrow far ahead.
-    final gapMs = DateTime.now()
-        .difference(_lastFixAt)
-        .inMilliseconds
-        .clamp(300, 1500);
-    final ahead = math.min(p.speed * gapMs / 1000, 40.0);
+    // Where you'll be when the glide ends, capped so a burst of speed or a
+    // long gap can't throw the arrow far ahead.
+    final glide = _nextGlideDuration();
+    final ahead = math.min(p.speed * glide.inMilliseconds / 1000, 40.0);
 
     if (along != null) {
       final s = math.min(along + ahead, _routeSuffix.first);
@@ -3385,27 +3338,24 @@ class _FauMapScreenState extends State<FauMapScreen> {
   /// driving route when it's on the route; the arrow then follows the road
   /// around corners instead of cutting straight across them.
   void _startGlide(LatLng target, {double? along}) {
-    final now = DateTime.now();
     final from = _shownPos ?? _userPos;
-    final sinceLastFix = now.difference(_lastFixAt);
-    _lastFixAt = now;
+    final duration = _nextGlideDuration();
+    _lastFixAt = DateTime.now();
 
     // First fix, or a jump too big to be driving: just place the arrow
-    // (and draw it there, so the next position glides on from it).
+    // (and draw it there, so the next position glides on from it). The
+    // focus camera follows it on the next frame.
     if (from == null || Geo.meters(from, target) > _glideSnapMeters) {
       _stopGlide();
       _shownPos = target;
       _shownAlong = along;
       _glideRoute = _fullRoute;
+      _shownBearing = _puckBearing(); // no spinning round after a jump
       _pushPuck();
       _pushRoute();
-      if (_navTracking) _jumpNavCamera(target);
       return;
     }
 
-    // Glide for about as long as fixes are arriving, so the arrow is still
-    // moving when the next one lands instead of stopping and restarting.
-    final ms = sinceLastFix.inMilliseconds.clamp(300, 1500);
     // Where the drawn arrow is along the route, if known. (Nothing drawn
     // yet: it's at _userPos, which may not be [target] when aiming ahead,
     // so that first glide goes straight.)
@@ -3415,11 +3365,18 @@ class _FauMapScreenState extends State<FauMapScreen> {
     _glideBetween(
       from,
       target,
-      Duration(milliseconds: ms),
+      duration,
       fromAlong: fromAlong,
       toAlong: along,
     );
-    if (_navTracking) _easeNavCamera(target, _glideDuration);
+  }
+
+  /// How long the next glide takes: a bit longer than the gap since the
+  /// last fix ([_glideStretch]), so the arrow never stops between fixes.
+  Duration _nextGlideDuration() {
+    final gap = DateTime.now().difference(_lastFixAt).inMilliseconds;
+    final ms = (gap * _glideStretch).round().clamp(300, 1800);
+    return Duration(milliseconds: ms);
   }
 
   /// Glides the arrow from [from] to [to] over [d]: along the current route
@@ -3438,14 +3395,16 @@ class _FauMapScreenState extends State<FauMapScreen> {
     _glideToAlong = toAlong;
     _glideStart = DateTime.now();
     _glideDuration = d;
-    _glideTimer ??= Timer.periodic(_glideFrame, (_) => _glideStep());
+    _gliding = true;
+    _wake();
   }
 
+  /// One frame of the arrow's glide (run by the frame loop).
   void _glideStep() {
     final from = _glideFrom;
     final to = _glideTo;
-    if (!mounted || from == null || to == null) {
-      _stopGlide();
+    if (from == null || to == null) {
+      _gliding = false;
       return;
     }
     final elapsed = DateTime.now().difference(_glideStart).inMilliseconds;
@@ -3470,34 +3429,30 @@ class _FauMapScreenState extends State<FauMapScreen> {
       _shownAlong = (t >= 1 && sameRoute) ? ta : null;
     }
     _shownPos = pos;
-    _glideFrameCount++;
+    if (t >= 1) _gliding = false;
+    _pushPuck();
 
-    // Keep the route line starting at the arrow while you're on the route
-    // (arrow -> nearest point of the road -> on to the lot). Off it, the
-    // line stays where you left it until the reroute, instead of a diagonal
-    // from the arrow to a point of the old route.
+    // The lines follow the arrow about 10 times a second (rebuilt only
+    // then, not every frame).
+    final now = DateTime.now();
+    if (t < 1 && now.difference(_lastRoutePushAt) < _routePushEvery) return;
+    _lastRoutePushAt = now;
+    // The route line starts at the arrow while you're on the route (arrow
+    // -> nearest point of the road -> on to the lot). Off it, the line stays
+    // where you left it until the reroute, instead of a diagonal from the
+    // arrow to a point of the old route.
     if (_routeSnap != null && _displayRoute.length >= 2) {
       _displayRoute = seg != null
           ? [pos, ..._fullRoute.sublist(seg + 1)]
           : [pos, ..._displayRoute.skip(1)];
-      if (_glideFrameCount % 3 == 0 || t >= 1) _pushRoute(); // ~10 Hz
+      _pushRoute();
     }
-    _pushPuck(); // the camera is already easing along on its own
-    // Walking: keep the walking line attached to the arrow (~10 Hz).
-    if (_walkActive && _glideFrameCount % 3 == 0) {
-      _drawWalkLine(pos);
-    }
-
-    if (t >= 1) {
-      _glideTimer?.cancel();
-      _glideTimer = null;
-    }
+    if (_walkActive) _drawWalkLine(pos);
   }
 
   /// Cancels any glide and draws the arrow at the real position again.
   void _stopGlide() {
-    _glideTimer?.cancel();
-    _glideTimer = null;
+    _gliding = false;
     _glideFrom = null;
     _glideTo = null;
     _glideFromAlong = null;
@@ -3506,68 +3461,134 @@ class _FauMapScreenState extends State<FauMapScreen> {
     _shownAlong = null;
   }
 
-  CameraPosition _navCamera(LatLng target, double bearing) => CameraPosition(
-        target: target,
-        zoom: _navZoom,
-        bearing: bearing,
-        tilt: _is3D ? _navTilt : 0,
-      );
+  // ---- frame loop ----
 
-  /// Focus mode: ease the camera linearly to [target] over [d], facing the
-  /// car's direction. One call per position; the map animates it smoothly.
-  void _easeNavCamera(LatLng target, Duration d) {
-    final m = _map;
-    if (m == null || !_navTracking) return;
-    // Let a deliberate animation (intro, 2D/3D) finish first.
-    if (DateTime.now().isBefore(_camAnimUntil)) return;
-    final fromTarget = _expectedCamTarget() ?? target;
-    final fromBearing = _expectedCamBearing();
-    final bearing = _navCameraBearing();
-    _camBearing = bearing;
-    _setCameraCommand(
-      target,
-      bearing,
-      easeFrom: fromTarget,
-      easeFromBearing: fromBearing,
-      easeDuration: d,
+  /// Starts the frame loop if it isn't running (it stops itself when idle).
+  void _wake() {
+    if (mounted && !_frameTicker.isActive) {
+      _lastFrameAt = null;
+      _frameTicker.start();
+    }
+  }
+
+  /// Runs once per screen frame while anything moves or turns, and all the
+  /// time in focus mode: turns the arrow and the cone, glides the arrow,
+  /// and puts the focus camera on it.
+  void _onFrame(Duration elapsed) {
+    if (!mounted) return;
+    final last = _lastFrameAt;
+    _lastFrameAt = elapsed;
+    final dt = last == null ? 1 / 60 : (elapsed - last).inMicroseconds / 1e6;
+
+    final bearing =
+        _approachAngle(_shownBearing, _puckBearing(), dt, _turnSmoothing);
+    final facing =
+        _approachAngle(_shownFacing, _compassHeading, dt, _turnSmoothing);
+    final turning = bearing != _shownBearing || facing != _shownFacing;
+    _shownBearing = bearing;
+    _shownFacing = facing;
+
+    final gliding = _gliding;
+    if (gliding) {
+      _glideStep(); // also draws the arrow
+    } else if (turning) {
+      _pushPuck();
+    }
+    if (_navTracking) _followCamera(dt);
+    if (!gliding && !turning && !_navTracking) _frameTicker.stop();
+  }
+
+  /// Moves angle [from] toward [to] the shortest way round, about 63% of the
+  /// way every [tau] seconds; lands exactly on [to] once within 0.1°.
+  static double _approachAngle(double from, double to, double dt, double tau) {
+    final d = Geo.shortestAngle(from, to);
+    if (d.abs() < 0.1) return to % 360;
+    return (from + d * (1 - math.exp(-dt / tau))) % 360;
+  }
+
+  /// The same for a plain number (zoom, tilt).
+  static double _approach(double from, double to, double dt, double tau) {
+    final d = to - from;
+    if (d.abs() < 0.001) return to;
+    return from + d * (1 - math.exp(-dt / tau));
+  }
+
+  /// Focus mode, every frame: the camera exactly on the arrow, facing the
+  /// arrow's (smoothed) direction, so the arrow stays pinned on screen and
+  /// points straight up. Zoom and tilt ease to their targets (2D/3D switch).
+  /// For [_focusEntryTime] after focus mode is turned on, the camera blends
+  /// from where it was onto the arrow, which may be moving.
+  void _followCamera(double dt) {
+    final pos = _shownPos ?? _userPos;
+    if (!_followReady || pos == null || !_styleReady) return;
+
+    _followZoom = _approach(_followZoom, _navZoom, dt, _zoomSmoothing);
+    _followTilt =
+        _approach(_followTilt, _is3D ? _navTilt : 0.0, dt, _zoomSmoothing);
+    var cam = CameraPosition(
+      target: pos,
+      zoom: _followZoom,
+      bearing: _shownBearing,
+      tilt: _followTilt,
     );
-    _guard(() => m.easeCamera(
-          CameraUpdate.newCameraPosition(_navCamera(target, bearing)),
-          duration: d,
-          interpolation: CameraAnimationInterpolation.linear,
-        ));
+
+    final from = _focusEntryFrom;
+    if (from != null) {
+      final raw = DateTime.now().difference(_focusEntryAt).inMicroseconds /
+          _focusEntryTime.inMicroseconds;
+      if (raw >= 1) {
+        _focusEntryFrom = null;
+      } else {
+        final e = Curves.easeInOutCubic.transform(raw);
+        cam = CameraPosition(
+          target: Geo.lerp(from.target, cam.target, e),
+          zoom: from.zoom + (cam.zoom - from.zoom) * e,
+          bearing: (from.bearing +
+                  Geo.shortestAngle(from.bearing, cam.bearing) * e) %
+              360,
+          tilt: from.tilt + (cam.tilt - from.tilt) * e,
+        );
+      }
+    }
+    _sendCamera(cam);
   }
 
-  /// Focus mode: move the camera instantly (used after a big position jump).
-  void _jumpNavCamera(LatLng target) {
-    final m = _map;
-    if (m == null || !_navTracking) return;
-    if (DateTime.now().isBefore(_camAnimUntil)) return;
-    final bearing = _navCameraBearing();
-    _camBearing = bearing;
-    _setCameraCommand(target, bearing);
-    _guard(() => m.moveCamera(
-          CameraUpdate.newCameraPosition(_navCamera(target, bearing)),
-        ));
-  }
-
-  /// Focus mode: re-aim the camera when the direction changes without a new
-  /// position (compass turn, new route). If the arrow is mid-glide, the
-  /// camera keeps travelling with it to the glide's end on the same timing.
-  void _refreshNavCamera(Duration whenStill) {
-    final glideTo = _glideTo;
-    if (_glideTimer != null && glideTo != null) {
-      final left = _glideDuration - DateTime.now().difference(_glideStart);
-      _easeNavCamera(
-        glideTo,
-        left > const Duration(milliseconds: 50)
-            ? left
-            : const Duration(milliseconds: 50),
-      );
+  /// Sends a focus-mode camera position, remembering it for the gesture
+  /// check. One move is in flight at a time; while it is, newer positions
+  /// replace each other, so the map never falls behind.
+  void _sendCamera(CameraPosition cam) {
+    final last = _lastSentCam;
+    if (last != null &&
+        Geo.meters(last.target, cam.target) < 0.01 &&
+        Geo.shortestAngle(last.bearing, cam.bearing).abs() < 0.01 &&
+        (last.zoom - cam.zoom).abs() < 0.0005 &&
+        (last.tilt - cam.tilt).abs() < 0.01) {
+      return; // nothing moved
+    }
+    _lastSentCam = cam;
+    _sentCams.add(cam);
+    if (_sentCams.length > _sentCamMemory) _sentCams.removeAt(0);
+    if (_camBusy) {
+      _camPending = cam;
       return;
     }
-    final pos = _shownPos ?? _userPos;
-    if (pos != null) _easeNavCamera(pos, whenStill);
+    _moveCamera(cam);
+  }
+
+  Future<void> _moveCamera(CameraPosition cam) async {
+    final m = _map;
+    if (m == null) return;
+    _camBusy = true;
+    try {
+      await m.moveCamera(CameraUpdate.newCameraPosition(cam));
+    } catch (e) {
+      debugPrint('[map] $e');
+    } finally {
+      _camBusy = false;
+    }
+    final next = _camPending;
+    _camPending = null;
+    if (next != null && _navTracking && mounted) _moveCamera(next);
   }
 
   Future<void> _resyncRealGps() async {
@@ -3777,16 +3798,13 @@ class _FauMapScreenState extends State<FauMapScreen> {
     });
 
     // Match where you are to the new route right away (which way the arrow
-    // points, and in focus mode the camera turns to face the route).
+    // points; in focus mode the camera turns with it, smoothly).
     final pos = _userPos;
     var progress = _Progress.none;
     if (pos != null) setState(() => progress = _updateRouteProgress(pos));
     _pushRoute();
     _pushPuck();
     if (progress == _Progress.arrived) _onArrived();
-    if (_navTracking && pos != null) {
-      _refreshNavCamera(const Duration(milliseconds: 600));
-    }
   }
 
   /// The car's direction of travel for a route request: a GPS course from
@@ -4304,16 +4322,14 @@ class _FauMapScreenState extends State<FauMapScreen> {
 
     _applyDevFix(p);
 
+    // Quick glide from where the arrow was; the lines (and in focus mode the
+    // camera) follow the arrow the same way they do for real GPS.
     const moveTime = Duration(milliseconds: 450);
     if (from == null || reduceMotion(context)) {
       _pushPuck();
-      if (_navTracking) _jumpNavCamera(p);
     } else {
-      // Quick glide from where the arrow was; the lines follow the arrow
-      // the same way they do for real GPS.
       _shownPos = from;
       _glideBetween(from, p, moveTime);
-      if (_navTracking) _easeNavCamera(p, moveTime);
     }
   }
 
@@ -4667,6 +4683,13 @@ class _FauMapScreenState extends State<FauMapScreen> {
       },
       onPointerUp: (_) => _pointerDownAt = null,
       onPointerCancel: (_) => _pointerDownAt = null,
+      // Mouse wheel or trackpad zoom: the user is taking the camera over.
+      onPointerSignal: (_) {
+        if (_navTracking) _setNavTracking(false, userGesture: true);
+      },
+      onPointerPanZoomStart: (_) {
+        if (_navTracking) _setNavTracking(false, userGesture: true);
+      },
       child: MapLibreMap(
         styleString: _styleUrl,
         initialCameraPosition: const CameraPosition(
