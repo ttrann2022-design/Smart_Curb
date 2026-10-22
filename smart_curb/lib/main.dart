@@ -1095,14 +1095,126 @@ class FauBuilding {
 
 class PathResult {
   final String lotId;
+
+  /// The open curb to park at, or null to park anywhere in the lot.
+  final String? unitId;
   final List<LatLng> pathPoints;
   final double totalDistanceMeters;
 
   const PathResult({
     required this.lotId,
+    this.unitId,
     required this.pathPoints,
     required this.totalDistanceMeters,
   });
+
+  /// Where to park: the curb's space, or the lot itself (the walk's start).
+  LatLng get parkAt => pathPoints.first;
+}
+
+/// A straight row of parking spaces with one curb unit in each, drawn on the
+/// map as 3D blocks coloured by the unit's live status.
+class CurbSpotRow {
+  final String lotId;
+
+  /// Centre of the first space in the row.
+  final LatLng first;
+
+  /// Compass direction the row runs, from the first space to the next.
+  final double rowBearing;
+
+  /// Curb unit ids, first space first.
+  final List<String> unitIds;
+
+  /// Cars enter each space from this side of the row (seen facing
+  /// [rowBearing]); the curb is at the other end of the space.
+  final bool enterFromRight;
+
+  /// How far back along the row from the first space's centre the lane
+  /// behind the row meets the road.
+  final double laneLeadIn;
+
+  const CurbSpotRow({
+    required this.lotId,
+    required this.first,
+    required this.rowBearing,
+    required this.unitIds,
+    required this.enterFromRight,
+    required this.laneLeadIn,
+  });
+
+  /// The row across the lane from [row], facing it: open ends toward each
+  /// other, so its curbs are at the far end of its spaces. Its spaces sit
+  /// directly opposite [row]'s ([unitIds] starts opposite [row]'s first),
+  /// and both rows are driven into from the one lane between them.
+  CurbSpotRow.facing(
+    CurbSpotRow row, {
+    required this.unitIds,
+    String? lotId,
+  })  : lotId = lotId ?? row.lotId,
+        first = Geo.offset(
+          row.first,
+          row.entryBearing,
+          spaceDepth + 2 * laneOffset,
+        ),
+        rowBearing = row.rowBearing,
+        enterFromRight = !row.enterFromRight,
+        laneLeadIn = row.laneLeadIn;
+
+  /// From the spaces' open end to the centre of the lane behind them (so
+  /// two facing rows' open ends are twice this apart). Sized so two facing
+  /// rows fit between Lot 14's aisles (18 m apart) with ~1 m to spare at
+  /// each curb end.
+  static const double laneOffset = 1.5; // m
+
+  /// Compass direction from a space's centre toward its open end.
+  double get entryBearing => rowBearing + (enterFromRight ? 90 : -90);
+
+  /// The drive in to space [index]: from where the lane behind the row
+  /// meets the road, along the lane to behind the space, then into it
+  /// through its open end, stopping at its centre (curb ahead of the car).
+  List<LatLng> approach(int index) {
+    LatLng lane(double along) => Geo.offset(
+          Geo.offset(first, rowBearing, along),
+          entryBearing,
+          spaceDepth / 2 + laneOffset,
+        );
+    return [
+      lane(-laneLeadIn),
+      lane(index * spaceWidth),
+      Geo.offset(first, rowBearing, index * spaceWidth),
+    ];
+  }
+
+  /// A standard US parking space (9 ft wide along the row, 18 ft deep),
+  /// drawn 20% larger so the blocks read well on the map.
+  static const double spaceWidth = 2.7 * 1.2; // m
+  static const double spaceDepth = 5.5 * 1.2; // m
+
+  /// Space left between neighbouring blocks so each one reads separately.
+  static const double gap = 0.3 * 1.2; // m
+
+  /// Each space's unit id, centre and outline (a closed ring of corners).
+  List<({String unitId, LatLng center, List<LatLng> ring})> spaces() {
+    const halfW = (spaceWidth - gap) / 2;
+    const halfD = spaceDepth / 2;
+    final across = rowBearing + 90;
+    LatLng corner(LatLng c, double w, double d) =>
+        Geo.offset(Geo.offset(c, rowBearing, w), across, d);
+    return [
+      for (var i = 0; i < unitIds.length; i++)
+        () {
+          final c = Geo.offset(first, rowBearing, i * spaceWidth);
+          final ring = [
+            corner(c, halfW, halfD),
+            corner(c, halfW, -halfD),
+            corner(c, -halfW, -halfD),
+            corner(c, -halfW, halfD),
+          ];
+          return (unitId: unitIds[i], center: c, ring: [...ring, ring.first]);
+        }(),
+    ];
+  }
 }
 
 class _GraphSnap {
@@ -1171,8 +1283,8 @@ class CampusPathfinder {
   static const Map<String, LatLng> lotPositions = {
     'lot12': LatLng(26.373262, -80.106806),
     'lot14': LatLng(26.373005, -80.099683),
-    'lot07': LatLng(26.373999, -80.105842),
-    'lot06': LatLng(26.374013, -80.104280),
+    'lot20': LatLng(26.373999, -80.105842),
+    'garage2': LatLng(26.374013, -80.104280),
   };
 
   /// True once the full OpenStreetMap walkway network has been loaded.
@@ -1214,8 +1326,8 @@ class CampusPathfinder {
   static Map<String, LatLng> nodes = {
     'lot12': const LatLng(26.373262, -80.106806),
     'lot14': const LatLng(26.373005, -80.099683),
-    'lot07': const LatLng(26.373999, -80.105842),
-    'lot06': const LatLng(26.374013, -80.104280),
+    'lot20': const LatLng(26.373999, -80.105842),
+    'garage2': const LatLng(26.374013, -80.104280),
     'ed47': const LatLng(26.373358, -80.105828),
     'bc71': const LatLng(26.373263, -80.100446),
     'cm22': const LatLng(26.372528, -80.104044),
@@ -1230,10 +1342,10 @@ class CampusPathfinder {
   /// neighbor list can no longer break the graph.
   static List<List<String>> edges = [
     ['lot12', 'ed47_west'],
-    ['lot07', 'ed47_west'],
+    ['lot20', 'ed47_west'],
     ['ed47', 'ed47_west'],
-    ['lot07', 'lot06'],
-    ['lot06', 'breezeway_west'],
+    ['lot20', 'garage2'],
+    ['garage2', 'breezeway_west'],
     ['ed47', 'breezeway_west'],
     ['cm22', 'breezeway_west'],
     ['cm22', 'breezeway_center'],
@@ -1261,15 +1373,23 @@ class CampusPathfinder {
     return adj;
   }
 
-  /// Lots and buildings never move, so each lot→building walk is computed once.
+  /// Lots, curbs and buildings never move, so each walk is computed once.
   static final Map<String, PathResult> _cache = {};
 
-  static PathResult walkingRoute(String lotId, LatLng lotPos, LatLng buildingPos) {
-    final key = '$lotId|${buildingPos.latitude},${buildingPos.longitude}';
+  /// The walk from [from] (lot [lotId], or curb [unitId] in it) to a building.
+  static PathResult walkingRoute(
+    String lotId,
+    LatLng from,
+    LatLng buildingPos, {
+    String? unitId,
+  }) {
+    final key =
+        '$lotId|${unitId ?? ''}|${buildingPos.latitude},${buildingPos.longitude}';
     return _cache.putIfAbsent(key, () {
-      final path = findPath(lotPos, buildingPos);
+      final path = findPath(from, buildingPos);
       return PathResult(
         lotId: lotId,
+        unitId: unitId,
         pathPoints: path,
         totalDistanceMeters: Geo.pathLength(path),
       );
@@ -1775,6 +1895,7 @@ class _FauMapScreenState extends State<FauMapScreen>
   static const String _srcLots = 'sc-lots';
   static const String _srcBuildings = 'sc-buildings';
   static const String _srcPuck = 'sc-puck';
+  static const String _srcSpots = 'sc-spots';
   static const String _layerBuildings3d = 'sc-buildings-3d';
   static const String _puckArrowImage = 'sc-puck-arrow';
   static const String _puckDotImage = 'sc-puck-dot';
@@ -1783,6 +1904,46 @@ class _FauMapScreenState extends State<FauMapScreen>
   static final Map<String, LatLng> _lotPositions = {
     ...CampusPathfinder.lotPositions,
   };
+
+  /// Where each curb unit physically is: rows of parking spaces, each shown
+  /// as a 3D block that is green (open), red (occupied) or gray (offline).
+  /// To place a row, tap the centre of its first space in dev mode and copy
+  /// the coordinate. Guidance always drives into a space from its open end
+  /// (the end away from its curb), along the lane behind its row.
+  static final List<CurbSpotRow> _spotRows = [
+    _lot14West,
+    // Across the lane, open ends facing _lot14West (curbs at the west end);
+    // the first id sits opposite C-095. Both rows share the lane between.
+    CurbSpotRow.facing(_lot14West, unitIds: ['C-042']),
+  ];
+
+  static const CurbSpotRow _lot14West = CurbSpotRow(
+    lotId: 'lot14',
+    // Nose-in spaces on the west side of the north-south aisle, starting
+    // at its crossing with the east-west road (26.373663, -80.099496):
+    // each space's aisle end is 1 m off the aisle line, and the first
+    // space is 1 m south of the road line.
+    first: LatLng(26.373640, -80.099539),
+    // Down the aisle, southward (OSM: 179.0°).
+    rowBearing: 179.0,
+    unitIds: ['C-095', 'C-077', 'C-001'],
+    // Curbs at the aisle (east) end; cars pull in from the west.
+    enterFromRight: true,
+    // The lane behind the row meets the east-west road here (the first
+    // space's edge is ~0.94 m off the road line).
+    laneLeadIn: 2.4,
+  );
+  static final _spotShapes = [for (final r in _spotRows) ...r.spaces()];
+
+  /// Each curb's drive-in path (see [CurbSpotRow.approach]), by unit id.
+  static final Map<String, List<LatLng>> _spotApproach = {
+    for (final r in _spotRows)
+      for (var i = 0; i < r.unitIds.length; i++) r.unitIds[i]: r.approach(i),
+  };
+
+  /// Height of the space blocks: low slabs, so they read as part of the lot.
+  static const double _spotHeight = 0.6; // m
+  static const double _spotTargetHeight = 1.5; // m
 
   /// Every FAU Boca Raton building that has an official building code, from
   /// OpenStreetMap (© OpenStreetMap contributors, ODbL), pulled Oct 2026.
@@ -2153,7 +2314,8 @@ class _FauMapScreenState extends State<FauMapScreen>
 
   // ---- subscriptions ----
   StreamSubscription<geo.Position>? _positionSub;
-  StreamSubscription<DatabaseEvent>? _parkingSub;
+  StreamSubscription<DatabaseEvent>? _unitsSub;
+  StreamSubscription<DatabaseEvent>? _lotsSub;
   StreamSubscription<CompassEvent>? _compassSub;
 
   /// Whether the device compass gives real readings (null = not known yet).
@@ -2304,6 +2466,9 @@ class _FauMapScreenState extends State<FauMapScreen>
   FauBuilding? _selectedBuilding;
   PathResult? _walkResult;
   String? _routeLotId;
+
+  /// The curb the current driving route ends at (null: the lot itself).
+  String? _routeUnitId;
   List<LatLng> _fullRoute = const [];
   List<double> _routeSuffix = const [];
   List<LatLng> _displayRoute = const [];
@@ -2360,7 +2525,8 @@ class _FauMapScreenState extends State<FauMapScreen>
     _positionSub?.cancel();
     _compassSub?.cancel();
     _compassCheckTimer?.cancel();
-    _parkingSub?.cancel();
+    _unitsSub?.cancel();
+    _lotsSub?.cancel();
     _devTap.dispose();
     _searchFocus.dispose();
     _searchCtrl.dispose();
@@ -2511,9 +2677,58 @@ class _FauMapScreenState extends State<FauMapScreen>
       _srcLots,
       _srcBuildings,
       _srcPuck,
+      _srcSpots,
     ]) {
       await safe('source $id', () => m.addGeoJsonSource(id, empty));
     }
+
+    // ---- curb parking spaces: 3D blocks in their live status colour ----
+    await safe(
+      'curb spaces',
+      () => m.addFillExtrusionLayer(
+        _srcSpots,
+        'sc-spots-3d',
+        const FillExtrusionLayerProperties(
+          fillExtrusionColor: ['get', 'color'],
+          // The curb you're being guided to stands taller than the rest.
+          fillExtrusionHeight: [
+            'case', ['==', ['get', 'target'], true],
+            _spotTargetHeight, _spotHeight,
+          ],
+          fillExtrusionBase: 0,
+          fillExtrusionOpacity: 0.95,
+        ),
+        filter: ['==', ['get', 'kind'], 'space'],
+        minzoom: 16,
+        belowLayerId: firstLabel,
+        enableInteraction: false,
+      ),
+    );
+    // Unit id on each space, upright however the map is turned, once
+    // zoomed in enough to fit.
+    await safe(
+      'curb space labels',
+      () => m.addSymbolLayer(
+        _srcSpots,
+        'sc-spots-label',
+        SymbolLayerProperties(
+          textField: ['get', 'id'],
+          textFont: _fonts,
+          textSize: ['case', ['==', ['get', 'target'], true], 12, 10],
+          textColor: [
+            'case', ['==', ['get', 'target'], true],
+            _hex(kAccent), '#FFFFFF',
+          ],
+          textHaloColor: '#000000',
+          textHaloWidth: 1.4,
+          textAllowOverlap: true,
+          textIgnorePlacement: true,
+        ),
+        filter: ['==', ['get', 'kind'], 'label'],
+        minzoom: 18.5,
+        enableInteraction: false,
+      ),
+    );
 
     // ---- route line: under the 3D buildings so they occlude it correctly ----
     final routeBelow = buildings3d ? _layerBuildings3d : firstLabel;
@@ -2773,6 +2988,50 @@ class _FauMapScreenState extends State<FauMapScreen>
   void _pushOverlays() {
     _pushLots();
     _pushBuildings();
+    _pushSpots();
+  }
+
+  /// Gray when offline (whatever else it reports) or not in the database,
+  /// red when occupied, green when open.
+  static Color _spotColor(Map<String, dynamic>? unit) {
+    if (unit == null || unit['online'] != true) return kTextMuted;
+    return unit['occupied'] == true ? kRed : kOpen;
+  }
+
+  void _pushSpots() {
+    // Every unit's live state by id, whichever lot it reports.
+    final units = <String, Map<String, dynamic>>{
+      for (final lot in _liveLots.values)
+        for (final u in lot['units'] as List<Map<String, dynamic>>)
+          u['id'] as String: u,
+    };
+    final target = _walkResult?.unitId;
+    _sync.push(
+      _srcSpots,
+      _fc([
+        for (final s in _spotShapes) ...[
+          {
+            'type': 'Feature',
+            'properties': {
+              'kind': 'space',
+              'color': _hex(_spotColor(units[s.unitId])),
+              'target': s.unitId == target,
+            },
+            'geometry': {
+              'type': 'Polygon',
+              'coordinates': [
+                [for (final p in s.ring) _coord(p)],
+              ],
+            },
+          },
+          _pointFeature(s.center, {
+            'kind': 'label',
+            'id': s.unitId,
+            'target': s.unitId == target,
+          }),
+        ],
+      ]),
+    );
   }
 
   void _pushLots() {
@@ -2879,7 +3138,7 @@ class _FauMapScreenState extends State<FauMapScreen>
       return;
     }
 
-    final key = '${walk.lotId}|${building.id}';
+    final key = '${walk.lotId}|${walk.unitId}|${building.id}';
     if (_walkShownFor == key) return; // already drawn (or drawing)
     _walkShownFor = key;
     // Start of the walk: lot -> building.
@@ -3622,10 +3881,17 @@ class _FauMapScreenState extends State<FauMapScreen>
   // LIVE PARKING DATA
   // ==========================================
 
+  /// "lot06" -> "Lot 6", "garage2" -> "Garage 2" (used when a lot has no name).
   static String _prettyLotName(String id) {
-    final m = RegExp(r'^lot0*(\d+)$', caseSensitive: false).firstMatch(id);
-    return m != null ? 'Lot ${m.group(1)}' : id.toUpperCase();
+    final m = RegExp(r'^([a-z]+)0*(\d+)$', caseSensitive: false).firstMatch(id);
+    if (m == null) return id.toUpperCase();
+    final word = m.group(1)!;
+    return '${word[0].toUpperCase()}${word.substring(1).toLowerCase()} ${m.group(2)}';
   }
+
+  /// "Lot 12 — Red Permit" -> "Lot 12": the short name fits the map label
+  /// (the dashboard's lot sign splits names the same way).
+  static String _shortLotName(String name) => name.split(' — ').first.trim();
 
   static LatLng? _readLatLng(Map<String, dynamic> data) {
     final lat = data['lat'] ?? data['latitude'];
@@ -3634,10 +3900,13 @@ class _FauMapScreenState extends State<FauMapScreen>
     return null;
   }
 
-  Map<String, Map<String, dynamic>> _parseLots(Object? raw) {
-    if (raw is! Map) return {};
-    final rawLots = raw['lots'] is Map ? raw['lots'] as Map : const {};
-    final rawUnits = raw['units'] is Map ? raw['units'] as Map : const {};
+  /// Groups the curb units in `units/` by their `lot` id: a lot's capacity
+  /// is how many of its curbs are online, and its occupied count is how
+  /// many of those are taken. Offline curbs count toward neither until they
+  /// report again. `lots/` only supplies display names.
+  Map<String, Map<String, dynamic>> _parseLots(Object? rawLotsValue, Object? rawUnitsValue) {
+    final rawLots = rawLotsValue is Map ? rawLotsValue : const {};
+    final rawUnits = rawUnitsValue is Map ? rawUnitsValue : const {};
 
     final capacity = <String, int>{};
     final occupied = <String, int>{};
@@ -3651,11 +3920,13 @@ class _FauMapScreenState extends State<FauMapScreen>
       // Units without an `online` flag are treated as reporting.
       final on = unit['online'];
       final isOnline = !(on == false || on == 0 || on == 'false');
-      capacity[lot] = (capacity[lot] ?? 0) + 1;
-      // An offline curb can't be trusted as free, so it counts as taken:
-      // it stays in the lot's total but drops out of the free count
-      // (labels, colours and best-lot routing all use this tally).
-      if (isOcc || !isOnline) occupied[lot] = (occupied[lot] ?? 0) + 1;
+      // An offline curb's state is unknown, so it is left out of the lot's
+      // total and its free count alike (labels, colours and best-lot
+      // routing all use this tally). It still shows, gray, in the spot list.
+      if (isOnline) {
+        capacity[lot] = (capacity[lot] ?? 0) + 1;
+        if (isOcc) occupied[lot] = (occupied[lot] ?? 0) + 1;
+      }
       (spots[lot] ??= []).add({
         'id': unitId.toString(),
         'occupied': isOcc,
@@ -3667,12 +3938,17 @@ class _FauMapScreenState extends State<FauMapScreen>
     }
 
     final result = <String, Map<String, dynamic>>{};
-    rawLots.forEach((key, val) {
-      final lotId = key.toString();
+    // Every lot in `lots/`, plus any lot a unit points at that isn't there.
+    final lotIds = {
+      for (final k in rawLots.keys) k.toString(),
+      ...spots.keys,
+    };
+    for (final lotId in lotIds) {
+      final val = rawLots[lotId];
       final lotData =
           val is Map ? Map<String, dynamic>.from(val) : <String, dynamic>{};
       final pos = _lotPositions[lotId] ?? _readLatLng(lotData);
-      if (pos == null) return;
+      if (pos == null) continue;
 
       final total = capacity[lotId] ?? 0;
       final occ = occupied[lotId] ?? 0;
@@ -3690,7 +3966,8 @@ class _FauMapScreenState extends State<FauMapScreen>
       }
 
       result[lotId] = {
-        'name': lotData['name']?.toString() ?? _prettyLotName(lotId),
+        'name': _shortLotName(
+            lotData['name']?.toString() ?? _prettyLotName(lotId)),
         'status': '$occ/$total',
         'occupied': occ,
         'capacity': total,
@@ -3699,37 +3976,96 @@ class _FauMapScreenState extends State<FauMapScreen>
         // Every curb unit in the lot, for the tap-a-lot spot grid.
         'units': spots[lotId] ?? const <Map<String, dynamic>>[],
       };
-    });
+    }
     return result;
   }
 
+  // Latest raw `lots/` and `units/` snapshots, and whether each has arrived.
+  Object? _rawLots;
+  Object? _rawUnits;
+  bool _gotLots = false;
+  bool _gotUnits = false;
+
+  /// Live curb data: every unit in `units/` (each names its lot) and the
+  /// lot names in `lots/`. Recomputed whenever either one changes.
   void _listenToFirebaseParking() {
-    _parkingSub = FirebaseDatabase.instance.ref('demo').onValue.listen((event) {
-      if (!mounted) return;
-      final lots = _parseLots(event.snapshot.value);
-      setState(() => _liveLots = lots);
-
-      final building = _selectedBuilding;
-      if (building == null) {
-        _pushOverlays();
-        return;
-      }
-
-      final best = CampusPathfinder.findBestAvailableRoute(
-        buildingPos: building.position,
-        lots: lots,
-      );
-
-      // Only hit OSRM when the recommended lot actually changes.
-      if (best?.lotId != _routeLotId) {
-        _updateNavigationRoute();
-      } else if (_fullRoute.isEmpty && !_isRouting && !_arrived) {
-        _updateNavigationRoute();
-      } else if (best != null) {
-        setState(() => _walkResult = best);
-      }
-      _pushOverlays();
+    final db = FirebaseDatabase.instance;
+    _unitsSub = db.ref('units').onValue.listen((event) {
+      _rawUnits = event.snapshot.value;
+      _gotUnits = true;
+      _onParkingData();
     });
+    _lotsSub = db.ref('lots').onValue.listen((event) {
+      _rawLots = event.snapshot.value;
+      _gotLots = true;
+      _onParkingData();
+    });
+  }
+
+  void _onParkingData() {
+    // Wait for both, so a lot never flashes as empty before its units load.
+    if (!mounted || !_gotUnits || !_gotLots) return;
+    final lots = _parseLots(_rawLots, _rawUnits);
+    setState(() => _liveLots = lots);
+
+    final building = _selectedBuilding;
+    // Parked, or nearly at the curb: keep it. A curb that fills up now is
+    // almost certainly you pulling into it.
+    if (building == null || _arrived || _closeToTargetCurb) {
+      _pushOverlays();
+      return;
+    }
+
+    final best = _bestParking(building);
+
+    // Only hit OSRM when the place to park actually changes.
+    if (best?.lotId != _routeLotId || best?.unitId != _routeUnitId) {
+      _updateNavigationRoute();
+    } else if (_fullRoute.isEmpty && !_isRouting) {
+      _updateNavigationRoute();
+    } else if (best != null) {
+      setState(() => _walkResult = best);
+    }
+    _pushOverlays();
+  }
+
+  /// Within this of the target curb, it is kept even if it turns occupied.
+  static const double _keepCurbMeters = 40;
+
+  bool get _closeToTargetCurb =>
+      _routeUnitId != null &&
+      _fullRoute.length >= 2 &&
+      _routeRemaining <= _keepCurbMeters;
+
+  /// Where to park for [building]: the recommended lot (the closest one
+  /// with space, by walking distance) and, in it, the open curb with the
+  /// shortest walk to the building. When none of the lot's open curbs has
+  /// a known position, the lot itself.
+  PathResult? _bestParking(FauBuilding building) {
+    final lot = CampusPathfinder.findBestAvailableRoute(
+      buildingPos: building.position,
+      lots: _liveLots,
+    );
+    if (lot == null) return null;
+
+    final open = {
+      for (final u in _liveLots[lot.lotId]!['units'] as List<Map<String, dynamic>>)
+        if (u['online'] == true && u['occupied'] != true) u['id'] as String,
+    };
+    PathResult? best;
+    for (final s in _spotShapes) {
+      if (!open.contains(s.unitId)) continue;
+      final r = CampusPathfinder.walkingRoute(
+        lot.lotId,
+        s.center,
+        building.position,
+        unitId: s.unitId,
+      );
+      if (best == null || r.totalDistanceMeters < best.totalDistanceMeters) {
+        best = r;
+      }
+    }
+    return best ?? lot;
   }
 
   // ==========================================
@@ -3749,15 +4085,13 @@ class _FauMapScreenState extends State<FauMapScreen>
     if (building == null || _liveLots.isEmpty) return;
 
     final reqId = ++_routeRequestId;
-    final best = CampusPathfinder.findBestAvailableRoute(
-      buildingPos: building.position,
-      lots: _liveLots,
-    );
+    final best = _bestParking(building);
 
     if (best == null) {
       setState(() {
         _walkResult = null;
         _routeLotId = null;
+        _routeUnitId = null;
         _isRouting = false;
         _clearDrivingRoute();
       });
@@ -3766,7 +4100,10 @@ class _FauMapScreenState extends State<FauMapScreen>
       return;
     }
 
-    final lotPos = _liveLots[best.lotId]!['position'] as LatLng;
+    // A curb is driven into from its open end: the road route goes to the
+    // lane behind its row, and the drive-in path finishes the route.
+    final approach = best.unitId == null ? null : _spotApproach[best.unitId];
+    final dest = approach?.first ?? best.parkAt;
     setState(() {
       _walkResult = best;
       _isRouting = true;
@@ -3777,16 +4114,24 @@ class _FauMapScreenState extends State<FauMapScreen>
     final start = _userPos ?? await _quickFix() ?? _campusEntrance;
     if (!mounted || reqId != _routeRequestId) return;
 
-    final road = await RealRoadRouter.getRoadRoute(
+    var road = await RealRoadRouter.getRoadRoute(
       start: start,
-      destination: lotPos,
+      destination: dest,
       startHeading: _routeStartHeading(),
     );
     if (!mounted || reqId != _routeRequestId) return;
+    if (approach != null) {
+      road = [
+        ...road,
+        if (Geo.meters(road.last, approach.first) > 1) approach.first,
+        ...approach.skip(1),
+      ];
+    }
 
     setState(() {
       _isRouting = false;
       _routeLotId = best.lotId;
+      _routeUnitId = best.unitId;
       _fullRoute = road;
       _routeSuffix = _suffixLengths(road);
       _routeSeg = 0;
@@ -3908,14 +4253,15 @@ class _FauMapScreenState extends State<FauMapScreen>
     // building (_pushRoute also pushes the walking line).
     _pushRoute();
     final lotName = _liveLots[_routeLotId]?['name'] ?? 'the lot';
+    final place = _routeUnitId != null ? '$_routeUnitId in $lotName' : lotName;
     final walk = _walkResult;
     final building = _selectedBuilding;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
           walk != null && building != null
-              ? 'Arrived at $lotName. About ${formatDistance(walk.totalDistanceMeters)} walk to ${building.code}.'
-              : 'Arrived at $lotName.',
+              ? 'Arrived at $place. About ${formatDistance(walk.totalDistanceMeters)} walk to ${building.code}.'
+              : 'Arrived at $place.',
         ),
       ),
     );
@@ -3927,11 +4273,9 @@ class _FauMapScreenState extends State<FauMapScreen>
     setState(() {
       _selectedBuilding = building;
       _routeLotId = null;
+      _routeUnitId = null;
       _clearDrivingRoute();
-      _walkResult = CampusPathfinder.findBestAvailableRoute(
-        buildingPos: building.position,
-        lots: _liveLots,
-      );
+      _walkResult = _bestParking(building);
     });
     _pushOverlays();
     _pushRoute();
@@ -3963,6 +4307,7 @@ class _FauMapScreenState extends State<FauMapScreen>
       _selectedBuilding = null;
       _walkResult = null;
       _routeLotId = null;
+      _routeUnitId = null;
       _isRouting = false;
       _clearDrivingRoute();
     });
@@ -4886,10 +5231,7 @@ class _FauMapScreenState extends State<FauMapScreen>
   }
 
   Widget _buildSuggestionRow(FauBuilding bldg) {
-    final best = CampusPathfinder.findBestAvailableRoute(
-      buildingPos: bldg.position,
-      lots: _liveLots,
-    );
+    final best = _bestParking(bldg);
     final lot = best != null ? _liveLots[best.lotId] : null;
     final free =
         lot == null ? 0 : (lot['capacity'] as int) - (lot['occupied'] as int);
@@ -4928,7 +5270,7 @@ class _FauMapScreenState extends State<FauMapScreen>
                   const SizedBox(height: 2),
                   Text(
                     lot != null
-                        ? 'Best lot: ${lot['name']} ($free free, ${formatDistance(best!.totalDistanceMeters)} walk)'
+                        ? '${best!.unitId != null ? 'Park at ${best.unitId}, ${lot['name']}' : 'Best lot: ${lot['name']}'} ($free free, ${formatDistance(best.totalDistanceMeters)} walk)'
                         : (_liveLots.isEmpty
                             ? 'Loading parking data...'
                             : 'All nearby lots full'),
@@ -5220,7 +5562,10 @@ class _FauMapScreenState extends State<FauMapScreen>
       final free = lot == null
           ? 0
           : (lot['capacity'] as int) - (lot['occupied'] as int);
-      title = 'Best Lot: ${lot?['name'] ?? walk.lotId} ($free free)';
+      final lotName = lot?['name'] ?? walk.lotId;
+      title = walk.unitId != null
+          ? 'Park at ${walk.unitId} • $lotName ($free free)'
+          : 'Best Lot: $lotName ($free free)';
       final walkText = formatDistance(walk.totalDistanceMeters);
       if (_isWalkSim) {
         subtitle =
@@ -5439,7 +5784,8 @@ class _FauMapScreenState extends State<FauMapScreen>
                     children: [
                       Expanded(
                         child: Text(
-                          '${lot['name']} • $free/${units.length} free',
+                          // Out of the curbs that are online.
+                          '${lot['name']} • $free/${lot['capacity']} free',
                           style: mono(fontSize: 11.5),
                           overflow: TextOverflow.ellipsis,
                         ),
