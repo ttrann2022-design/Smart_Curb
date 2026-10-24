@@ -6366,7 +6366,7 @@ class _ProfileTabState extends State<_ProfileTab> {
   late final User? _user = FirebaseAuth.instance.currentUser;
   late final Stream<DatabaseEvent>? _stream = _user == null
       ? null
-      : FirebaseDatabase.instance.ref('drivers/${_user!.uid}/profile').onValue;
+      : FirebaseDatabase.instance.ref('drivers/${_user.uid}/profile').onValue;
 
   void _openContactDialog({Map<String, dynamic>? data}) {
     showAppDialog(
@@ -7709,7 +7709,7 @@ class _UserSettingsPageState extends State<UserSettingsPage> {
                 trailing: Switch(
                   value: enabled,
                   onChanged:
-                      _notifRef == null ? null : (val) => _notifRef!.set(val),
+                      _notifRef == null ? null : (val) => _notifRef.set(val),
                 ),
               );
             },
