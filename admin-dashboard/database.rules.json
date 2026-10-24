@@ -76,10 +76,15 @@
     "units": {
       ".read": true,
       "$unitId": {
-        // Operators and managers set the LED zone and panel text.
+        // Operators and managers set the LED zone, brightness and panel text.
         "ledColor": {
           ".write": "auth != null && root.child('users').child(auth.uid).child('role').val().matches(/^(operator|manager)$/)",
           ".validate": "newData.isString() && newData.val().matches(/^(red|blue|green|gold|white)$/)"
+        },
+        // Whole percent, 0 to 100.
+        "ledBrightness": {
+          ".write": "auth != null && root.child('users').child(auth.uid).child('role').val().matches(/^(operator|manager)$/)",
+          ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100 && newData.val() % 1 === 0"
         },
         "panelText": {
           ".write": "auth != null && root.child('users').child(auth.uid).child('role').val().matches(/^(operator|manager)$/)",
