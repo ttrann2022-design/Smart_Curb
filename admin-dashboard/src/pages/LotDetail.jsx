@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import { ref, onValue, update } from "firebase/database";
 import { database } from "../firebase";
@@ -7,6 +7,14 @@ import { c, mono, LED_HEX, LED_COLORS } from "../theme";
 import { useFlash } from "../motion";
 import { useNow, batteryText, cleanText, formatAgo, formatExact, statusKey } from "../units";
 import { PageHeader, Card, Chips, Button, Field, Input, StatusPill, EmptyState, Notice, StatusText } from "../components/ui";
+
+const BRIGHTNESS_DEBOUNCE_MS = 300;
+
+// Saved LED brightness as a whole percent. Units that don't have one yet show 100.
+function brightnessOf(u) {
+  const v = u?.ledBrightness;
+  return typeof v === "number" && Number.isFinite(v) ? Math.min(100, Math.max(0, Math.round(v))) : 100;
+}
 
 function unitTone(u) {
   if (!u.online) return { bg: "#1F1F1B", border: "#3A3A32", text: c.dim };
@@ -36,13 +44,14 @@ function CurbTile({ id, unit, selected, onPick }) {
   );
 }
 
-// What the curb's LED panel would show: zone colour plus the panel text.
-function LedPreview({ color, text }) {
+// What the curb's LED panel would show: zone colour, brightness and the panel text.
+function LedPreview({ color, text, brightness = 100 }) {
   const hex = LED_HEX[color] || c.dim;
+  const glow = 0.15 + 0.85 * (brightness / 100);
   return (
     <div
       role="img"
-      aria-label={`Preview: ${color} panel showing ${text || "no text"}`}
+      aria-label={`Preview: ${color} panel at ${brightness}% brightness showing ${text || "no text"}`}
       style={{
         position: "relative", height: 64, borderRadius: 6, overflow: "hidden",
         background: "radial-gradient(circle, rgba(255,255,255,0.05) 1px, transparent 1.4px) 0 0 / 5px 5px, #070706",
@@ -52,12 +61,12 @@ function LedPreview({ color, text }) {
         boxShadow: `inset 0 -3px 0 ${hex}`,
       }}
     >
-      <span aria-hidden="true" style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 6, background: hex, boxShadow: `0 0 14px ${hex}`, transition: "background-color 0.3s" }} />
-      <span aria-hidden="true" style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 6, background: hex, boxShadow: `0 0 14px ${hex}`, transition: "background-color 0.3s" }} />
+      <span aria-hidden="true" style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 6, background: hex, boxShadow: `0 0 14px ${hex}`, opacity: glow, transition: "background-color 0.3s" }} />
+      <span aria-hidden="true" style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 6, background: hex, boxShadow: `0 0 14px ${hex}`, opacity: glow, transition: "background-color 0.3s" }} />
       <span style={{
         fontFamily: mono, fontWeight: 700, fontSize: text && text.length > 12 ? 15 : 19, letterSpacing: 2,
         color: text ? "#FFF6D8" : c.faint, textShadow: text ? `0 0 6px ${hex}, 0 0 14px ${hex}` : "none",
-        padding: "0 18px", whiteSpace: "nowrap", overflow: "hidden",
+        padding: "0 18px", whiteSpace: "nowrap", overflow: "hidden", opacity: text ? glow : 1,
       }}>
         {text || "NO TEXT"}
       </span>
@@ -83,6 +92,11 @@ function LotDetail() {
   const [panelText, setPanelText] = useState("");
   const [status, setStatus] = useState(null);
   const [saving, setSaving] = useState(false);
+  // Brightness being dragged or waiting to be written; null shows the saved value.
+  const [brightnessDraft, setBrightnessDraft] = useState(null);
+  // { timer, id, path, value, sim }: the path is fixed when the change is made, so a
+  // write that lands after switching mode or curb still goes where it was meant to.
+  const pendingBrightness = useRef(null);
   const { role, mode } = useOutletContext();
   const now = useNow();
   const canEdit = role === "operator" || role === "manager";
@@ -103,19 +117,65 @@ function LotDetail() {
   const unit = selectedUnit ? units[selectedUnit] : null;
   const savedColor = cleanText(unit?.ledColor) || "blue";
   const savedText = unit?.panelText || "";
+  const savedBrightness = brightnessOf(unit);
+  const brightness = brightnessDraft ?? savedBrightness;
   const dirty = !!unit && (ledColor !== savedColor || panelText.trim() !== savedText);
   const lotCounts = lotUnits.reduce((s, [, u]) => {
     s[statusKey(u)] += 1;
     return s;
   }, { open: 0, occupied: 0, offline: 0 });
 
+  // Brightness writes on its own (not through Apply), once the slider settles:
+  // on release, or BRIGHTNESS_DEBOUNCE_MS after the last arrow key.
+  const writeBrightness = useCallback(async () => {
+    const p = pendingBrightness.current;
+    if (!p) return;
+    clearTimeout(p.timer);
+    pendingBrightness.current = null;
+    try {
+      await update(ref(database, p.path), { ledBrightness: p.value });
+      setStatus({
+        ok: true,
+        text: p.sim
+          ? `${p.id} brightness set to ${p.value}% in the simulation.`
+          : `${p.id} brightness set to ${p.value}%. LED control isn't connected to the curb hardware yet, so the physical panel won't change.`,
+      });
+    } catch (err) {
+      setStatus({ ok: false, text: err.code === "PERMISSION_DENIED" ? "You don't have permission to change this curb." : "Couldn't save brightness: " + err.message });
+    }
+    if (!pendingBrightness.current) setBrightnessDraft(null);
+  }, []);
+
+  // Leaving the page (or switching Live/Simulation remounts it): send what's pending.
+  useEffect(() => () => { writeBrightness(); }, [writeBrightness]);
+
+  const changeBrightness = (value) => {
+    if (!canEdit || !selectedUnit) return;
+    setBrightnessDraft(value);
+    setStatus(null);
+    clearTimeout(pendingBrightness.current?.timer);
+    pendingBrightness.current = {
+      id: selectedUnit,
+      path: dataPath(`units/${selectedUnit}`),
+      value,
+      sim: getDataMode() === "sim",
+      timer: setTimeout(writeBrightness, BRIGHTNESS_DEBOUNCE_MS),
+    };
+  };
+
   const pickLot = (id) => {
+    writeBrightness();
+    setBrightnessDraft(null);
     setSelectedLot(id);
     setSelectedUnit(null);
     setStatus(null);
   };
 
   const pickUnit = (id) => {
+    if (id !== selectedUnit) {
+      writeBrightness();
+      setBrightnessDraft(null);
+    }
     setSelectedUnit(id);
     setLedColor(cleanText(units[id]?.ledColor) || "blue");
     setPanelText(units[id]?.panelText || "");
@@ -186,6 +246,7 @@ function LotDetail() {
                     <InfoRow label="Battery" value={batteryText(unit)} />
                     <InfoRow label="Last change" value={formatAgo(unit.lastUpdated, now) || "—"} title={formatExact(unit.lastUpdated)} />
                     <InfoRow label="Current LED" value={cleanText(unit.ledColor) || "Not set"} />
+                    <InfoRow label="Brightness" value={`${savedBrightness}%`} />
                     <InfoRow label="Current text" value={unit.panelText || "Not set"} />
                   </dl>
 
@@ -195,7 +256,7 @@ function LotDetail() {
                       {dirty && canEdit && <span className="sws-badge" style={{ background: c.warnBg, color: c.warn }}>UNSAVED</span>}
                     </div>
 
-                    <LedPreview color={ledColor} text={panelText.trim()} />
+                    <LedPreview color={ledColor} text={panelText.trim()} brightness={brightness} />
 
                     {!canEdit && <Notice tone="info" icon="lock">Viewers can see LED settings. Operators and managers can change them.</Notice>}
 
@@ -223,6 +284,24 @@ function LotDetail() {
                           ))}
                         </div>
                       </div>
+
+                      <Field label="Brightness" hint={canEdit ? "Saves when you let go of the slider." : null}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                          <input
+                            type="range"
+                            className="sws-range"
+                            min={0}
+                            max={100}
+                            step={1}
+                            value={brightness}
+                            aria-valuetext={`${brightness}%`}
+                            onChange={(e) => changeBrightness(Number(e.target.value))}
+                            onPointerUp={writeBrightness}
+                            onBlur={writeBrightness}
+                          />
+                          <span aria-hidden="true" style={{ fontFamily: mono, fontSize: 13, fontWeight: 600, width: 42, textAlign: "right" }}>{brightness}%</span>
+                        </div>
+                      </Field>
 
                       <Field label="Panel text" hint={`${panelText.length} of 16 characters`}>
                         <Input

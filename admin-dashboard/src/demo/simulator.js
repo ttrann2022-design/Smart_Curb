@@ -19,10 +19,10 @@ function writeSim(updates) {
 }
 
 export const DEMO_LOTS = {
-  lot06: { name: "Lot 6", count: 20, target: 0.55, led: "green", text: "LOT 6" },
-  lot07: { name: "Lot 7", count: 24, target: 0.75, led: "blue", text: "LOT 7" },
-  lot12: { name: "Lot 12", count: 28, target: 0.85, led: "red", text: "LOT 12" },
-  lot14: { name: "Lot 14", count: 22, target: 0.95, led: "gold", text: "LOT 14" },
+  lot06: { name: "Lot 6", count: 20, target: 0.55, led: "green", brightness: 80, text: "LOT 6" },
+  lot07: { name: "Lot 7", count: 24, target: 0.75, led: "blue", brightness: 100, text: "LOT 7" },
+  lot12: { name: "Lot 12", count: 28, target: 0.85, led: "red", brightness: 100, text: "LOT 12" },
+  lot14: { name: "Lot 14", count: 22, target: 0.95, led: "gold", brightness: 60, text: "LOT 14" },
 };
 export const DEMO_CURB_COUNT = Object.values(DEMO_LOTS).reduce((s, l) => s + l.count, 0);
 export const DEMO_LOT_COUNT = Object.keys(DEMO_LOTS).length;
@@ -61,6 +61,7 @@ function buildDemoData() {
         battery: 45 + Math.floor(Math.random() * 56),
         online: true,
         ledColor: lot.led,
+        ledBrightness: lot.brightness,
         panelText: lot.text,
         lastUpdated: now - Math.floor(Math.random() * 45 * 60000),
       };
