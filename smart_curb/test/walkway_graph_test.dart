@@ -17,15 +17,16 @@ void main() {
   };
 
   test('OSM walkway graph loads and routes every lot to every building', () async {
-    await CampusPathfinder.load();
-    expect(CampusPathfinder.usingOsmGraph, isTrue);
-    expect(CampusPathfinder.nodes.length, greaterThan(1000));
+    final pathfinder = fauBoca.pathfinder;
+    await pathfinder.load();
+    expect(pathfinder.usingOsmGraph, isTrue);
+    expect(pathfinder.nodes.length, greaterThan(1000));
 
     final sw = Stopwatch()..start();
     for (final b in buildings.entries) {
       final parts = <String>[];
-      for (final lot in CampusPathfinder.lotPositions.entries) {
-        final r = CampusPathfinder.walkingRoute(lot.key, lot.value, b.value);
+      for (final lot in fauBoca.lotPositions.entries) {
+        final r = pathfinder.walkingRoute(lot.key, lot.value, b.value);
         final straight = Geo.meters(lot.value, b.value);
         // Found a real path through the network, not the 2-point fallback.
         expect(r.pathPoints.length, greaterThan(2), reason: '${lot.key}->${b.key}');
@@ -39,5 +40,45 @@ void main() {
     }
     // ignore: avoid_print
     print('28 routes in ${sw.elapsedMilliseconds} ms');
+  });
+
+  test('Broward Mall: every lot reaches every store, closest lot is picked', () async {
+    final pathfinder = browardMall.pathfinder;
+    await pathfinder.load();
+    expect(pathfinder.usingOsmGraph, isTrue);
+    expect(pathfinder.nodes.length, greaterThan(1000));
+
+    for (final b in browardMall.buildings) {
+      for (final lot in browardMall.lotPositions.entries) {
+        final r = pathfinder.walkingRoute(lot.key, lot.value, b.position);
+        final straight = Geo.meters(lot.value, b.position);
+        expect(r.pathPoints.length, greaterThan(2), reason: '${lot.key}->${b.code}');
+        expect(r.totalDistanceMeters, greaterThanOrEqualTo(straight - 1));
+        expect(r.totalDistanceMeters, lessThan(straight * 3 + 300));
+      }
+    }
+
+    // No sensors at the mall: every lot qualifies (as the map screen builds
+    // them), so the pick is simply the shortest walk.
+    final lots = {
+      for (final e in browardMall.lotPositions.entries)
+        e.key: <String, dynamic>{
+          'occupied': 0,
+          'capacity': 0,
+          'sensors': false,
+          'position': e.value,
+        },
+    };
+    String bestFor(String id) => pathfinder
+        .findBestAvailableRoute(
+          buildingPos: browardMall.buildings.firstWhere((b) => b.id == id).position,
+          lots: lots,
+        )!
+        .lotId;
+    // Each anchor has its own lot right outside.
+    expect(bestFor('bm_dillards'), 'lot1');
+    expect(bestFor('bm_macys'), 'lot2');
+    expect(bestFor('bm_regal'), 'lot3');
+    expect(bestFor('bm_jcpenney'), 'lot4');
   });
 }

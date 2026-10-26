@@ -47,4 +47,6 @@ flutter:
     - assets/logo.png
     # Campus walking network for A* (generated from OpenStreetMap)
     - assets/campus_walkways.json
+    # Walking network around Broward Mall (generated from OpenStreetMap)
+    - assets/broward_walkways.json
 

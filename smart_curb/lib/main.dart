@@ -26,7 +26,8 @@ void main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
-  await CampusPathfinder.load(); // campus walking network for A*
+  // Each place's walking network for A*.
+  await Future.wait([for (final p in Place.all) p.pathfinder.load()]);
   runApp(const MyApp());
 }
 
@@ -654,13 +655,15 @@ class _HomeTab extends StatefulWidget {
 }
 
 class _HomeTabState extends State<_HomeTab> {
-  static const List<Map<String, String>> _availableCampuses = [
-    {
-      'id': 'fau_boca',
-      'shortName': 'FAU',
-      'fullName': 'Florida Atlantic University',
-      'address': '777 Glades Rd, Boca Raton, FL 33431',
-    },
+  /// Every place users can add (see [Place.all]).
+  static final List<Map<String, String>> _availableCampuses = [
+    for (final p in Place.all)
+      {
+        'id': p.id,
+        'shortName': p.shortName,
+        'fullName': p.fullName,
+        'address': p.address,
+      },
   ];
 
   // Stream is created once instead of on every build (avoids re-subscribing).
@@ -771,10 +774,10 @@ class _HomeTabState extends State<_HomeTab> {
   }
 
   Widget _buildLocationCard(String uid, String locKey, Map<String, dynamic> data) {
-    final shortName = data['shortName']?.toString() ?? 'FAU';
-    final fullName = data['fullName']?.toString() ?? 'Florida Atlantic University';
-    final address =
-        data['address']?.toString() ?? '777 Glades Rd, Boca Raton, FL 33431';
+    final place = Place.byId(locKey);
+    final shortName = data['shortName']?.toString() ?? place?.shortName ?? '?';
+    final fullName = data['fullName']?.toString() ?? place?.fullName ?? locKey;
+    final address = data['address']?.toString() ?? place?.address ?? '';
 
     return Padding(
       key: ValueKey('loc-$locKey'),
@@ -782,10 +785,16 @@ class _HomeTabState extends State<_HomeTab> {
       child: PressScale(
         child: InkWell(
         borderRadius: BorderRadius.circular(kRadius),
-        onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => const FauMapScreen()),
-        ),
+        onTap: () {
+          if (place == null) {
+            showErrorSnackBar(context, 'This location is no longer available.');
+            return;
+          }
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => PlaceMapScreen(place: place)),
+          );
+        },
         child: Container(
           padding: const EdgeInsets.all(16.0),
           decoration: BoxDecoration(
@@ -1076,16 +1085,17 @@ class Geo {
 }
 
 // ==========================================
-// FAU CAMPUS MODELS & A* PATHFINDING
+// PLACE MODELS & A* PATHFINDING
 // ==========================================
 
-class FauBuilding {
+/// A destination on a place's map (a campus building, a store in a mall).
+class PlaceBuilding {
   final String id;
   final String code;
   final String name;
   final LatLng position;
 
-  const FauBuilding({
+  const PlaceBuilding({
     required this.id,
     required this.code,
     required this.name,
@@ -1277,27 +1287,25 @@ class _MinHeap {
   }
 }
 
+/// A* walking routes over one place's walkway network.
 class CampusPathfinder {
-  /// Where each parking lot is (lots are not graph nodes; like buildings,
-  /// they are snapped onto the nearest walkway when routing).
-  static const Map<String, LatLng> lotPositions = {
-    'lot12': LatLng(26.373262, -80.106806),
-    'lot14': LatLng(26.373005, -80.099683),
-    'lot20': LatLng(26.373999, -80.105842),
-    'garage2': LatLng(26.374013, -80.104280),
-  };
+  /// [asset] holds the place's walking network (see [load]). [nodes] and
+  /// [edges] are a small hand-made graph used until it loads, or if it
+  /// can't be read.
+  CampusPathfinder(this.asset, {this.nodes = const {}, this.edges = const []});
+
+  final String asset;
 
   /// True once the full OpenStreetMap walkway network has been loaded.
-  static bool usingOsmGraph = false;
+  bool usingOsmGraph = false;
 
-  /// Loads the campus walking network (every sidewalk, footpath, crossing,
-  /// campus road and parking aisle from OpenStreetMap) from
-  /// assets/campus_walkways.json. Format: `nodes` = flat [lat, lon, ...],
-  /// `edges` = flat [nodeIndex, nodeIndex, ...]. If it can't be read, the
-  /// small built-in graph below stays in use.
-  static Future<void> load() async {
+  /// Loads the walking network (every sidewalk, footpath, crossing, road
+  /// and parking aisle from OpenStreetMap) from [asset]. Format: `nodes` =
+  /// flat [lat, lon, ...], `edges` = flat [nodeIndex, nodeIndex, ...]. If it
+  /// can't be read, the hand-made graph stays in use.
+  Future<void> load() async {
     try {
-      final raw = await rootBundle.loadString('assets/campus_walkways.json');
+      final raw = await rootBundle.loadString(asset);
       final json = jsonDecode(raw) as Map<String, dynamic>;
       final n = (json['nodes'] as List).cast<num>();
       final e = (json['edges'] as List).cast<num>();
@@ -1321,44 +1329,17 @@ class CampusPathfinder {
     }
   }
 
-  /// Walkway nodes. Starts as the small hand-made graph around the first
-  /// lots and buildings; [load] replaces it with the full campus network.
-  static Map<String, LatLng> nodes = {
-    'lot12': const LatLng(26.373262, -80.106806),
-    'lot14': const LatLng(26.373005, -80.099683),
-    'lot20': const LatLng(26.373999, -80.105842),
-    'garage2': const LatLng(26.374013, -80.104280),
-    'ed47': const LatLng(26.373358, -80.105828),
-    'bc71': const LatLng(26.373263, -80.100446),
-    'cm22': const LatLng(26.372528, -80.104044),
-    'ed47_west': const LatLng(26.373300, -80.106300),
-    'breezeway_west': const LatLng(26.373300, -80.103500),
-    'breezeway_center': const LatLng(26.373280, -80.101700),
-    'breezeway_east': const LatLng(26.373270, -80.101000),
-    'bc71_east': const LatLng(26.373150, -80.099950),
-  };
+  /// Walkway nodes: the hand-made graph until [load] replaces it with the
+  /// full network.
+  Map<String, LatLng> nodes;
 
   /// Walkways, listed once each. They are always two-way, so a one-sided
   /// neighbor list can no longer break the graph.
-  static List<List<String>> edges = [
-    ['lot12', 'ed47_west'],
-    ['lot20', 'ed47_west'],
-    ['ed47', 'ed47_west'],
-    ['lot20', 'garage2'],
-    ['garage2', 'breezeway_west'],
-    ['ed47', 'breezeway_west'],
-    ['cm22', 'breezeway_west'],
-    ['cm22', 'breezeway_center'],
-    ['breezeway_west', 'breezeway_center'],
-    ['breezeway_center', 'breezeway_east'],
-    ['breezeway_east', 'bc71'],
-    ['bc71', 'bc71_east'],
-    ['bc71_east', 'lot14'],
-  ];
+  List<List<String>> edges;
 
-  static Map<String, Map<String, double>> _adj = _buildAdjacency();
+  late Map<String, Map<String, double>> _adj = _buildAdjacency();
 
-  static Map<String, Map<String, double>> _buildAdjacency() {
+  Map<String, Map<String, double>> _buildAdjacency() {
     final adj = <String, Map<String, double>>{};
     for (final e in edges) {
       final a = nodes[e[0]];
@@ -1374,10 +1355,10 @@ class CampusPathfinder {
   }
 
   /// Lots, curbs and buildings never move, so each walk is computed once.
-  static final Map<String, PathResult> _cache = {};
+  final Map<String, PathResult> _cache = {};
 
   /// The walk from [from] (lot [lotId], or curb [unitId] in it) to a building.
-  static PathResult walkingRoute(
+  PathResult walkingRoute(
     String lotId,
     LatLng from,
     LatLng buildingPos, {
@@ -1396,9 +1377,11 @@ class CampusPathfinder {
     });
   }
 
-  /// Closest non-full lot by real walking distance. Lots with no sensors
-  /// (capacity 0) are treated as unknown and skipped.
-  static PathResult? findBestAvailableRoute({
+  /// Closest non-full lot by real walking distance. Lots whose sensors
+  /// report nothing (capacity 0) are treated as unknown and skipped; lots
+  /// with no sensors at all (`sensors: false`, see [Place.liveParking])
+  /// can't be counted, so they always qualify.
+  PathResult? findBestAvailableRoute({
     required LatLng buildingPos,
     required Map<String, Map<String, dynamic>> lots,
   }) {
@@ -1406,7 +1389,8 @@ class CampusPathfinder {
     for (final entry in lots.entries) {
       final occupied = (entry.value['occupied'] as num?)?.toInt() ?? 0;
       final capacity = (entry.value['capacity'] as num?)?.toInt() ?? 0;
-      if (capacity <= 0 || occupied >= capacity) continue;
+      final sensors = entry.value['sensors'] != false;
+      if (sensors && (capacity <= 0 || occupied >= capacity)) continue;
 
       final lotPos = entry.value['position'] as LatLng?;
       if (lotPos == null) continue;
@@ -1421,7 +1405,7 @@ class CampusPathfinder {
 
   /// Lots and buildings never move, so where each one joins the network is
   /// worked out once (there are thousands of walkway segments to check).
-  static final Map<String, List<_GraphSnap>> _snapCache = {};
+  final Map<String, List<_GraphSnap>> _snapCache = {};
 
   /// How much farther than its nearest walkway the destination may still
   /// join the network. Building positions are their centres, and the nearest
@@ -1436,7 +1420,7 @@ class CampusPathfinder {
 
   /// Projects p onto every walkway segment (not just nodes) within [reach]
   /// of the nearest one, so points between nodes route correctly.
-  static List<_GraphSnap> _snapToGraph(LatLng p, {double reach = 0}) {
+  List<_GraphSnap> _snapToGraph(LatLng p, {double reach = 0}) {
     // Walking reroutes start from live GPS points (each one new), so keep the
     // cache from growing forever.
     if (_snapCache.length > 500) _snapCache.clear();
@@ -1459,7 +1443,7 @@ class CampusPathfinder {
     });
   }
 
-  static List<LatLng> findPath(LatLng start, LatLng goal) {
+  List<LatLng> findPath(LatLng start, LatLng goal) {
     final ss = _snapToGraph(start);
     final gs = _snapToGraph(goal, reach: _goalReach);
     const sId = '__start';
@@ -1613,7 +1597,802 @@ class RealRoadRouter {
 }
 
 // ==========================================
-// FAU CAMPUS MAP SCREEN (MapLibre GL, 3D)
+// PLACES (each one a map users can add)
+// ==========================================
+
+/// A place users can add to their home page and open as a map: its area,
+/// destinations, parking lots and walking network. The map screen reads
+/// everything place-specific from here, so a new place needs no other code.
+class Place {
+  /// Key under `drivers/<uid>/locations` when a user adds it.
+  final String id;
+
+  /// Logo text, full name and address on the home page.
+  final String shortName;
+  final String fullName;
+  final String address;
+
+  /// Short name in sentences ("Travel to FAU").
+  final String nickname;
+
+  /// Map screen app bar title and subtitle, and the guidance card's title
+  /// before a destination is picked.
+  final String mapTitle;
+  final String areaName;
+  final String guidanceTitle;
+
+  /// Guidance card text inside and outside the place's box.
+  final String insideLabel;
+  final String outsideLabel;
+
+  /// The map opens here, and flies back here on reset.
+  final LatLng center;
+
+  /// Where a driving route starts without a GPS fix, and where dev mode's
+  /// "Travel to" button puts you.
+  final LatLng entrance;
+
+  /// The map can't be panned outside this box, and inside it counts as
+  /// being at the place.
+  final LatLng sw;
+  final LatLng ne;
+  final double minZoom;
+
+  /// Destinations: tap one on the map or search for it.
+  final List<PlaceBuilding> buildings;
+
+  /// Where each parking lot is (lots are not graph nodes; like buildings,
+  /// they are snapped onto the nearest walkway when routing).
+  final Map<String, LatLng> lotPositions;
+
+  /// True: lot occupancy comes live from the curbs in `units/` (names from
+  /// `lots/`). False: no curbs here yet, so the lots in [lotPositions] are
+  /// plain map points named by [lotNames], and the closest one to the
+  /// destination by walking distance is recommended.
+  final bool liveParking;
+  final Map<String, String> lotNames;
+
+  /// Rows of parking spaces with a curb unit in each (see [CurbSpotRow]).
+  final List<CurbSpotRow> spotRows;
+
+  final CampusPathfinder pathfinder;
+
+  Place({
+    required this.id,
+    required this.shortName,
+    required this.fullName,
+    required this.address,
+    required this.nickname,
+    required this.mapTitle,
+    required this.areaName,
+    required this.guidanceTitle,
+    required this.insideLabel,
+    required this.outsideLabel,
+    required this.center,
+    required this.entrance,
+    required this.sw,
+    required this.ne,
+    required this.minZoom,
+    required this.buildings,
+    required this.lotPositions,
+    required this.liveParking,
+    this.lotNames = const {},
+    this.spotRows = const [],
+    required this.pathfinder,
+  });
+
+  bool contains(LatLng p) =>
+      p.latitude >= sw.latitude &&
+      p.latitude <= ne.latitude &&
+      p.longitude >= sw.longitude &&
+      p.longitude <= ne.longitude;
+
+  /// Every curb space, each shown on the map as a 3D block.
+  late final spotShapes = [for (final r in spotRows) ...r.spaces()];
+
+  /// Each curb's drive-in path (see [CurbSpotRow.approach]), by unit id.
+  late final Map<String, List<LatLng>> spotApproach = {
+    for (final r in spotRows)
+      for (var i = 0; i < r.unitIds.length; i++) r.unitIds[i]: r.approach(i),
+  };
+
+  /// Every place users can add, in the order the add dialog lists them.
+  static final List<Place> all = [fauBoca, browardMall];
+
+  static Place? byId(String id) {
+    for (final p in all) {
+      if (p.id == id) return p;
+    }
+    return null;
+  }
+}
+
+final Place fauBoca = Place(
+  id: 'fau_boca',
+  shortName: 'FAU',
+  fullName: 'Florida Atlantic University',
+  address: '777 Glades Rd, Boca Raton, FL 33431',
+  nickname: 'FAU',
+  mapTitle: 'FAU Campus Map',
+  areaName: 'Boca Raton Main Campus',
+  guidanceTitle: 'FAU Boca Raton Main Campus',
+  insideLabel: 'On Campus',
+  outsideLabel: 'Outside Campus Area',
+  center: const LatLng(26.3745, -80.1030),
+  entrance: const LatLng(26.3685, -80.1020),
+  // Campus box. The north edge sits just past NW Spanish River Blvd, so the
+  // map starts counting at its traffic lights coming in from I-95 (I-95 ramp
+  // lights ~26.3873, the Airport Rd and FAU Blvd 4-way lights ~26.3861-66).
+  sw: const LatLng(26.3630, -80.1170),
+  ne: const LatLng(26.3880, -80.0890),
+  minZoom: 14.5,
+  buildings: _fauBuildings,
+  lotPositions: const {
+    'lot12': LatLng(26.373262, -80.106806),
+    'lot14': LatLng(26.373005, -80.099683),
+    'lot20': LatLng(26.373999, -80.105842),
+    'garage2': LatLng(26.374013, -80.104280),
+  },
+  liveParking: true,
+  // To place a row, tap the centre of its first space in dev mode and copy
+  // the coordinate. Guidance always drives into a space from its open end
+  // (the end away from its curb), along the lane behind its row.
+  spotRows: [
+    _fauLot14West,
+    // Across the lane, open ends facing _fauLot14West (curbs at the west
+    // end); the first id sits opposite C-095. Both rows share the lane
+    // between.
+    CurbSpotRow.facing(_fauLot14West, unitIds: ['C-042']),
+  ],
+  // The small hand-made graph around the first lots and buildings, used
+  // until the full campus network loads.
+  pathfinder: CampusPathfinder(
+    'assets/campus_walkways.json',
+    nodes: {
+      'lot12': const LatLng(26.373262, -80.106806),
+      'lot14': const LatLng(26.373005, -80.099683),
+      'lot20': const LatLng(26.373999, -80.105842),
+      'garage2': const LatLng(26.374013, -80.104280),
+      'ed47': const LatLng(26.373358, -80.105828),
+      'bc71': const LatLng(26.373263, -80.100446),
+      'cm22': const LatLng(26.372528, -80.104044),
+      'ed47_west': const LatLng(26.373300, -80.106300),
+      'breezeway_west': const LatLng(26.373300, -80.103500),
+      'breezeway_center': const LatLng(26.373280, -80.101700),
+      'breezeway_east': const LatLng(26.373270, -80.101000),
+      'bc71_east': const LatLng(26.373150, -80.099950),
+    },
+    edges: [
+      ['lot12', 'ed47_west'],
+      ['lot20', 'ed47_west'],
+      ['ed47', 'ed47_west'],
+      ['lot20', 'garage2'],
+      ['garage2', 'breezeway_west'],
+      ['ed47', 'breezeway_west'],
+      ['cm22', 'breezeway_west'],
+      ['cm22', 'breezeway_center'],
+      ['breezeway_west', 'breezeway_center'],
+      ['breezeway_center', 'breezeway_east'],
+      ['breezeway_east', 'bc71'],
+      ['bc71', 'bc71_east'],
+      ['bc71_east', 'lot14'],
+    ],
+  ),
+);
+
+const CurbSpotRow _fauLot14West = CurbSpotRow(
+  lotId: 'lot14',
+  // Nose-in spaces on the west side of the north-south aisle, starting
+  // at its crossing with the east-west road (26.373663, -80.099496):
+  // each space's aisle end is 1 m off the aisle line, and the first
+  // space is 1 m south of the road line.
+  first: LatLng(26.373640, -80.099539),
+  // Down the aisle, southward (OSM: 179.0°).
+  rowBearing: 179.0,
+  unitIds: ['C-095', 'C-077', 'C-001'],
+  // Curbs at the aisle (east) end; cars pull in from the west.
+  enterFromRight: true,
+  // The lane behind the row meets the east-west road here (the first
+  // space's edge is ~0.94 m off the road line).
+  laneLeadIn: 2.4,
+);
+
+/// No curbs installed yet: the four lots are plain map points, and the
+/// closest one to the destination (by walking distance) is recommended.
+final Place browardMall = Place(
+  id: 'broward_mall',
+  shortName: 'BWD',
+  fullName: 'Broward Mall',
+  address: '8000 W Broward Blvd, Plantation, FL 33388',
+  nickname: 'Broward Mall',
+  mapTitle: 'Broward Mall Map',
+  areaName: 'Westfield Broward Mall, Plantation',
+  guidanceTitle: 'Westfield Broward Mall',
+  insideLabel: 'At the Mall',
+  outsideLabel: 'Outside Mall Area',
+  center: const LatLng(26.117789, -80.254729), // the mall building's centre
+  // Perimeter Rd, just in from its traffic light on W Broward Blvd.
+  entrance: const LatLng(26.120312, -80.257132),
+  // The mall's block (W Broward Blvd, N University Dr, Federated Rd and
+  // Perimeter Rd) and the roads around it; the same area as its walkways.
+  sw: const LatLng(26.1100, -80.2630),
+  ne: const LatLng(26.1250, -80.2470),
+  minZoom: 15.0,
+  buildings: _browardMallBuildings,
+  // The biggest surface lot on each side of the mall (OpenStreetMap),
+  // numbered clockwise from the north.
+  lotPositions: const {
+    'lot1': LatLng(26.119498, -80.256565), // north-west, by Dillard's
+    'lot2': LatLng(26.118063, -80.253161), // east, by Macy's
+    'lot3': LatLng(26.115663, -80.253942), // south, by Regal
+    'lot4': LatLng(26.116812, -80.256363), // west, by JCPenney
+  },
+  liveParking: false,
+  lotNames: const {
+    'lot1': 'Parking Lot 1',
+    'lot2': 'Parking Lot 2',
+    'lot3': 'Parking Lot 3',
+    'lot4': 'Parking Lot 4',
+  },
+  pathfinder: CampusPathfinder('assets/broward_walkways.json'),
+);
+
+/// Westfield Broward Mall: the mall itself, its anchors and the stores and
+/// restaurants inside it, plus those on its own grounds, from
+/// OpenStreetMap (© OpenStreetMap contributors, ODbL), pulled Oct 2026.
+/// Code = the short label on the map.
+const List<PlaceBuilding> _browardMallBuildings = [
+  PlaceBuilding(
+    id: 'bm_mall',
+    code: 'Broward Mall',
+    name: 'Westfield Broward Mall (Main Building)',
+    position: LatLng(26.117789, -80.254729),
+  ),
+  PlaceBuilding(
+    id: 'bm_bww',
+    code: 'Buffalo Wild Wings',
+    name: 'Buffalo Wild Wings (Restaurant)',
+    position: LatLng(26.117983, -80.254278),
+  ),
+  PlaceBuilding(
+    id: 'bm_brio',
+    code: 'Brio',
+    name: 'Brio (Restaurant)',
+    position: LatLng(26.115404, -80.252057),
+  ),
+  PlaceBuilding(
+    id: 'bm_cajun_boil',
+    code: 'Cajun Boil',
+    name: 'Cajun Boil (Restaurant)',
+    position: LatLng(26.117342, -80.255394),
+  ),
+  PlaceBuilding(
+    id: 'bm_cajun_grill',
+    code: 'Cajun Grill',
+    name: 'Cajun Grill (Food Court)',
+    position: LatLng(26.117113, -80.255105),
+  ),
+  PlaceBuilding(
+    id: 'bm_captains_closet',
+    code: "Captain's Closet",
+    name: "Captain's Closet (Outdoor Gear)",
+    position: LatLng(26.117895, -80.254764),
+  ),
+  PlaceBuilding(
+    id: 'bm_cedenos',
+    code: 'Cedeños',
+    name: 'Cedeños Cuban Café (Food Court)',
+    position: LatLng(26.117009, -80.254994),
+  ),
+  PlaceBuilding(
+    id: 'bm_charleys',
+    code: 'Charleys',
+    name: 'Charleys Philly Steaks (Food Court)',
+    position: LatLng(26.117183, -80.255113),
+  ),
+  PlaceBuilding(
+    id: 'bm_chick_fil_a',
+    code: 'Chick-fil-A',
+    name: 'Chick-fil-A (Food Court)',
+    position: LatLng(26.117141, -80.254803),
+  ),
+  PlaceBuilding(
+    id: 'bm_cinnabon',
+    code: 'Cinnabon',
+    name: 'Cinnabon (Bakery)',
+    position: LatLng(26.117505, -80.254783),
+  ),
+  PlaceBuilding(
+    id: 'bm_claires',
+    code: "Claire's",
+    name: "Claire's (Accessories)",
+    position: LatLng(26.117423, -80.255264),
+  ),
+  PlaceBuilding(
+    id: 'bm_cream_crackers',
+    code: 'Cream and Crackers',
+    name: 'Cream and Crackers (Food Court)',
+    position: LatLng(26.117307, -80.254791),
+  ),
+  PlaceBuilding(
+    id: 'bm_dillards',
+    code: "Dillard's",
+    name: "Dillard's (Department Store)",
+    position: LatLng(26.118281, -80.256400),
+  ),
+  PlaceBuilding(
+    id: 'bm_farandua',
+    code: 'Farandua',
+    name: 'Farandua Corn and Potatoes (Food Court)',
+    position: LatLng(26.117386, -80.255327),
+  ),
+  PlaceBuilding(
+    id: 'bm_fl_body_jewelry',
+    code: 'FL Body Jewelry',
+    name: 'Florida Body Jewelry & Design (Jewelry)',
+    position: LatLng(26.117730, -80.255317),
+  ),
+  PlaceBuilding(
+    id: 'bm_fresh_mangos',
+    code: 'Fresh Mangos',
+    name: 'Fresh Mangos (Food Court)',
+    position: LatLng(26.116920, -80.254870),
+  ),
+  PlaceBuilding(
+    id: 'bm_haagen_dazs',
+    code: 'Häagen-Dazs',
+    name: 'Häagen-Dazs (Ice Cream)',
+    position: LatLng(26.117452, -80.254861),
+  ),
+  PlaceBuilding(
+    id: 'bm_jcpenney',
+    code: 'JCPenney',
+    name: 'JCPenney (Department Store)',
+    position: LatLng(26.116289, -80.255379),
+  ),
+  PlaceBuilding(
+    id: 'bm_jerk_grill',
+    code: 'Jerk Grill',
+    name: 'Jerk Grill (Food Court)',
+    position: LatLng(26.117054, -80.254910),
+  ),
+  PlaceBuilding(
+    id: 'bm_lenscrafters',
+    code: 'LensCrafters',
+    name: 'LensCrafters (Eyewear)',
+    position: LatLng(26.118938, -80.254558),
+  ),
+  PlaceBuilding(
+    id: 'bm_lids',
+    code: 'Lids',
+    name: 'Lids (Hats)',
+    position: LatLng(26.118292, -80.255222),
+  ),
+  PlaceBuilding(
+    id: 'bm_macys',
+    code: "Macy's",
+    name: "Macy's (Department Store)",
+    position: LatLng(26.117144, -80.253427),
+  ),
+  PlaceBuilding(
+    id: 'bm_mens_wearhouse',
+    code: "Men's Wearhouse",
+    name: "Men's Wearhouse (Menswear)",
+    position: LatLng(26.120043, -80.257649),
+  ),
+  PlaceBuilding(
+    id: 'bm_ole_ole',
+    code: "Ole' Ole'",
+    name: "Ole' Ole' Mexican Grill (Restaurant)",
+    position: LatLng(26.120083, -80.257502),
+  ),
+  PlaceBuilding(
+    id: 'bm_panda_express',
+    code: 'Panda Express',
+    name: 'Panda Express (Food Court)',
+    position: LatLng(26.117355, -80.254859),
+  ),
+  PlaceBuilding(
+    id: 'bm_planet_grilled_cheese',
+    code: 'Planet Grilled Cheese',
+    name: 'Planet Grilled Cheese (Food Court)',
+    position: LatLng(26.117404, -80.254928),
+  ),
+  PlaceBuilding(
+    id: 'bm_raw_energy',
+    code: 'Raw Energy',
+    name: 'Raw Energy (Food Court)',
+    position: LatLng(26.116954, -80.254932),
+  ),
+  PlaceBuilding(
+    id: 'bm_regal',
+    code: 'Regal',
+    name: 'Regal Broward Stadium 12 (Cinema)',
+    position: LatLng(26.116257, -80.254112),
+  ),
+  PlaceBuilding(
+    id: 'bm_sarku',
+    code: 'Sarku Japan',
+    name: 'Sarku Japan (Food Court)',
+    position: LatLng(26.117059, -80.255053),
+  ),
+  PlaceBuilding(
+    id: 'bm_scott_eye_care',
+    code: 'Scott Eye Care',
+    name: 'Scott Eye Care (Optometrist)',
+    position: LatLng(26.118917, -80.254517),
+  ),
+  PlaceBuilding(
+    id: 'bm_vinci',
+    code: 'Vinci',
+    name: 'Vinci (Clothing)',
+    position: LatLng(26.117542, -80.254732),
+  ),
+  PlaceBuilding(
+    id: 'bm_zales',
+    code: 'Zales',
+    name: 'Zales (Jewelry)',
+    position: LatLng(26.118239, -80.255346),
+  ),
+];
+
+/// FAU Boca Raton: every building that has an official building code, from
+/// OpenStreetMap (© OpenStreetMap contributors, ODbL), pulled Oct 2026.
+/// Position = centre of the building's outline, so the dots line up with
+/// the buildings drawn on the map. Parking garages (PK-) are left out.
+const List<PlaceBuilding> _fauBuildings = [
+  PlaceBuilding(
+    id: 'ad10',
+    code: 'AD-10',
+    name: 'Kenneth R. Williams Administration (AD-10)',
+    position: LatLng(26.371848, -80.101591),
+  ),
+  PlaceBuilding(
+    id: 'ag39',
+    code: 'AG-39',
+    name: 'Ritter Art Gallery (AG-39)',
+    position: LatLng(26.371550, -80.103648),
+  ),
+  PlaceBuilding(
+    id: 'ah52',
+    code: 'AH-52',
+    name: 'Dorothy F. Schmidt Center for Arts and Humanities (AH-52)',
+    position: LatLng(26.369743, -80.101365),
+  ),
+  PlaceBuilding(
+    id: 'al9',
+    code: 'AL-9',
+    name: 'Dorothy F. Schmidt Arts and Letters (AL-9)',
+    position: LatLng(26.369474, -80.102208),
+  ),
+  PlaceBuilding(
+    id: 'au31a',
+    code: 'AU-31A',
+    name: 'Carole & Barry Kaye Performing Arts Auditorium (AU-31A)',
+    position: LatLng(26.370302, -80.105596),
+  ),
+  PlaceBuilding(
+    id: 'az79',
+    code: 'AZ-79',
+    name: 'Memory & Wellness Center, Louis & Anne Green (AZ-79)',
+    position: LatLng(26.379654, -80.097165),
+  ),
+  PlaceBuilding(
+    id: 'bb48',
+    code: 'BB-48',
+    name: 'Baseball Stadium (BB-48)',
+    position: LatLng(26.370815, -80.109459),
+  ),
+  PlaceBuilding(
+    id: 'bc71',
+    code: 'BC-71',
+    name: 'Charles E. Schmidt Biomedical Science Center (BC-71)',
+    position: LatLng(26.373296, -80.100442),
+  ),
+  PlaceBuilding(
+    id: 'bk76',
+    code: 'BK-76',
+    name: 'Bookstore (BK-76)',
+    position: LatLng(26.370663, -80.103727),
+  ),
+  PlaceBuilding(
+    id: 'bs12',
+    code: 'BS-12',
+    name: 'Behavioral Sciences (BS-12)',
+    position: LatLng(26.372992, -80.102838),
+  ),
+  PlaceBuilding(
+    id: 'bu86',
+    code: 'BU-86',
+    name: 'College of Business (BU-86)',
+    position: LatLng(26.373213, -80.104676),
+  ),
+  PlaceBuilding(
+    id: 'ce31d',
+    code: 'CE-31D',
+    name: 'Continuing Education Hall (CE-31D)',
+    position: LatLng(26.370530, -80.106951),
+  ),
+  PlaceBuilding(
+    id: 'cm22',
+    code: 'CM-22',
+    name: 'Computer Center (CM-22)',
+    position: LatLng(26.372498, -80.104066),
+  ),
+  PlaceBuilding(
+    id: 'co69',
+    code: 'CO-69',
+    name: 'Campus Operations & Police (CO-69)',
+    position: LatLng(26.378060, -80.097316),
+  ),
+  PlaceBuilding(
+    id: 'cr31e',
+    code: 'CR-31E',
+    name: 'Student Activities Center (CR-31E)',
+    position: LatLng(26.369951, -80.106673),
+  ),
+  PlaceBuilding(
+    id: 'cu97',
+    code: 'CU-97',
+    name: 'Culture & Society Building (CU-97)',
+    position: LatLng(26.368409, -80.101906),
+  ),
+  PlaceBuilding(
+    id: 'dm6',
+    code: 'DM-6',
+    name: 'Nations North Residence Hall - Algonquin (DM-6)',
+    position: LatLng(26.369466, -80.104897),
+  ),
+  PlaceBuilding(
+    id: 'dp49',
+    code: 'DP-49',
+    name: 'Gladys Davis Pavilion (DP-49)',
+    position: LatLng(26.372508, -80.107069),
+  ),
+  PlaceBuilding(
+    id: 'ds87',
+    code: 'DS-87',
+    name: 'Desantis Pavilion (DS-87)',
+    position: LatLng(26.373398, -80.104460),
+  ),
+  PlaceBuilding(
+    id: 'ed47',
+    code: 'ED-47',
+    name: 'College of Education (ED-47)',
+    position: LatLng(26.373268, -80.105829),
+  ),
+  PlaceBuilding(
+    id: 'ee96',
+    code: 'EE-96',
+    name: 'Engineering & Computer Science (EE-96)',
+    position: LatLng(26.372883, -80.098079),
+  ),
+  PlaceBuilding(
+    id: 'eg36',
+    code: 'EG-36',
+    name: 'College of Engineering West (EG-36)',
+    position: LatLng(26.370577, -80.104460),
+  ),
+  PlaceBuilding(
+    id: 'fa94',
+    code: 'FA-94',
+    name: 'Marleen & Harold Forkas Alumni Center (FA-94)',
+    position: LatLng(26.374215, -80.103465),
+  ),
+  PlaceBuilding(
+    id: 'fl24',
+    code: 'FL-24',
+    name: 'Fleming Hall (FL-24)',
+    position: LatLng(26.373073, -80.103857),
+  ),
+  PlaceBuilding(
+    id: 'fw23',
+    code: 'FW-23',
+    name: 'Fleming West (FW-23)',
+    position: LatLng(26.373242, -80.104207),
+  ),
+  PlaceBuilding(
+    id: 'gn73',
+    code: 'GN-73',
+    name: 'General Classroom North (GN-73)',
+    position: LatLng(26.373214, -80.102372),
+  ),
+  PlaceBuilding(
+    id: 'gp92',
+    code: 'GP-92',
+    name: 'Glades Park Towers (GP-92)',
+    position: LatLng(26.367746, -80.104263),
+  ),
+  PlaceBuilding(
+    id: 'gs2',
+    code: 'GS-2',
+    name: 'General Classroom South (GS-2)',
+    position: LatLng(26.371073, -80.102823),
+  ),
+  PlaceBuilding(
+    id: 'gy38',
+    code: 'GY-38',
+    name: 'The Burrow Arena (GY-38)',
+    position: LatLng(26.372357, -80.109352),
+  ),
+  PlaceBuilding(
+    id: 'hp89',
+    code: 'HP-89',
+    name: 'Heritage Park Towers (HP-89)',
+    position: LatLng(26.369451, -80.103761),
+  ),
+  PlaceBuilding(
+    id: 'ir70',
+    code: 'IR-70',
+    name: 'Indian River Towers (IR-70)',
+    position: LatLng(26.368233, -80.103209),
+  ),
+  PlaceBuilding(
+    id: 'is4',
+    code: 'IS-4',
+    name: 'Instructional Services (IS-4)',
+    position: LatLng(26.371261, -80.103649),
+  ),
+  PlaceBuilding(
+    id: 'kh25',
+    code: 'KH-25',
+    name: 'Barry Kaye Hall (KH-25)',
+    position: LatLng(26.373115, -80.103473),
+  ),
+  PlaceBuilding(
+    id: 'll31c',
+    code: 'LL-31C',
+    name: 'Friedberg Lifelong Learning Center (LL-31C)',
+    position: LatLng(26.370811, -80.106865),
+  ),
+  PlaceBuilding(
+    id: 'lo31b',
+    code: 'LO-31B',
+    name: 'Live Oak Pavilion (LO-31B)',
+    position: LatLng(26.370781, -80.105759),
+  ),
+  PlaceBuilding(
+    id: 'ly3',
+    code: 'LY-3',
+    name: 'S E Wimberly Library (LY-3)',
+    position: LatLng(26.371845, -80.104117),
+  ),
+  PlaceBuilding(
+    id: 'ly3a',
+    code: 'LY-3A',
+    name: 'Hillel Jewish Life Center (LY-3A)',
+    position: LatLng(26.371831, -80.103370),
+  ),
+  PlaceBuilding(
+    id: 'nu84',
+    code: 'NU-84',
+    name: 'Christine E Lynn College of Nursing (NU-84)',
+    position: LatLng(26.370830, -80.100582),
+  ),
+  PlaceBuilding(
+    id: 'od93',
+    code: 'OD-93',
+    name: 'Office Depot Center for Executive Education (OD-93)',
+    position: LatLng(26.373414, -80.104990),
+  ),
+  PlaceBuilding(
+    id: 'pa51',
+    code: 'PA-51',
+    name: 'Dorothy F. Schmidt Performing Arts (PA-51)',
+    position: LatLng(26.368891, -80.101744),
+  ),
+  PlaceBuilding(
+    id: 'pg35',
+    code: 'PG-35',
+    name: 'Plant Growth Complex (PG-35)',
+    position: LatLng(26.373576, -80.103010),
+  ),
+  PlaceBuilding(
+    id: 'pr75',
+    code: 'PR-75',
+    name: 'Eleanor R. Baldwin House (PR-75)',
+    position: LatLng(26.370914, -80.095192),
+  ),
+  PlaceBuilding(
+    id: 'ps55',
+    code: 'PS-55',
+    name: 'Physical Science (PS-55)',
+    position: LatLng(26.372671, -80.101989),
+  ),
+  PlaceBuilding(
+    id: 'pw62',
+    code: 'PW-62',
+    name: 'B.P.W. Scholarship House (PW-62)',
+    position: LatLng(26.367102, -80.096201),
+  ),
+  PlaceBuilding(
+    id: 'rc91',
+    code: 'RC-91',
+    name: 'Recreation & Fitness Center (RC-91)',
+    position: LatLng(26.374130, -80.102294),
+  ),
+  PlaceBuilding(
+    id: 'rd01',
+    code: 'RD-01',
+    name: 'Innovation Centre 1 (RD-01)',
+    position: LatLng(26.385306, -80.097104),
+  ),
+  PlaceBuilding(
+    id: 'rd02',
+    code: 'RD-02',
+    name: 'Innovation Centre 2 (RD-02)',
+    position: LatLng(26.383796, -80.097171),
+  ),
+  PlaceBuilding(
+    id: 'sb68',
+    code: 'SB-68',
+    name: 'Softball Stadium (SB-68)',
+    position: LatLng(26.373551, -80.110084),
+  ),
+  PlaceBuilding(
+    id: 'sc1',
+    code: 'SC-1',
+    name: 'Sanson Life Science (SC-1)',
+    position: LatLng(26.372423, -80.102987),
+  ),
+  PlaceBuilding(
+    id: 'se43',
+    code: 'SE-43',
+    name: 'Science & Engineering (SE-43)',
+    position: LatLng(26.373294, -80.101803),
+  ),
+  PlaceBuilding(
+    id: 'sh46',
+    code: 'SH-46',
+    name: 'Student Housing Services (SH-46)',
+    position: LatLng(26.368800, -80.104836),
+  ),
+  PlaceBuilding(
+    id: 'so44',
+    code: 'SO-44',
+    name: 'Social Sciences (SO-44)',
+    position: LatLng(26.370683, -80.101659),
+  ),
+  PlaceBuilding(
+    id: 'ss8',
+    code: 'SS-8',
+    name: 'Student Services (SS-8)',
+    position: LatLng(26.370406, -80.103054),
+  ),
+  PlaceBuilding(
+    id: 'ss8w',
+    code: 'SS-8W',
+    name: 'Student Health Services (SS-8W)',
+    position: LatLng(26.370394, -80.103400),
+  ),
+  PlaceBuilding(
+    id: 'su80',
+    code: 'SU-80',
+    name: 'Student Support Services (SU-80)',
+    position: LatLng(26.369258, -80.105631),
+  ),
+  PlaceBuilding(
+    id: 'un31',
+    code: 'UN-31',
+    name: 'Student Union (UN-31)',
+    position: LatLng(26.370257, -80.106234),
+  ),
+  PlaceBuilding(
+    id: 'ut5',
+    code: 'UT-5',
+    name: 'Utilities (UT-5)',
+    position: LatLng(26.372408, -80.104928),
+  ),
+  PlaceBuilding(
+    id: 'va53',
+    code: 'VA-53',
+    name: 'Dorothy F. Schmidt Visual Arts (VA-53)',
+    position: LatLng(26.369090, -80.100889),
+  ),
+];
+
+// ==========================================
+// PLACE MAP SCREEN (MapLibre GL, 3D)
 // ==========================================
 
 enum _Progress { none, onRoute, offRoute, arrived }
@@ -1808,14 +2587,17 @@ class _SourceSync {
   }
 }
 
-class FauMapScreen extends StatefulWidget {
-  const FauMapScreen({super.key});
+class PlaceMapScreen extends StatefulWidget {
+  /// Everything place-specific on the map (area, destinations, lots).
+  final Place place;
+
+  const PlaceMapScreen({super.key, required this.place});
 
   @override
-  State<FauMapScreen> createState() => _FauMapScreenState();
+  State<PlaceMapScreen> createState() => _PlaceMapScreenState();
 }
 
-class _FauMapScreenState extends State<FauMapScreen>
+class _PlaceMapScreenState extends State<PlaceMapScreen>
     with SingleTickerProviderStateMixin {
   // ---- map style ----
   /// Bright, detailed OpenStreetMap style (free, no API key).
@@ -1865,29 +2647,20 @@ class _FauMapScreenState extends State<FauMapScreen>
   static const Duration _simTick = Duration(milliseconds: 50);
   static const double _simMetersPerTick = 0.447; // 20 mph at 50 ms ticks
 
-  // ---- campus geometry ----
-  static const LatLng _campusEntrance = LatLng(26.3685, -80.1020);
-  // Campus box: the map can't be panned outside it, and inside it counts as
-  // "on campus". The north edge sits just past NW Spanish River Blvd, so the
-  // map starts counting at its traffic lights coming in from I-95 (I-95 ramp
-  // lights ~26.3873, the Airport Rd and FAU Blvd 4-way lights ~26.3861-66).
-  static const LatLng _sw = LatLng(26.3630, -80.1170);
-  static const LatLng _ne = LatLng(26.3880, -80.0890);
-  static const LatLng _fauCenter = LatLng(26.3745, -80.1030);
-  static final CameraTargetBounds _cameraBounds =
-      CameraTargetBounds(LatLngBounds(southwest: _sw, northeast: _ne));
-  static const double _minCampusZoom = 14.5;
-  static const MinMaxZoomPreference _campusZoom =
-      MinMaxZoomPreference(_minCampusZoom, 20.0);
+  // ---- place geometry ----
+  // The place's box: the map can't be panned outside it, and inside it
+  // counts as "on campus" (at the place).
+  Place get _place => widget.place;
+  late final CameraTargetBounds _cameraBounds = CameraTargetBounds(
+    LatLngBounds(southwest: _place.sw, northeast: _place.ne),
+  );
+  late final MinMaxZoomPreference _campusZoom =
+      MinMaxZoomPreference(_place.minZoom, 20.0);
   // Dev mode: no campus box and no minimum zoom, to follow live GPS anywhere.
   static const MinMaxZoomPreference _freeRoamZoom =
       MinMaxZoomPreference(null, 20.0);
 
-  static bool _inCampus(LatLng p) =>
-      p.latitude >= _sw.latitude &&
-      p.latitude <= _ne.latitude &&
-      p.longitude >= _sw.longitude &&
-      p.longitude <= _ne.longitude;
+  bool _inCampus(LatLng p) => _place.contains(p);
 
   // ---- map source / layer ids ----
   static const String _srcRoute = 'sc-route';
@@ -1901,404 +2674,12 @@ class _FauMapScreenState extends State<FauMapScreen>
   static const String _puckDotImage = 'sc-puck-dot';
   static const List<String> _fonts = ['Noto Sans Regular'];
 
-  static final Map<String, LatLng> _lotPositions = {
-    ...CampusPathfinder.lotPositions,
-  };
-
-  /// Where each curb unit physically is: rows of parking spaces, each shown
-  /// as a 3D block that is green (open), red (occupied) or gray (offline).
-  /// To place a row, tap the centre of its first space in dev mode and copy
-  /// the coordinate. Guidance always drives into a space from its open end
-  /// (the end away from its curb), along the lane behind its row.
-  static final List<CurbSpotRow> _spotRows = [
-    _lot14West,
-    // Across the lane, open ends facing _lot14West (curbs at the west end);
-    // the first id sits opposite C-095. Both rows share the lane between.
-    CurbSpotRow.facing(_lot14West, unitIds: ['C-042']),
-  ];
-
-  static const CurbSpotRow _lot14West = CurbSpotRow(
-    lotId: 'lot14',
-    // Nose-in spaces on the west side of the north-south aisle, starting
-    // at its crossing with the east-west road (26.373663, -80.099496):
-    // each space's aisle end is 1 m off the aisle line, and the first
-    // space is 1 m south of the road line.
-    first: LatLng(26.373640, -80.099539),
-    // Down the aisle, southward (OSM: 179.0°).
-    rowBearing: 179.0,
-    unitIds: ['C-095', 'C-077', 'C-001'],
-    // Curbs at the aisle (east) end; cars pull in from the west.
-    enterFromRight: true,
-    // The lane behind the row meets the east-west road here (the first
-    // space's edge is ~0.94 m off the road line).
-    laneLeadIn: 2.4,
-  );
-  static final _spotShapes = [for (final r in _spotRows) ...r.spaces()];
-
-  /// Each curb's drive-in path (see [CurbSpotRow.approach]), by unit id.
-  static final Map<String, List<LatLng>> _spotApproach = {
-    for (final r in _spotRows)
-      for (var i = 0; i < r.unitIds.length; i++) r.unitIds[i]: r.approach(i),
-  };
+  // Curb spaces (the place's [Place.spotRows]) are 3D blocks that are green
+  // (open), red (occupied) or gray (offline).
 
   /// Height of the space blocks: low slabs, so they read as part of the lot.
   static const double _spotHeight = 0.6; // m
   static const double _spotTargetHeight = 1.5; // m
-
-  /// Every FAU Boca Raton building that has an official building code, from
-  /// OpenStreetMap (© OpenStreetMap contributors, ODbL), pulled Oct 2026.
-  /// Position = centre of the building's outline, so the dots line up with
-  /// the buildings drawn on the map. Parking garages (PK-) are left out.
-  static const List<FauBuilding> _campusBuildings = [
-    FauBuilding(
-      id: 'ad10',
-      code: 'AD-10',
-      name: 'Kenneth R. Williams Administration (AD-10)',
-      position: LatLng(26.371848, -80.101591),
-    ),
-    FauBuilding(
-      id: 'ag39',
-      code: 'AG-39',
-      name: 'Ritter Art Gallery (AG-39)',
-      position: LatLng(26.371550, -80.103648),
-    ),
-    FauBuilding(
-      id: 'ah52',
-      code: 'AH-52',
-      name: 'Dorothy F. Schmidt Center for Arts and Humanities (AH-52)',
-      position: LatLng(26.369743, -80.101365),
-    ),
-    FauBuilding(
-      id: 'al9',
-      code: 'AL-9',
-      name: 'Dorothy F. Schmidt Arts and Letters (AL-9)',
-      position: LatLng(26.369474, -80.102208),
-    ),
-    FauBuilding(
-      id: 'au31a',
-      code: 'AU-31A',
-      name: 'Carole & Barry Kaye Performing Arts Auditorium (AU-31A)',
-      position: LatLng(26.370302, -80.105596),
-    ),
-    FauBuilding(
-      id: 'az79',
-      code: 'AZ-79',
-      name: 'Memory & Wellness Center, Louis & Anne Green (AZ-79)',
-      position: LatLng(26.379654, -80.097165),
-    ),
-    FauBuilding(
-      id: 'bb48',
-      code: 'BB-48',
-      name: 'Baseball Stadium (BB-48)',
-      position: LatLng(26.370815, -80.109459),
-    ),
-    FauBuilding(
-      id: 'bc71',
-      code: 'BC-71',
-      name: 'Charles E. Schmidt Biomedical Science Center (BC-71)',
-      position: LatLng(26.373296, -80.100442),
-    ),
-    FauBuilding(
-      id: 'bk76',
-      code: 'BK-76',
-      name: 'Bookstore (BK-76)',
-      position: LatLng(26.370663, -80.103727),
-    ),
-    FauBuilding(
-      id: 'bs12',
-      code: 'BS-12',
-      name: 'Behavioral Sciences (BS-12)',
-      position: LatLng(26.372992, -80.102838),
-    ),
-    FauBuilding(
-      id: 'bu86',
-      code: 'BU-86',
-      name: 'College of Business (BU-86)',
-      position: LatLng(26.373213, -80.104676),
-    ),
-    FauBuilding(
-      id: 'ce31d',
-      code: 'CE-31D',
-      name: 'Continuing Education Hall (CE-31D)',
-      position: LatLng(26.370530, -80.106951),
-    ),
-    FauBuilding(
-      id: 'cm22',
-      code: 'CM-22',
-      name: 'Computer Center (CM-22)',
-      position: LatLng(26.372498, -80.104066),
-    ),
-    FauBuilding(
-      id: 'co69',
-      code: 'CO-69',
-      name: 'Campus Operations & Police (CO-69)',
-      position: LatLng(26.378060, -80.097316),
-    ),
-    FauBuilding(
-      id: 'cr31e',
-      code: 'CR-31E',
-      name: 'Student Activities Center (CR-31E)',
-      position: LatLng(26.369951, -80.106673),
-    ),
-    FauBuilding(
-      id: 'cu97',
-      code: 'CU-97',
-      name: 'Culture & Society Building (CU-97)',
-      position: LatLng(26.368409, -80.101906),
-    ),
-    FauBuilding(
-      id: 'dm6',
-      code: 'DM-6',
-      name: 'Nations North Residence Hall - Algonquin (DM-6)',
-      position: LatLng(26.369466, -80.104897),
-    ),
-    FauBuilding(
-      id: 'dp49',
-      code: 'DP-49',
-      name: 'Gladys Davis Pavilion (DP-49)',
-      position: LatLng(26.372508, -80.107069),
-    ),
-    FauBuilding(
-      id: 'ds87',
-      code: 'DS-87',
-      name: 'Desantis Pavilion (DS-87)',
-      position: LatLng(26.373398, -80.104460),
-    ),
-    FauBuilding(
-      id: 'ed47',
-      code: 'ED-47',
-      name: 'College of Education (ED-47)',
-      position: LatLng(26.373268, -80.105829),
-    ),
-    FauBuilding(
-      id: 'ee96',
-      code: 'EE-96',
-      name: 'Engineering & Computer Science (EE-96)',
-      position: LatLng(26.372883, -80.098079),
-    ),
-    FauBuilding(
-      id: 'eg36',
-      code: 'EG-36',
-      name: 'College of Engineering West (EG-36)',
-      position: LatLng(26.370577, -80.104460),
-    ),
-    FauBuilding(
-      id: 'fa94',
-      code: 'FA-94',
-      name: 'Marleen & Harold Forkas Alumni Center (FA-94)',
-      position: LatLng(26.374215, -80.103465),
-    ),
-    FauBuilding(
-      id: 'fl24',
-      code: 'FL-24',
-      name: 'Fleming Hall (FL-24)',
-      position: LatLng(26.373073, -80.103857),
-    ),
-    FauBuilding(
-      id: 'fw23',
-      code: 'FW-23',
-      name: 'Fleming West (FW-23)',
-      position: LatLng(26.373242, -80.104207),
-    ),
-    FauBuilding(
-      id: 'gn73',
-      code: 'GN-73',
-      name: 'General Classroom North (GN-73)',
-      position: LatLng(26.373214, -80.102372),
-    ),
-    FauBuilding(
-      id: 'gp92',
-      code: 'GP-92',
-      name: 'Glades Park Towers (GP-92)',
-      position: LatLng(26.367746, -80.104263),
-    ),
-    FauBuilding(
-      id: 'gs2',
-      code: 'GS-2',
-      name: 'General Classroom South (GS-2)',
-      position: LatLng(26.371073, -80.102823),
-    ),
-    FauBuilding(
-      id: 'gy38',
-      code: 'GY-38',
-      name: 'The Burrow Arena (GY-38)',
-      position: LatLng(26.372357, -80.109352),
-    ),
-    FauBuilding(
-      id: 'hp89',
-      code: 'HP-89',
-      name: 'Heritage Park Towers (HP-89)',
-      position: LatLng(26.369451, -80.103761),
-    ),
-    FauBuilding(
-      id: 'ir70',
-      code: 'IR-70',
-      name: 'Indian River Towers (IR-70)',
-      position: LatLng(26.368233, -80.103209),
-    ),
-    FauBuilding(
-      id: 'is4',
-      code: 'IS-4',
-      name: 'Instructional Services (IS-4)',
-      position: LatLng(26.371261, -80.103649),
-    ),
-    FauBuilding(
-      id: 'kh25',
-      code: 'KH-25',
-      name: 'Barry Kaye Hall (KH-25)',
-      position: LatLng(26.373115, -80.103473),
-    ),
-    FauBuilding(
-      id: 'll31c',
-      code: 'LL-31C',
-      name: 'Friedberg Lifelong Learning Center (LL-31C)',
-      position: LatLng(26.370811, -80.106865),
-    ),
-    FauBuilding(
-      id: 'lo31b',
-      code: 'LO-31B',
-      name: 'Live Oak Pavilion (LO-31B)',
-      position: LatLng(26.370781, -80.105759),
-    ),
-    FauBuilding(
-      id: 'ly3',
-      code: 'LY-3',
-      name: 'S E Wimberly Library (LY-3)',
-      position: LatLng(26.371845, -80.104117),
-    ),
-    FauBuilding(
-      id: 'ly3a',
-      code: 'LY-3A',
-      name: 'Hillel Jewish Life Center (LY-3A)',
-      position: LatLng(26.371831, -80.103370),
-    ),
-    FauBuilding(
-      id: 'nu84',
-      code: 'NU-84',
-      name: 'Christine E Lynn College of Nursing (NU-84)',
-      position: LatLng(26.370830, -80.100582),
-    ),
-    FauBuilding(
-      id: 'od93',
-      code: 'OD-93',
-      name: 'Office Depot Center for Executive Education (OD-93)',
-      position: LatLng(26.373414, -80.104990),
-    ),
-    FauBuilding(
-      id: 'pa51',
-      code: 'PA-51',
-      name: 'Dorothy F. Schmidt Performing Arts (PA-51)',
-      position: LatLng(26.368891, -80.101744),
-    ),
-    FauBuilding(
-      id: 'pg35',
-      code: 'PG-35',
-      name: 'Plant Growth Complex (PG-35)',
-      position: LatLng(26.373576, -80.103010),
-    ),
-    FauBuilding(
-      id: 'pr75',
-      code: 'PR-75',
-      name: 'Eleanor R. Baldwin House (PR-75)',
-      position: LatLng(26.370914, -80.095192),
-    ),
-    FauBuilding(
-      id: 'ps55',
-      code: 'PS-55',
-      name: 'Physical Science (PS-55)',
-      position: LatLng(26.372671, -80.101989),
-    ),
-    FauBuilding(
-      id: 'pw62',
-      code: 'PW-62',
-      name: 'B.P.W. Scholarship House (PW-62)',
-      position: LatLng(26.367102, -80.096201),
-    ),
-    FauBuilding(
-      id: 'rc91',
-      code: 'RC-91',
-      name: 'Recreation & Fitness Center (RC-91)',
-      position: LatLng(26.374130, -80.102294),
-    ),
-    FauBuilding(
-      id: 'rd01',
-      code: 'RD-01',
-      name: 'Innovation Centre 1 (RD-01)',
-      position: LatLng(26.385306, -80.097104),
-    ),
-    FauBuilding(
-      id: 'rd02',
-      code: 'RD-02',
-      name: 'Innovation Centre 2 (RD-02)',
-      position: LatLng(26.383796, -80.097171),
-    ),
-    FauBuilding(
-      id: 'sb68',
-      code: 'SB-68',
-      name: 'Softball Stadium (SB-68)',
-      position: LatLng(26.373551, -80.110084),
-    ),
-    FauBuilding(
-      id: 'sc1',
-      code: 'SC-1',
-      name: 'Sanson Life Science (SC-1)',
-      position: LatLng(26.372423, -80.102987),
-    ),
-    FauBuilding(
-      id: 'se43',
-      code: 'SE-43',
-      name: 'Science & Engineering (SE-43)',
-      position: LatLng(26.373294, -80.101803),
-    ),
-    FauBuilding(
-      id: 'sh46',
-      code: 'SH-46',
-      name: 'Student Housing Services (SH-46)',
-      position: LatLng(26.368800, -80.104836),
-    ),
-    FauBuilding(
-      id: 'so44',
-      code: 'SO-44',
-      name: 'Social Sciences (SO-44)',
-      position: LatLng(26.370683, -80.101659),
-    ),
-    FauBuilding(
-      id: 'ss8',
-      code: 'SS-8',
-      name: 'Student Services (SS-8)',
-      position: LatLng(26.370406, -80.103054),
-    ),
-    FauBuilding(
-      id: 'ss8w',
-      code: 'SS-8W',
-      name: 'Student Health Services (SS-8W)',
-      position: LatLng(26.370394, -80.103400),
-    ),
-    FauBuilding(
-      id: 'su80',
-      code: 'SU-80',
-      name: 'Student Support Services (SU-80)',
-      position: LatLng(26.369258, -80.105631),
-    ),
-    FauBuilding(
-      id: 'un31',
-      code: 'UN-31',
-      name: 'Student Union (UN-31)',
-      position: LatLng(26.370257, -80.106234),
-    ),
-    FauBuilding(
-      id: 'ut5',
-      code: 'UT-5',
-      name: 'Utilities (UT-5)',
-      position: LatLng(26.372408, -80.104928),
-    ),
-    FauBuilding(
-      id: 'va53',
-      code: 'VA-53',
-      name: 'Dorothy F. Schmidt Visual Arts (VA-53)',
-      position: LatLng(26.369090, -80.100889),
-    ),
-  ];
 
   // ---- map ----
   MapLibreMapController? _map;
@@ -2463,7 +2844,7 @@ class _FauMapScreenState extends State<FauMapScreen>
   bool _isSimulating = false;
 
   // ---- routing ----
-  FauBuilding? _selectedBuilding;
+  PlaceBuilding? _selectedBuilding;
   PathResult? _walkResult;
   String? _routeLotId;
 
@@ -2568,7 +2949,7 @@ class _FauMapScreenState extends State<FauMapScreen>
       _introPlayed = true;
       _animateTo(
         CameraPosition(
-          target: _fauCenter,
+          target: _place.center,
           zoom: _overviewZoom,
           bearing: 20,
           tilt: _is3D ? _overviewTilt : 0,
@@ -3009,7 +3390,7 @@ class _FauMapScreenState extends State<FauMapScreen>
     _sync.push(
       _srcSpots,
       _fc([
-        for (final s in _spotShapes) ...[
+        for (final s in _place.spotShapes) ...[
           {
             'type': 'Feature',
             'properties': {
@@ -3040,8 +3421,9 @@ class _FauMapScreenState extends State<FauMapScreen>
 
     _liveLots.forEach((id, lot) {
       final isBest = id == bestId;
+      final status = lot['status'] as String; // empty without sensors
       labels.add(_pointFeature(lot['position'] as LatLng, {
-        'label': '${lot['name']}\n${lot['status']}',
+        'label': status.isEmpty ? '${lot['name']}' : '${lot['name']}\n$status',
         // Live status colour from _parseLots (green / amber / red).
         'color': _hex(lot['color'] as Color),
         'best': isBest,
@@ -3056,7 +3438,7 @@ class _FauMapScreenState extends State<FauMapScreen>
     _sync.push(
       _srcBuildings,
       _fc([
-        for (final b in _campusBuildings)
+        for (final b in _place.buildings)
           _pointFeature(b.position, {
             'code': b.code,
             'selected': b.id == selectedId,
@@ -3365,7 +3747,7 @@ class _FauMapScreenState extends State<FauMapScreen>
     if (_navTracking) _setNavTracking(false);
     _animateTo(
       CameraPosition(
-        target: _fauCenter,
+        target: _place.center,
         zoom: _overviewZoom,
         bearing: 0,
         tilt: _is3D ? _overviewTilt : 0,
@@ -3947,7 +4329,7 @@ class _FauMapScreenState extends State<FauMapScreen>
       final val = rawLots[lotId];
       final lotData =
           val is Map ? Map<String, dynamic>.from(val) : <String, dynamic>{};
-      final pos = _lotPositions[lotId] ?? _readLatLng(lotData);
+      final pos = _place.lotPositions[lotId] ?? _readLatLng(lotData);
       if (pos == null) continue;
 
       final total = capacity[lotId] ?? 0;
@@ -3971,6 +4353,7 @@ class _FauMapScreenState extends State<FauMapScreen>
         'status': '$occ/$total',
         'occupied': occ,
         'capacity': total,
+        'sensors': true,
         'position': pos,
         'color': color,
         // Every curb unit in the lot, for the tap-a-lot spot grid.
@@ -3979,6 +4362,27 @@ class _FauMapScreenState extends State<FauMapScreen>
     }
     return result;
   }
+
+  /// A place without curbs (see [Place.liveParking]): its lots as plain map
+  /// points, gray like a lot with nothing reporting, and nothing to count.
+  Map<String, Map<String, dynamic>> _staticLots() => {
+        for (final e in _place.lotPositions.entries)
+          e.key: {
+            'name': _place.lotNames[e.key] ?? _prettyLotName(e.key),
+            'status': '',
+            'occupied': 0,
+            'capacity': 0,
+            'sensors': false,
+            'position': e.value,
+            'color': kTextMuted,
+            'units': const <Map<String, dynamic>>[],
+          },
+      };
+
+  /// "3 free", or null for a lot without sensors (nothing to count).
+  static String? _freeText(Map<String, dynamic> lot) => lot['sensors'] == false
+      ? null
+      : '${(lot['capacity'] as int) - (lot['occupied'] as int)} free';
 
   // Latest raw `lots/` and `units/` snapshots, and whether each has arrived.
   Object? _rawLots;
@@ -3989,6 +4393,10 @@ class _FauMapScreenState extends State<FauMapScreen>
   /// Live curb data: every unit in `units/` (each names its lot) and the
   /// lot names in `lots/`. Recomputed whenever either one changes.
   void _listenToFirebaseParking() {
+    if (!_place.liveParking) {
+      _liveLots = _staticLots(); // nothing live to listen to
+      return;
+    }
     final db = FirebaseDatabase.instance;
     _unitsSub = db.ref('units').onValue.listen((event) {
       _rawUnits = event.snapshot.value;
@@ -4041,8 +4449,8 @@ class _FauMapScreenState extends State<FauMapScreen>
   /// with space, by walking distance) and, in it, the open curb with the
   /// shortest walk to the building. When none of the lot's open curbs has
   /// a known position, the lot itself.
-  PathResult? _bestParking(FauBuilding building) {
-    final lot = CampusPathfinder.findBestAvailableRoute(
+  PathResult? _bestParking(PlaceBuilding building) {
+    final lot = _place.pathfinder.findBestAvailableRoute(
       buildingPos: building.position,
       lots: _liveLots,
     );
@@ -4053,9 +4461,9 @@ class _FauMapScreenState extends State<FauMapScreen>
         if (u['online'] == true && u['occupied'] != true) u['id'] as String,
     };
     PathResult? best;
-    for (final s in _spotShapes) {
+    for (final s in _place.spotShapes) {
       if (!open.contains(s.unitId)) continue;
-      final r = CampusPathfinder.walkingRoute(
+      final r = _place.pathfinder.walkingRoute(
         lot.lotId,
         s.center,
         building.position,
@@ -4102,7 +4510,7 @@ class _FauMapScreenState extends State<FauMapScreen>
 
     // A curb is driven into from its open end: the road route goes to the
     // lane behind its row, and the drive-in path finishes the route.
-    final approach = best.unitId == null ? null : _spotApproach[best.unitId];
+    final approach = best.unitId == null ? null : _place.spotApproach[best.unitId];
     final dest = approach?.first ?? best.parkAt;
     setState(() {
       _walkResult = best;
@@ -4111,7 +4519,7 @@ class _FauMapScreenState extends State<FauMapScreen>
     _pushOverlays();
     _lastRouteAt = DateTime.now();
 
-    final start = _userPos ?? await _quickFix() ?? _campusEntrance;
+    final start = _userPos ?? await _quickFix() ?? _place.entrance;
     if (!mounted || reqId != _routeRequestId) return;
 
     var road = await RealRoadRouter.getRoadRoute(
@@ -4267,7 +4675,7 @@ class _FauMapScreenState extends State<FauMapScreen>
     );
   }
 
-  void _onBuildingSelected(FauBuilding building) {
+  void _onBuildingSelected(PlaceBuilding building) {
     _stopSimulation();
     _searchCtrl.text = building.name; // also covers picks made by map tap
     setState(() {
@@ -4338,9 +4746,9 @@ class _FauMapScreenState extends State<FauMapScreen>
 
     // With ~60 buildings close together, a tap picks whichever building or
     // lot is actually nearest (lots first on a tie), within reach.
-    FauBuilding? nearest;
+    PlaceBuilding? nearest;
     var nearestDist = 35.0; // meters
-    for (final b in _campusBuildings) {
+    for (final b in _place.buildings) {
       final d = Geo.meters(latLng, b.position);
       if (d < nearestDist) {
         nearestDist = d;
@@ -4381,7 +4789,7 @@ class _FauMapScreenState extends State<FauMapScreen>
   void _teleportToCampus() {
     _stopSimulation();
     _stopGlide();
-    var target = _campusEntrance;
+    var target = _place.entrance;
     for (final p in _fullRoute) {
       if (_inCampus(p)) {
         target = p;
@@ -4391,7 +4799,7 @@ class _FauMapScreenState extends State<FauMapScreen>
     setState(() {
       _devLocationOverride = true;
       _userPos = target;
-      _gpsStatus = 'Teleported to campus (dev)';
+      _gpsStatus = 'Teleported to ${_place.nickname} (dev)';
     });
     _pushPuck();
     final m = _map;
@@ -4612,7 +5020,7 @@ class _FauMapScreenState extends State<FauMapScreen>
     final building = _selectedBuilding;
     if (building == null || !_arrived || _walkDone) return;
     _lastWalkRerouteAt = DateTime.now();
-    final path = CampusPathfinder.findPath(from, building.position);
+    final path = _place.pathfinder.findPath(from, building.position);
     if (path.length < 2) return;
     setState(() => _setWalkPath(path));
     _revealWalk(path); // the new line draws itself out from you
@@ -4833,7 +5241,7 @@ class _FauMapScreenState extends State<FauMapScreen>
 
     final cam = _map?.cameraPosition;
     final viewOnCampus = cam == null ||
-        (_inCampus(cam.target) && cam.zoom >= _minCampusZoom);
+        (_inCampus(cam.target) && cam.zoom >= _place.minZoom);
     if (viewOnCampus) {
       setState(() => _freeRoam = false);
       return;
@@ -4842,7 +5250,7 @@ class _FauMapScreenState extends State<FauMapScreen>
     const flyBack = Duration(milliseconds: 1200);
     _animateTo(
       CameraPosition(
-        target: _fauCenter,
+        target: _place.center,
         zoom: _overviewZoom,
         bearing: 0,
         tilt: _is3D ? _overviewTilt : 0,
@@ -4880,7 +5288,7 @@ class _FauMapScreenState extends State<FauMapScreen>
 
   /// Every building in random order, shown while the box is empty
   /// (reshuffled each time the search opens).
-  List<FauBuilding> _randomPicks = const [];
+  List<PlaceBuilding> _randomPicks = const [];
   DateTime _searchOpenedAt = DateTime.fromMillisecondsSinceEpoch(0);
 
   void _onSearchFocusChanged() {
@@ -4888,7 +5296,7 @@ class _FauMapScreenState extends State<FauMapScreen>
     setState(() {
       if (_searchFocus.hasFocus) {
         _searchOpenedAt = DateTime.now();
-        _randomPicks = List<FauBuilding>.of(_campusBuildings)..shuffle();
+        _randomPicks = List<PlaceBuilding>.of(_place.buildings)..shuffle();
         // Show fresh suggestions; typing replaces the selected name.
         _searchQuery = '';
         _searchCtrl.selection = TextSelection(
@@ -4903,7 +5311,7 @@ class _FauMapScreenState extends State<FauMapScreen>
     });
   }
 
-  void _pickSuggestion(FauBuilding building) {
+  void _pickSuggestion(PlaceBuilding building) {
     _onBuildingSelected(building); // first, so unfocus shows the new name
     _searchFocus.unfocus();
   }
@@ -4919,11 +5327,11 @@ class _FauMapScreenState extends State<FauMapScreen>
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('FAU Campus Map'),
+            Text(_place.mapTitle),
             Text(
               navActive
                   ? 'Navigation Mode Active (${_heading.round()}°)'
-                  : (_devMode ? 'Dev Mode Active' : 'Boca Raton Main Campus'),
+                  : (_devMode ? 'Dev Mode Active' : _place.areaName),
               style: GoogleFonts.archivo(
                 fontSize: 12.5,
                 color: navActive ? kAccent : (_devMode ? kDev : kTextMuted),
@@ -4979,7 +5387,7 @@ class _FauMapScreenState extends State<FauMapScreen>
             ),
           IconButton(
             icon: const Icon(Icons.center_focus_strong),
-            tooltip: 'Reset Campus View',
+            tooltip: 'Reset Map View',
             onPressed: _resetView,
           ),
         ],
@@ -5037,8 +5445,8 @@ class _FauMapScreenState extends State<FauMapScreen>
       },
       child: MapLibreMap(
         styleString: _styleUrl,
-        initialCameraPosition: const CameraPosition(
-          target: _fauCenter,
+        initialCameraPosition: CameraPosition(
+          target: _place.center,
           zoom: 15.0,
         ),
         onMapCreated: (controller) => _map = controller,
@@ -5066,12 +5474,12 @@ class _FauMapScreenState extends State<FauMapScreen>
     final focused = _searchFocus.hasFocus;
     final hasText = _searchCtrl.text.isNotEmpty;
 
-    final List<FauBuilding> suggestions;
+    final List<PlaceBuilding> suggestions;
     if (_searchQuery.trim().isEmpty) {
       suggestions = _randomPicks;
     } else {
       final q = _searchQuery.trim().toLowerCase();
-      suggestions = _campusBuildings
+      suggestions = _place.buildings
           .where((b) =>
               b.code.toLowerCase().contains(q) ||
               b.name.toLowerCase().contains(q))
@@ -5230,11 +5638,10 @@ class _FauMapScreenState extends State<FauMapScreen>
     );
   }
 
-  Widget _buildSuggestionRow(FauBuilding bldg) {
+  Widget _buildSuggestionRow(PlaceBuilding bldg) {
     final best = _bestParking(bldg);
     final lot = best != null ? _liveLots[best.lotId] : null;
-    final free =
-        lot == null ? 0 : (lot['capacity'] as int) - (lot['occupied'] as int);
+    final free = lot == null ? null : _freeText(lot);
 
     return InkWell(
       onTap: () => _pickSuggestion(bldg),
@@ -5270,7 +5677,7 @@ class _FauMapScreenState extends State<FauMapScreen>
                   const SizedBox(height: 2),
                   Text(
                     lot != null
-                        ? '${best!.unitId != null ? 'Park at ${best.unitId}, ${lot['name']}' : 'Best lot: ${lot['name']}'} ($free free, ${formatDistance(best.totalDistanceMeters)} walk)'
+                        ? '${best!.unitId != null ? 'Park at ${best.unitId}, ${lot['name']}' : 'Best lot: ${lot['name']}'} (${[?free, '${formatDistance(best.totalDistanceMeters)} walk'].join(', ')})'
                         : (_liveLots.isEmpty
                             ? 'Loading parking data...'
                             : 'All nearby lots full'),
@@ -5422,7 +5829,7 @@ class _FauMapScreenState extends State<FauMapScreen>
                     child: ElevatedButton.icon(
                       onPressed: _teleportToCampus,
                       icon: const Icon(Icons.flight_takeoff, size: 18),
-                      label: const Text('Travel to FAU'),
+                      label: Text('Travel to ${_place.nickname}'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: kDev,
                         foregroundColor: kOnAccent,
@@ -5543,12 +5950,12 @@ class _FauMapScreenState extends State<FauMapScreen>
     final String phase; // kind of message; the subtitle animates when it changes
 
     if (building == null) {
-      title = 'FAU Boca Raton Main Campus';
+      title = _place.guidanceTitle;
       subtitle = _userPos == null
           ? _gpsStatus
           : (onCampus
-              ? 'On Campus • Heading: ${_heading.round()}°'
-              : 'Outside Campus Area');
+              ? '${_place.insideLabel} • Heading: ${_heading.round()}°'
+              : _place.outsideLabel);
       phase = _userPos == null ? 'gps' : (onCampus ? 'on' : 'off');
     } else if (walk == null) {
       title =
@@ -5559,13 +5966,12 @@ class _FauMapScreenState extends State<FauMapScreen>
       phase = 'nolot';
     } else {
       final lot = _liveLots[walk.lotId];
-      final free = lot == null
-          ? 0
-          : (lot['capacity'] as int) - (lot['occupied'] as int);
+      final free = lot == null ? null : _freeText(lot);
       final lotName = lot?['name'] ?? walk.lotId;
+      final lotText = free == null ? '$lotName' : '$lotName ($free)';
       title = walk.unitId != null
-          ? 'Park at ${walk.unitId} • $lotName ($free free)'
-          : 'Best Lot: $lotName ($free free)';
+          ? 'Park at ${walk.unitId} • $lotText'
+          : 'Best Lot: $lotText';
       final walkText = formatDistance(walk.totalDistanceMeters);
       if (_isWalkSim) {
         subtitle =
@@ -5785,7 +6191,9 @@ class _FauMapScreenState extends State<FauMapScreen>
                       Expanded(
                         child: Text(
                           // Out of the curbs that are online.
-                          '${lot['name']} • $free/${lot['capacity']} free',
+                          lot['sensors'] == false
+                              ? '${lot['name']}'
+                              : '${lot['name']} • $free/${lot['capacity']} free',
                           style: mono(fontSize: 11.5),
                           overflow: TextOverflow.ellipsis,
                         ),
