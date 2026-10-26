@@ -1144,6 +1144,11 @@ class CurbSpotRow {
   /// behind the row meets the road.
   final double laneLeadIn;
 
+  /// From the spaces' open end to the centre of the lane behind them (so
+  /// two facing rows' open ends are twice this apart). Widen it to make two
+  /// facing rows fill the room between their lot's aisles.
+  final double laneOffset;
+
   const CurbSpotRow({
     required this.lotId,
     required this.first,
@@ -1151,6 +1156,7 @@ class CurbSpotRow {
     required this.unitIds,
     required this.enterFromRight,
     required this.laneLeadIn,
+    this.laneOffset = defaultLaneOffset,
   });
 
   /// The row across the lane from [row], facing it: open ends toward each
@@ -1165,20 +1171,22 @@ class CurbSpotRow {
         first = Geo.offset(
           row.first,
           row.entryBearing,
-          spaceDepth + 2 * laneOffset,
+          spaceDepth + 2 * row.laneOffset,
         ),
         rowBearing = row.rowBearing,
         enterFromRight = !row.enterFromRight,
-        laneLeadIn = row.laneLeadIn;
+        laneLeadIn = row.laneLeadIn,
+        laneOffset = row.laneOffset;
 
-  /// From the spaces' open end to the centre of the lane behind them (so
-  /// two facing rows' open ends are twice this apart). Sized so two facing
-  /// rows fit between Lot 14's aisles (18 m apart) with ~1 m to spare at
-  /// each curb end.
-  static const double laneOffset = 1.5; // m
+  /// A 3 m lane: two facing rows fit between aisles 18 m apart with ~1 m to
+  /// spare at each curb end.
+  static const double defaultLaneOffset = 1.5; // m
 
   /// Compass direction from a space's centre toward its open end.
   double get entryBearing => rowBearing + (enterFromRight ? 90 : -90);
+
+  /// Compass direction from a space's centre toward its curb (the front).
+  double get curbBearing => (entryBearing + 180) % 360;
 
   /// The drive in to space [index]: from where the lane behind the row
   /// meets the road, along the lane to behind the space, then into it
@@ -1204,8 +1212,10 @@ class CurbSpotRow {
   /// Space left between neighbouring blocks so each one reads separately.
   static const double gap = 0.3 * 1.2; // m
 
-  /// Each space's unit id, centre and outline (a closed ring of corners).
-  List<({String unitId, LatLng center, List<LatLng> ring})> spaces() {
+  /// Each space's unit id, centre, outline (a closed ring of corners) and
+  /// which way its curb is ([curbBearing]).
+  List<({String unitId, LatLng center, List<LatLng> ring, double curbBearing})>
+      spaces() {
     const halfW = (spaceWidth - gap) / 2;
     const halfD = spaceDepth / 2;
     final across = rowBearing + 90;
@@ -1221,7 +1231,12 @@ class CurbSpotRow {
             corner(c, -halfW, -halfD),
             corner(c, -halfW, halfD),
           ];
-          return (unitId: unitIds[i], center: c, ring: [...ring, ring.first]);
+          return (
+            unitId: unitIds[i],
+            center: c,
+            ring: [...ring, ring.first],
+            curbBearing: curbBearing,
+          );
         }(),
     ];
   }
@@ -1727,32 +1742,129 @@ final Place fauBoca = Place(
   ne: const LatLng(26.3880, -80.0890),
   minZoom: 14.5,
   buildings: _fauBuildings,
+  // Every FAU lot and garage with an official name, from OpenStreetMap
+  // (© OpenStreetMap contributors, ODbL), pulled Oct 2026. Ids match the
+  // `lot` field of the curbs in `units/` (zero-padded, so they sort). Lots
+  // with no curbs show as plain map points and are always recommendable.
   lotPositions: const {
-    'lot12': LatLng(26.373262, -80.106806),
-    'lot14': LatLng(26.373005, -80.099683),
-    'lot20': LatLng(26.373999, -80.105842),
-    'garage2': LatLng(26.374013, -80.104280),
+    'lot01': LatLng(26.370548, -80.099284),
+    'lot02': LatLng(26.372916, -80.099578),
+    'lot03': LatLng(26.371307, -80.101397),
+    'lot04': LatLng(26.374155, -80.099734),
+    'lot05': LatLng(26.379985, -80.101641),
+    'lot06': LatLng(26.374074, -80.104246),
+    'lot07': LatLng(26.374039, -80.105947),
+    'lot08': LatLng(26.373260, -80.106791),
+    'lot10': LatLng(26.372522, -80.108251),
+    'lot12': LatLng(26.373825, -80.110753),
+    'lot13': LatLng(26.372919, -80.111539),
+    'lot14': LatLng(26.372338, -80.110426),
+    'lot15': LatLng(26.370655, -80.108325),
+    'lot16': LatLng(26.368944, -80.106239),
+    'lot17': LatLng(26.367668, -80.106790),
+    'lot18': LatLng(26.368141, -80.105545),
+    'lot19': LatLng(26.371296, -80.104582),
+    'lot20': LatLng(26.371033, -80.104776),
+    'lot21': LatLng(26.367677, -80.104817),
+    'lot22': LatLng(26.367680, -80.102950),
+    'lot23': LatLng(26.367113, -80.102026),
+    'lot24': LatLng(26.366514, -80.100685),
+    'lot25': LatLng(26.369226, -80.098988),
+    'lot26n': LatLng(26.375429, -80.096293),
+    'lot27': LatLng(26.370610, -80.098295),
+    'lot28': LatLng(26.368689, -80.098128),
+    'lot29': LatLng(26.377618, -80.096624),
+    'lot30': LatLng(26.376335, -80.096356),
+    'lot31': LatLng(26.376868, -80.096083),
+    'lot32': LatLng(26.376943, -80.096885),
+    'lot33': LatLng(26.376499, -80.097328),
+    'lot34': LatLng(26.374992, -80.096988),
+    'lot35': LatLng(26.375031, -80.097781),
+    'lot36': LatLng(26.375505, -80.099596),
+    'lot45': LatLng(26.377852, -80.097683),
+    'lot46': LatLng(26.378737, -80.097365),
+    'lot47': LatLng(26.378205, -80.094938),
+    'lot51': LatLng(26.371994, -80.104955),
+    'lot60': LatLng(26.368668, -80.096215),
+    'lot92': LatLng(26.366769, -80.104050),
+    'lot96n': LatLng(26.373468, -80.098182),
+    'lot102': LatLng(26.367360, -80.099337),
+    'garage1': LatLng(26.372192, -80.106030),
+    'garage2': LatLng(26.368955, -80.099541),
+    'garage3': LatLng(26.375169, -80.104009),
+    'aqua': LatLng(26.379360, -80.099444),
+    'copper': LatLng(26.377530, -80.099187),
   },
   liveParking: true,
+  // Shown when `lots/` has no name for the lot.
+  lotNames: const {
+    'lot01': 'Lot 1',
+    'lot02': 'Lot 2',
+    'lot03': 'Lot 3',
+    'lot04': 'Lot 4',
+    'lot05': 'Lot 5',
+    'lot06': 'Lot 6',
+    'lot07': 'Lot 7',
+    'lot08': 'Lot 8',
+    'lot10': 'Lot 10',
+    'lot12': 'Lot 12',
+    'lot13': 'Lot 13',
+    'lot14': 'Lot 14',
+    'lot15': 'Lot 15',
+    'lot16': 'Lot 16',
+    'lot17': 'Lot 17',
+    'lot18': 'Lot 18',
+    'lot19': 'Lot 19',
+    'lot20': 'Lot 20',
+    'lot21': 'Lot 21',
+    'lot22': 'Lot 22',
+    'lot23': 'Lot 23',
+    'lot24': 'Lot 24',
+    'lot25': 'Lot 25',
+    'lot26n': 'Lot 26N',
+    'lot27': 'Lot 27',
+    'lot28': 'Lot 28',
+    'lot29': 'Lot 29',
+    'lot30': 'Lot 30',
+    'lot31': 'Lot 31',
+    'lot32': 'Lot 32',
+    'lot33': 'Lot 33',
+    'lot34': 'Lot 34',
+    'lot35': 'Lot 35',
+    'lot36': 'Lot 36',
+    'lot45': 'Lot 45',
+    'lot46': 'Lot 46',
+    'lot47': 'Lot 47',
+    'lot51': 'Lot 51',
+    'lot60': 'Lot 60',
+    'lot92': 'Lot 92',
+    'lot96n': 'Lot 96N',
+    'lot102': 'Lot 102',
+    'garage1': 'Garage 1',
+    'garage2': 'Garage 2',
+    'garage3': 'Garage 3',
+    'aqua': 'Aqua Lot',
+    'copper': 'Copper Lot',
+  },
   // To place a row, tap the centre of its first space in dev mode and copy
   // the coordinate. Guidance always drives into a space from its open end
   // (the end away from its curb), along the lane behind its row.
   spotRows: [
-    _fauLot14West,
-    // Across the lane, open ends facing _fauLot14West (curbs at the west
-    // end); the first id sits opposite C-095. Both rows share the lane
-    // between.
-    CurbSpotRow.facing(_fauLot14West, unitIds: ['C-042']),
+    _fauLot14North,
+    // Across the lane, open ends facing _fauLot14North (curbs at the north
+    // end, at the next aisle up); the first id sits opposite C-095. Both
+    // rows share the lane between.
+    CurbSpotRow.facing(_fauLot14North, unitIds: ['C-042']),
   ],
   // The small hand-made graph around the first lots and buildings, used
   // until the full campus network loads.
   pathfinder: CampusPathfinder(
     'assets/campus_walkways.json',
     nodes: {
-      'lot12': const LatLng(26.373262, -80.106806),
-      'lot14': const LatLng(26.373005, -80.099683),
-      'lot20': const LatLng(26.373999, -80.105842),
-      'garage2': const LatLng(26.374013, -80.104280),
+      'lot08': const LatLng(26.373262, -80.106806),
+      'lot02': const LatLng(26.373005, -80.099683),
+      'lot07': const LatLng(26.373999, -80.105842),
+      'lot06': const LatLng(26.374013, -80.104280),
       'ed47': const LatLng(26.373358, -80.105828),
       'bc71': const LatLng(26.373263, -80.100446),
       'cm22': const LatLng(26.372528, -80.104044),
@@ -1763,11 +1875,11 @@ final Place fauBoca = Place(
       'bc71_east': const LatLng(26.373150, -80.099950),
     },
     edges: [
-      ['lot12', 'ed47_west'],
-      ['lot20', 'ed47_west'],
+      ['lot08', 'ed47_west'],
+      ['lot07', 'ed47_west'],
       ['ed47', 'ed47_west'],
-      ['lot20', 'garage2'],
-      ['garage2', 'breezeway_west'],
+      ['lot07', 'lot06'],
+      ['lot06', 'breezeway_west'],
       ['ed47', 'breezeway_west'],
       ['cm22', 'breezeway_west'],
       ['cm22', 'breezeway_center'],
@@ -1775,26 +1887,28 @@ final Place fauBoca = Place(
       ['breezeway_center', 'breezeway_east'],
       ['breezeway_east', 'bc71'],
       ['bc71', 'bc71_east'],
-      ['bc71_east', 'lot14'],
+      ['bc71_east', 'lot02'],
     ],
   ),
 );
 
-const CurbSpotRow _fauLot14West = CurbSpotRow(
+const CurbSpotRow _fauLot14North = CurbSpotRow(
   lotId: 'lot14',
-  // Nose-in spaces on the west side of the north-south aisle, starting
-  // at its crossing with the east-west road (26.373663, -80.099496):
-  // each space's aisle end is 1 m off the aisle line, and the first
-  // space is 1 m south of the road line.
-  first: LatLng(26.373640, -80.099539),
-  // Down the aisle, southward (OSM: 179.0°).
-  rowBearing: 179.0,
+  // Lot 14. Nose-in spaces on the north side of an east-west aisle (OSM line
+  // at 26.372301), starting at its crossing with the lot's north-south road
+  // (-80.109880): each space's aisle end is 1 m off the aisle line, and the
+  // first space's side is 0.45 m off the road line.
+  first: LatLng(26.372340, -80.109899),
+  // Along the aisle, westward (OSM: 270.1°).
+  rowBearing: 270.1,
   unitIds: ['C-095', 'C-077', 'C-001'],
-  // Curbs at the aisle (east) end; cars pull in from the west.
+  // Curbs at the aisle (south) end; cars pull in from the north.
   enterFromRight: true,
-  // The lane behind the row meets the east-west road here (the first
-  // space's edge is ~0.94 m off the road line).
-  laneLeadIn: 2.4,
+  // The lane behind the row meets the north-south road here.
+  laneLeadIn: 1.9,
+  // A 3.9 m lane: with the facing row's curbs 1 m off the next aisle north
+  // (26.372473, 19.1 m away), the two rows fill the room between the aisles.
+  laneOffset: 1.97,
 );
 
 /// No curbs installed yet: the four lots are plain map points, and the
@@ -1837,10 +1951,10 @@ final Place browardMall = Place(
   pathfinder: CampusPathfinder('assets/broward_walkways.json'),
 );
 
-/// Westfield Broward Mall: the mall itself, its anchors and the stores and
-/// restaurants inside it, plus those on its own grounds, from
-/// OpenStreetMap (© OpenStreetMap contributors, ODbL), pulled Oct 2026.
-/// Code = the short label on the map.
+/// Westfield Broward Mall: the mall itself, its anchor stores, the cinema
+/// and a few other main destinations, from OpenStreetMap
+/// (© OpenStreetMap contributors, ODbL), pulled Oct 2026. Code = the short
+/// label on the map.
 const List<PlaceBuilding> _browardMallBuildings = [
   PlaceBuilding(
     id: 'bm_mall',
@@ -1849,70 +1963,10 @@ const List<PlaceBuilding> _browardMallBuildings = [
     position: LatLng(26.117789, -80.254729),
   ),
   PlaceBuilding(
-    id: 'bm_bww',
-    code: 'Buffalo Wild Wings',
-    name: 'Buffalo Wild Wings (Restaurant)',
-    position: LatLng(26.117983, -80.254278),
-  ),
-  PlaceBuilding(
     id: 'bm_brio',
     code: 'Brio',
     name: 'Brio (Restaurant)',
     position: LatLng(26.115404, -80.252057),
-  ),
-  PlaceBuilding(
-    id: 'bm_cajun_boil',
-    code: 'Cajun Boil',
-    name: 'Cajun Boil (Restaurant)',
-    position: LatLng(26.117342, -80.255394),
-  ),
-  PlaceBuilding(
-    id: 'bm_cajun_grill',
-    code: 'Cajun Grill',
-    name: 'Cajun Grill (Food Court)',
-    position: LatLng(26.117113, -80.255105),
-  ),
-  PlaceBuilding(
-    id: 'bm_captains_closet',
-    code: "Captain's Closet",
-    name: "Captain's Closet (Outdoor Gear)",
-    position: LatLng(26.117895, -80.254764),
-  ),
-  PlaceBuilding(
-    id: 'bm_cedenos',
-    code: 'Cedeños',
-    name: 'Cedeños Cuban Café (Food Court)',
-    position: LatLng(26.117009, -80.254994),
-  ),
-  PlaceBuilding(
-    id: 'bm_charleys',
-    code: 'Charleys',
-    name: 'Charleys Philly Steaks (Food Court)',
-    position: LatLng(26.117183, -80.255113),
-  ),
-  PlaceBuilding(
-    id: 'bm_chick_fil_a',
-    code: 'Chick-fil-A',
-    name: 'Chick-fil-A (Food Court)',
-    position: LatLng(26.117141, -80.254803),
-  ),
-  PlaceBuilding(
-    id: 'bm_cinnabon',
-    code: 'Cinnabon',
-    name: 'Cinnabon (Bakery)',
-    position: LatLng(26.117505, -80.254783),
-  ),
-  PlaceBuilding(
-    id: 'bm_claires',
-    code: "Claire's",
-    name: "Claire's (Accessories)",
-    position: LatLng(26.117423, -80.255264),
-  ),
-  PlaceBuilding(
-    id: 'bm_cream_crackers',
-    code: 'Cream and Crackers',
-    name: 'Cream and Crackers (Food Court)',
-    position: LatLng(26.117307, -80.254791),
   ),
   PlaceBuilding(
     id: 'bm_dillards',
@@ -1921,40 +1975,10 @@ const List<PlaceBuilding> _browardMallBuildings = [
     position: LatLng(26.118281, -80.256400),
   ),
   PlaceBuilding(
-    id: 'bm_farandua',
-    code: 'Farandua',
-    name: 'Farandua Corn and Potatoes (Food Court)',
-    position: LatLng(26.117386, -80.255327),
-  ),
-  PlaceBuilding(
-    id: 'bm_fl_body_jewelry',
-    code: 'FL Body Jewelry',
-    name: 'Florida Body Jewelry & Design (Jewelry)',
-    position: LatLng(26.117730, -80.255317),
-  ),
-  PlaceBuilding(
-    id: 'bm_fresh_mangos',
-    code: 'Fresh Mangos',
-    name: 'Fresh Mangos (Food Court)',
-    position: LatLng(26.116920, -80.254870),
-  ),
-  PlaceBuilding(
-    id: 'bm_haagen_dazs',
-    code: 'Häagen-Dazs',
-    name: 'Häagen-Dazs (Ice Cream)',
-    position: LatLng(26.117452, -80.254861),
-  ),
-  PlaceBuilding(
     id: 'bm_jcpenney',
     code: 'JCPenney',
     name: 'JCPenney (Department Store)',
     position: LatLng(26.116289, -80.255379),
-  ),
-  PlaceBuilding(
-    id: 'bm_jerk_grill',
-    code: 'Jerk Grill',
-    name: 'Jerk Grill (Food Court)',
-    position: LatLng(26.117054, -80.254910),
   ),
   PlaceBuilding(
     id: 'bm_lenscrafters',
@@ -1963,76 +1987,16 @@ const List<PlaceBuilding> _browardMallBuildings = [
     position: LatLng(26.118938, -80.254558),
   ),
   PlaceBuilding(
-    id: 'bm_lids',
-    code: 'Lids',
-    name: 'Lids (Hats)',
-    position: LatLng(26.118292, -80.255222),
-  ),
-  PlaceBuilding(
     id: 'bm_macys',
     code: "Macy's",
     name: "Macy's (Department Store)",
     position: LatLng(26.117144, -80.253427),
   ),
   PlaceBuilding(
-    id: 'bm_mens_wearhouse',
-    code: "Men's Wearhouse",
-    name: "Men's Wearhouse (Menswear)",
-    position: LatLng(26.120043, -80.257649),
-  ),
-  PlaceBuilding(
-    id: 'bm_ole_ole',
-    code: "Ole' Ole'",
-    name: "Ole' Ole' Mexican Grill (Restaurant)",
-    position: LatLng(26.120083, -80.257502),
-  ),
-  PlaceBuilding(
-    id: 'bm_panda_express',
-    code: 'Panda Express',
-    name: 'Panda Express (Food Court)',
-    position: LatLng(26.117355, -80.254859),
-  ),
-  PlaceBuilding(
-    id: 'bm_planet_grilled_cheese',
-    code: 'Planet Grilled Cheese',
-    name: 'Planet Grilled Cheese (Food Court)',
-    position: LatLng(26.117404, -80.254928),
-  ),
-  PlaceBuilding(
-    id: 'bm_raw_energy',
-    code: 'Raw Energy',
-    name: 'Raw Energy (Food Court)',
-    position: LatLng(26.116954, -80.254932),
-  ),
-  PlaceBuilding(
     id: 'bm_regal',
     code: 'Regal',
     name: 'Regal Broward Stadium 12 (Cinema)',
     position: LatLng(26.116257, -80.254112),
-  ),
-  PlaceBuilding(
-    id: 'bm_sarku',
-    code: 'Sarku Japan',
-    name: 'Sarku Japan (Food Court)',
-    position: LatLng(26.117059, -80.255053),
-  ),
-  PlaceBuilding(
-    id: 'bm_scott_eye_care',
-    code: 'Scott Eye Care',
-    name: 'Scott Eye Care (Optometrist)',
-    position: LatLng(26.118917, -80.254517),
-  ),
-  PlaceBuilding(
-    id: 'bm_vinci',
-    code: 'Vinci',
-    name: 'Vinci (Clothing)',
-    position: LatLng(26.117542, -80.254732),
-  ),
-  PlaceBuilding(
-    id: 'bm_zales',
-    code: 'Zales',
-    name: 'Zales (Jewelry)',
-    position: LatLng(26.118239, -80.255346),
   ),
 ];
 
@@ -2681,6 +2645,10 @@ class _PlaceMapScreenState extends State<PlaceMapScreen>
   static const double _spotHeight = 0.6; // m
   static const double _spotTargetHeight = 1.5; // m
 
+  /// The unit id sits this far from the space's centre toward its curb
+  /// (spaces are 6.6 m deep), so the name marks the front of the space.
+  static const double _spotLabelToCurb = 1.8; // m
+
   // ---- map ----
   MapLibreMapController? _map;
   bool _styleReady = false;
@@ -3085,8 +3053,10 @@ class _PlaceMapScreenState extends State<PlaceMapScreen>
         enableInteraction: false,
       ),
     );
-    // Unit id on each space, upright however the map is turned, once
-    // zoomed in enough to fit.
+    // Unit id at the curb end of each space, once zoomed in enough to fit.
+    // It lies flat on the map with its top toward the curb (the front of
+    // the space), like a marking painted for a driver pulling in, so which
+    // end is the curb reads at a glance however the map is turned.
     await safe(
       'curb space labels',
       () => m.addSymbolLayer(
@@ -3102,6 +3072,9 @@ class _PlaceMapScreenState extends State<PlaceMapScreen>
           ],
           textHaloColor: '#000000',
           textHaloWidth: 1.4,
+          textRotate: ['get', 'rotate'],
+          textRotationAlignment: 'map',
+          textPitchAlignment: 'map',
           textAllowOverlap: true,
           textIgnorePlacement: true,
         ),
@@ -3271,6 +3244,8 @@ class _PlaceMapScreenState extends State<PlaceMapScreen>
         enableInteraction: false,
       ),
     );
+    // With ~50 FAU lots, labels that would overlap are hidden (like the
+    // building labels); the recommended lot's label always shows.
     await safe(
       'lot labels',
       () => m.addSymbolLayer(
@@ -3279,7 +3254,28 @@ class _PlaceMapScreenState extends State<PlaceMapScreen>
         const SymbolLayerProperties(
           textField: ['get', 'label'],
           textFont: _fonts,
-          textSize: ['case', isBestLot, 13, 11],
+          textSize: 11,
+          textColor: ['get', 'color'],
+          textHaloColor: '#000000',
+          textHaloWidth: 1.8,
+          textJustify: 'center',
+          textAnchor: 'top',
+          textOffset: [0, 0.9],
+          textAllowOverlap: false,
+        ),
+        filter: ['!=', ['get', 'best'], true],
+        enableInteraction: false,
+      ),
+    );
+    await safe(
+      'best lot label',
+      () => m.addSymbolLayer(
+        _srcLots,
+        'sc-lots-label-best',
+        const SymbolLayerProperties(
+          textField: ['get', 'label'],
+          textFont: _fonts,
+          textSize: 13,
           textColor: ['get', 'color'],
           textHaloColor: '#000000',
           textHaloWidth: 1.8,
@@ -3289,6 +3285,7 @@ class _PlaceMapScreenState extends State<PlaceMapScreen>
           textAllowOverlap: true,
           textIgnorePlacement: true,
         ),
+        filter: isBestLot,
         enableInteraction: false,
       ),
     );
@@ -3405,11 +3402,15 @@ class _PlaceMapScreenState extends State<PlaceMapScreen>
               ],
             },
           },
-          _pointFeature(s.center, {
-            'kind': 'label',
-            'id': s.unitId,
-            'target': s.unitId == target,
-          }),
+          _pointFeature(
+            Geo.offset(s.center, s.curbBearing, _spotLabelToCurb),
+            {
+              'kind': 'label',
+              'id': s.unitId,
+              'target': s.unitId == target,
+              'rotate': s.curbBearing,
+            },
+          ),
         ],
       ]),
     );
@@ -4285,7 +4286,8 @@ class _PlaceMapScreenState extends State<PlaceMapScreen>
   /// Groups the curb units in `units/` by their `lot` id: a lot's capacity
   /// is how many of its curbs are online, and its occupied count is how
   /// many of those are taken. Offline curbs count toward neither until they
-  /// report again. `lots/` only supplies display names.
+  /// report again. `lots/` only supplies display names. Lots with no curbs
+  /// at all are sensorless (see [_sensorlessLot]).
   Map<String, Map<String, dynamic>> _parseLots(Object? rawLotsValue, Object? rawUnitsValue) {
     final rawLots = rawLotsValue is Map ? rawLotsValue : const {};
     final rawUnits = rawUnitsValue is Map ? rawUnitsValue : const {};
@@ -4320,8 +4322,10 @@ class _PlaceMapScreenState extends State<PlaceMapScreen>
     }
 
     final result = <String, Map<String, dynamic>>{};
-    // Every lot in `lots/`, plus any lot a unit points at that isn't there.
+    // Every lot the place knows, every lot in `lots/`, and any lot a unit
+    // points at that is in neither.
     final lotIds = {
+      ..._place.lotPositions.keys,
       for (final k in rawLots.keys) k.toString(),
       ...spots.keys,
     };
@@ -4331,6 +4335,16 @@ class _PlaceMapScreenState extends State<PlaceMapScreen>
           val is Map ? Map<String, dynamic>.from(val) : <String, dynamic>{};
       final pos = _place.lotPositions[lotId] ?? _readLatLng(lotData);
       if (pos == null) continue;
+      final name = _shortLotName(lotData['name']?.toString() ??
+          _place.lotNames[lotId] ??
+          _prettyLotName(lotId));
+
+      // No curbs installed at all (online or not): a plain map point, like
+      // a place without live parking (see [_staticLots]).
+      if (!spots.containsKey(lotId)) {
+        result[lotId] = _sensorlessLot(name, pos);
+        continue;
+      }
 
       final total = capacity[lotId] ?? 0;
       final occ = occupied[lotId] ?? 0;
@@ -4348,8 +4362,7 @@ class _PlaceMapScreenState extends State<PlaceMapScreen>
       }
 
       result[lotId] = {
-        'name': _shortLotName(
-            lotData['name']?.toString() ?? _prettyLotName(lotId)),
+        'name': name,
         'status': '$occ/$total',
         'occupied': occ,
         'capacity': total,
@@ -4363,20 +4376,28 @@ class _PlaceMapScreenState extends State<PlaceMapScreen>
     return result;
   }
 
-  /// A place without curbs (see [Place.liveParking]): its lots as plain map
-  /// points, gray like a lot with nothing reporting, and nothing to count.
+  /// A place without curbs (see [Place.liveParking]): all its lots are
+  /// sensorless.
   Map<String, Map<String, dynamic>> _staticLots() => {
         for (final e in _place.lotPositions.entries)
-          e.key: {
-            'name': _place.lotNames[e.key] ?? _prettyLotName(e.key),
-            'status': '',
-            'occupied': 0,
-            'capacity': 0,
-            'sensors': false,
-            'position': e.value,
-            'color': kTextMuted,
-            'units': const <Map<String, dynamic>>[],
-          },
+          e.key: _sensorlessLot(
+            _place.lotNames[e.key] ?? _prettyLotName(e.key),
+            e.value,
+          ),
+      };
+
+  /// A lot with no curbs: a plain map point, gray like a lot with nothing
+  /// reporting, with nothing to count. It can always be recommended (see
+  /// [CampusPathfinder.findBestAvailableRoute]).
+  static Map<String, dynamic> _sensorlessLot(String name, LatLng pos) => {
+        'name': name,
+        'status': '',
+        'occupied': 0,
+        'capacity': 0,
+        'sensors': false,
+        'position': pos,
+        'color': kTextMuted,
+        'units': const <Map<String, dynamic>>[],
       };
 
   /// "3 free", or null for a lot without sensors (nothing to count).

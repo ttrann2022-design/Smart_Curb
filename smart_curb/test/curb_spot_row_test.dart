@@ -34,7 +34,7 @@ void main() {
 
   test('the drive in runs along the lane behind the row, then in from the open end', () {
     final spaces = row.spaces();
-    final behind = CurbSpotRow.spaceDepth / 2 + CurbSpotRow.laneOffset;
+    final behind = CurbSpotRow.spaceDepth / 2 + row.laneOffset;
     for (var i = 0; i < spaces.length; i++) {
       final a = row.approach(i);
       expect(a.length, 3);
@@ -61,8 +61,25 @@ void main() {
         // Straight across (west), not shifted along the row.
         expect(Geo.bearing(mine[i].center, theirs[i].center), closeTo(269.0, 0.1));
         expect(Geo.meters(mine[i].center, theirs[i].center),
-            closeTo(CurbSpotRow.spaceDepth + 2 * CurbSpotRow.laneOffset, 0.01));
+            closeTo(CurbSpotRow.spaceDepth + 2 * row.laneOffset, 0.01));
       }
+    });
+
+    test('a wider lane moves it out to match, still sharing the lane', () {
+      const wide = CurbSpotRow(
+        lotId: 'lot14',
+        first: LatLng(26.373640, -80.099539),
+        rowBearing: 179.0,
+        unitIds: ['C-095'],
+        enterFromRight: true,
+        laneLeadIn: 2.4,
+        laneOffset: 2.0,
+      );
+      final facing = CurbSpotRow.facing(wide, unitIds: ['C-301']);
+      expect(facing.laneOffset, 2.0);
+      expect(Geo.meters(wide.first, facing.first),
+          closeTo(CurbSpotRow.spaceDepth + 4.0, 0.01));
+      expect(Geo.meters(wide.approach(0)[1], facing.approach(0)[1]), lessThan(0.01));
     });
 
     test('shares the lane, and is entered from its open end (curb reversed)', () {

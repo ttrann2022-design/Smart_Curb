@@ -36,10 +36,11 @@ void main() {
         parts.add('${lot.key} ${r.totalDistanceMeters.round()}m (line ${straight.round()}m)');
       }
       // ignore: avoid_print
-      print('${b.key.padRight(12)} ${parts.join(' | ')}');
+      print('${b.key.padRight(12)} ${parts.take(4).join(' | ')} ...');
     }
+    final routes = buildings.length * fauBoca.lotPositions.length;
     // ignore: avoid_print
-    print('28 routes in ${sw.elapsedMilliseconds} ms');
+    print('$routes routes in ${sw.elapsedMilliseconds} ms');
   });
 
   test('Broward Mall: every lot reaches every store, closest lot is picked', () async {
