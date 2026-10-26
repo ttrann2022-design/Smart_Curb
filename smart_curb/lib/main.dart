@@ -10,7 +10,9 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart' show Ticker;
+import 'package:flutter/rendering.dart' show RenderAbstractViewport;
+import 'package:flutter/scheduler.dart'
+    show SchedulerBinding, SchedulerPhase, Ticker;
 import 'package:flutter/services.dart';
 import 'package:flutter_compass/flutter_compass.dart';
 import 'package:geolocator/geolocator.dart' as geo;
@@ -630,20 +632,41 @@ class _UserSpaceState extends State<UserSpace> {
 // TAB 1: HOME (Places & Campus Management)
 // ==========================================
 
-Widget buildCampusLogo(String shortName) {
-  return Container(
-    width: 52,
-    height: 52,
-    decoration: BoxDecoration(
-      color: kCardAlt,
-      borderRadius: BorderRadius.circular(kRadius),
-      border: Border.all(color: kDivider),
-    ),
-    alignment: Alignment.center,
+/// A place's 52 px logo tile: its logo image when it has one (the whole
+/// logo, on its own background colour), otherwise [shortName] as text.
+Widget buildCampusLogo(String shortName, {Place? place}) {
+  const size = 52.0;
+  final text = Center(
     child: Text(
       shortName,
       style: mono(fontSize: 15, color: kAccent, letterSpacing: 0.8),
     ),
+  );
+  final logo = place?.logoAsset;
+  return Container(
+    width: size,
+    height: size,
+    clipBehavior: Clip.antiAlias,
+    decoration: BoxDecoration(
+      color: logo == null ? kCardAlt : place!.logoBackground,
+      borderRadius: BorderRadius.circular(kRadius),
+      border: Border.all(color: kDivider),
+    ),
+    child: logo == null
+        ? text
+        : Padding(
+            padding: const EdgeInsets.all(3),
+            child: Image.asset(
+              logo,
+              fit: BoxFit.contain,
+              // The FAU file is 3840 px wide: decode it tile-sized.
+              cacheWidth: 200,
+              filterQuality: FilterQuality.medium,
+              // Missing or broken file: the text tile, on the usual colour.
+              errorBuilder: (_, _, _) =>
+                  ColoredBox(color: kCardAlt, child: text),
+            ),
+          ),
   );
 }
 
@@ -721,45 +744,56 @@ class _HomeTabState extends State<_HomeTab> {
       stream: _stream,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-
-        final rawData = snapshot.data?.snapshot.value;
-        if (rawData is! Map) {
-          _addedIds = const {};
-          return AnimatedAddCard(
-            title: 'No Locations Found',
-            subtitle: 'Tap to add a new location',
-            onTap: _showAddSpaceDialog,
+          return const FadeSwitcher(
+            child: Center(
+              key: ValueKey('loading'),
+              child: CircularProgressIndicator(),
+            ),
           );
         }
 
+        final rawData = snapshot.data?.snapshot.value;
         final locations = <String, Map<String, dynamic>>{
-          for (final entry in rawData.entries)
-            if (entry.value is Map)
-              entry.key.toString():
-                  Map<String, dynamic>.from(entry.value as Map),
+          if (rawData is Map)
+            for (final entry in rawData.entries)
+              if (entry.value is Map)
+                entry.key.toString():
+                    Map<String, dynamic>.from(entry.value as Map),
         };
         _addedIds = locations.keys.toSet();
         final visible = locations.entries
             .where((e) => matchesLocationQuery(e.value, _query))
             .toList();
 
-        return _ListWithBottomAction(
+        // Always the same list, even with no places left, so the last card
+        // swipes away like the others before the empty card takes over.
+        return FadeSwitcher(
+          child: _ListWithBottomAction(
+          key: const ValueKey('list'),
+          // Deleted places swipe away to the left.
+          swipeOut: true,
+          isEmpty: locations.isEmpty,
+          empty: AnimatedAddCard(
+            title: 'No Locations Found',
+            subtitle: 'Tap to add a new location',
+            onTap: _showAddSpaceDialog,
+          ),
           actionTitle: 'Add more locations',
           actionIcon: Icons.add_location_alt_outlined,
           onAction: _showAddSpaceDialog,
           children: [
             AppTextField(
+              key: const ValueKey('search'),
               controller: _searchCtrl,
               hintText: 'Search your locations',
               icon: Icons.search,
               onChanged: (v) => setState(() => _query = v),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(key: ValueKey('search-gap'), height: 16),
             for (final e in visible) _buildLocationCard(uid, e.key, e.value),
-            if (visible.isEmpty)
+            if (visible.isEmpty && locations.isNotEmpty)
               Padding(
+                key: const ValueKey('no-match'),
                 padding: const EdgeInsets.symmetric(vertical: 24),
                 child: Text(
                   'No saved locations match "${_query.trim()}".',
@@ -768,6 +802,7 @@ class _HomeTabState extends State<_HomeTab> {
                 ),
               ),
           ],
+          ),
         );
       },
     );
@@ -804,7 +839,7 @@ class _HomeTabState extends State<_HomeTab> {
           ),
           child: Row(
             children: [
-              buildCampusLogo(shortName),
+              buildCampusLogo(shortName, place: place),
               const SizedBox(width: 16),
               Expanded(
                 child: Column(
@@ -867,6 +902,22 @@ class _SelectLocationDialogState extends State<_SelectLocationDialog> {
   final _searchCtrl = TextEditingController();
   String _query = '';
 
+  /// The campus being added: its button turns into a check and its card
+  /// lights up for a moment before the dialog closes.
+  String? _addingId;
+  static const Duration _addConfirm = Duration(milliseconds: 420);
+
+  void _add(Map<String, String> campus) {
+    if (_addingId != null) return;
+    setState(() => _addingId = campus['id']);
+    final wait = reduceMotion(context) ? Duration.zero : _addConfirm;
+    Future.delayed(wait, () {
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      widget.onAdd(campus);
+    });
+  }
+
   @override
   void dispose() {
     _searchCtrl.dispose();
@@ -913,21 +964,22 @@ class _SelectLocationDialogState extends State<_SelectLocationDialog> {
               onChanged: (v) => setState(() => _query = v),
             ),
             const SizedBox(height: 16),
+            // Rows rise in when the dialog opens, fold away or grow in as you
+            // search, and recede under the edges as they scroll.
             Expanded(
-              child: emptyText != null
-                  ? Padding(
-                      padding: const EdgeInsets.only(top: 24),
-                      child: Text(
-                        emptyText,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(color: kTextMuted, fontSize: 13),
-                      ),
-                    )
-                  : ListView.builder(
-                      itemCount: results.length,
-                      itemBuilder: (context, index) =>
-                          _buildCampusRow(results[index]),
-                    ),
+              child: AnimatedRowList(
+                springy: true,
+                isEmpty: emptyText != null,
+                empty: Padding(
+                  padding: const EdgeInsets.only(top: 24),
+                  child: Text(
+                    emptyText ?? '',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: kTextMuted, fontSize: 13),
+                  ),
+                ),
+                children: [for (final c in results) _buildCampusRow(c)],
+              ),
             ),
           ],
         ),
@@ -936,17 +988,24 @@ class _SelectLocationDialogState extends State<_SelectLocationDialog> {
   }
 
   Widget _buildCampusRow(Map<String, String> campus) {
-    return Container(
+    final adding = _addingId == campus['id'];
+    return AnimatedContainer(
+      key: ValueKey('campus-${campus['id']}'),
+      duration: kMotion,
+      curve: kEaseOut,
       margin: const EdgeInsets.only(bottom: 12.0),
       padding: const EdgeInsets.all(16.0),
       decoration: BoxDecoration(
-        color: kBg,
+        color: adding ? kNavBg : kBg,
         borderRadius: BorderRadius.circular(kRadius),
-        border: Border.all(color: kDivider),
+        border: Border.all(color: adding ? kAccent : kDivider),
       ),
       child: Row(
         children: [
-          buildCampusLogo(campus['shortName']!),
+          buildCampusLogo(
+            campus['shortName']!,
+            place: Place.byId(campus['id']!),
+          ),
           const SizedBox(width: 14),
           Expanded(
             child: Column(
@@ -969,15 +1028,30 @@ class _SelectLocationDialogState extends State<_SelectLocationDialog> {
             ),
           ),
           const SizedBox(width: 10),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              widget.onAdd(campus);
-            },
-            style: ElevatedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          PressScale(
+            child: ElevatedButton(
+              onPressed: () => _add(campus),
+              style: ElevatedButton.styleFrom(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              ),
+              // "Add" pops into a check when tapped.
+              child: AnimatedSwitcher(
+                duration: kMotion,
+                transitionBuilder: (child, anim) => FadeTransition(
+                  opacity: anim,
+                  child: ScaleTransition(
+                    scale: Tween(begin: 0.4, end: 1.0).animate(
+                      CurvedAnimation(parent: anim, curve: Curves.easeOutBack),
+                    ),
+                    child: child,
+                  ),
+                ),
+                child: adding
+                    ? const Icon(Icons.check, key: ValueKey('added'), size: 18)
+                    : const Text('Add', key: ValueKey('add')),
+              ),
             ),
-            child: const Text('Add'),
           ),
         ],
       ),
@@ -1101,6 +1175,51 @@ class PlaceBuilding {
     required this.name,
     required this.position,
   });
+}
+
+/// The buildings matching a search [query], best matches first: codes
+/// starting with it, then names starting with it, then the rest (each group
+/// in list order). When it names a building exactly, by code ("ed-47", or
+/// "ed47" without the dash) or by name ("College of Education", with or
+/// without its "(ED-47)"), only that building.
+List<PlaceBuilding> rankBuildingMatches(
+  List<PlaceBuilding> buildings,
+  String query,
+) {
+  String bare(String s) => s.toLowerCase().replaceAll(RegExp(r'[\s\-]'), '');
+  String words(String s) =>
+      s.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+  // "College of Education (ED-47)" -> "college of education"
+  String baseName(String name) =>
+      words(name.replaceFirst(RegExp(r'\s*\([^)]*\)\s*$'), ''));
+  final q = words(query);
+  final qb = bare(q);
+  if (q.isEmpty) return List.of(buildings);
+
+  final exact = [
+    for (final b in buildings)
+      if ((qb.isNotEmpty && bare(b.code) == qb) ||
+          words(b.name) == q ||
+          baseName(b.name) == q)
+        b,
+  ];
+  if (exact.isNotEmpty) return exact;
+
+  int? rank(PlaceBuilding b) {
+    final code = bare(b.code);
+    final name = b.name.toLowerCase();
+    if (qb.isNotEmpty && code == qb) return 0;
+    if (qb.isNotEmpty && code.startsWith(qb)) return 1;
+    if (name.startsWith(q)) return 2;
+    if (name.contains(q) || (qb.isNotEmpty && code.contains(qb))) return 3;
+    return null; // no match
+  }
+
+  final ranked = [
+    for (var i = 0; i < buildings.length; i++)
+      if (rank(buildings[i]) case final r?) (r, i, buildings[i]),
+  ]..sort((a, b) => a.$1 != b.$1 ? a.$1 - b.$1 : a.$2 - b.$2);
+  return [for (final r in ranked) r.$3];
 }
 
 class PathResult {
@@ -1627,6 +1746,12 @@ class Place {
   final String fullName;
   final String address;
 
+  /// The place's logo (shown instead of [shortName] when it loads), and
+  /// the colour around it when it isn't square: its own background colour,
+  /// so it reads as one tile.
+  final String? logoAsset;
+  final Color logoBackground;
+
   /// Short name in sentences ("Travel to FAU").
   final String nickname;
 
@@ -1677,6 +1802,8 @@ class Place {
     required this.shortName,
     required this.fullName,
     required this.address,
+    this.logoAsset,
+    this.logoBackground = kCardAlt,
     required this.nickname,
     required this.mapTitle,
     required this.areaName,
@@ -1727,6 +1854,8 @@ final Place fauBoca = Place(
   shortName: 'FAU',
   fullName: 'Florida Atlantic University',
   address: '777 Glades Rd, Boca Raton, FL 33431',
+  logoAsset: 'assets/FAU_logo.jpg',
+  logoBackground: const Color(0xFF005483), // the logo's own blue
   nickname: 'FAU',
   mapTitle: 'FAU Campus Map',
   areaName: 'Boca Raton Main Campus',
@@ -1918,6 +2047,8 @@ final Place browardMall = Place(
   shortName: 'BWD',
   fullName: 'Broward Mall',
   address: '8000 W Broward Blvd, Plantation, FL 33388',
+  logoAsset: 'assets/broward_logo.jpg',
+  logoBackground: Colors.white,
   nickname: 'Broward Mall',
   mapTitle: 'Broward Mall Map',
   areaName: 'Westfield Broward Mall, Plantation',
@@ -5318,8 +5449,10 @@ class _PlaceMapScreenState extends State<PlaceMapScreen>
       if (_searchFocus.hasFocus) {
         _searchOpenedAt = DateTime.now();
         _randomPicks = List<PlaceBuilding>.of(_place.buildings)..shuffle();
-        // Show fresh suggestions; typing replaces the selected name.
-        _searchQuery = '';
+        // Search what the box shows: with a destination picked that's its
+        // name, so the list is just that building. The name is selected, so
+        // typing replaces it (and the clear button empties it to browse).
+        _searchQuery = _searchCtrl.text;
         _searchCtrl.selection = TextSelection(
           baseOffset: 0,
           extentOffset: _searchCtrl.text.length,
@@ -5495,18 +5628,27 @@ class _PlaceMapScreenState extends State<PlaceMapScreen>
     final focused = _searchFocus.hasFocus;
     final hasText = _searchCtrl.text.isNotEmpty;
 
-    final List<PlaceBuilding> suggestions;
-    if (_searchQuery.trim().isEmpty) {
-      suggestions = _randomPicks;
-    } else {
-      final q = _searchQuery.trim().toLowerCase();
-      suggestions = _place.buildings
-          .where((b) =>
-              b.code.toLowerCase().contains(q) ||
-              b.name.toLowerCase().contains(q))
-          .toList();
-    }
+    // Nothing typed: the current destination first, then the shuffle.
+    // Typing: the best matches first (see [rankBuildingMatches]).
+    final List<PlaceBuilding> suggestions = _searchQuery.trim().isEmpty
+        ? [
+            ?selected,
+            for (final b in _randomPicks)
+              if (b.id != selected?.id) b,
+          ]
+        : rankBuildingMatches(_place.buildings, _searchQuery);
     final scrolls = suggestions.length > _maxVisibleSuggestions;
+    final active = focused || selected != null;
+    const hint = 'Search for destination...';
+    const fieldStyle = TextStyle(
+      color: kText,
+      fontSize: 14,
+      fontWeight: FontWeight.w600,
+    );
+    const hintStyle = TextStyle(color: kTextMuted, fontSize: 14);
+    // Fixed icon boxes, so the label drawn over the field lines up with the
+    // field's own text.
+    const iconBox = BoxConstraints.tightFor(width: 48, height: 48);
 
     const shadow = [
       // Light shadow only so the panel separates from the bright map.
@@ -5527,53 +5669,103 @@ class _PlaceMapScreenState extends State<PlaceMapScreen>
         child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Container(
+          // Border and icon colours ease between idle and active.
+          AnimatedContainer(
+            duration: kMotion,
+            curve: kEaseOut,
             decoration: BoxDecoration(
               color: kCard,
               borderRadius: BorderRadius.circular(kRadius),
-              border: Border.all(
-                color: (focused || selected != null) ? kAccent : kDivider,
-              ),
+              border: Border.all(color: active ? kAccent : kDivider),
               boxShadow: shadow,
             ),
-            child: TextField(
-              controller: _searchCtrl,
-              focusNode: _searchFocus,
-              cursorColor: kAccent,
-              textAlignVertical: TextAlignVertical.center,
-              textInputAction: TextInputAction.search,
-              style: const TextStyle(
-                color: kText,
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-              ),
-              onChanged: (v) => setState(() => _searchQuery = v),
-              onSubmitted: (_) {
-                if (suggestions.isNotEmpty) _pickSuggestion(suggestions.first);
-              },
-              decoration: InputDecoration(
-                border: InputBorder.none,
-                isDense: true,
-                contentPadding: const EdgeInsets.symmetric(vertical: 15),
-                hintText: 'Search for destination...',
-                hintStyle: const TextStyle(color: kTextMuted, fontSize: 14),
-                prefixIcon: Icon(
-                  Icons.search,
-                  color: (focused || selected != null) ? kAccent : kTextMuted,
+            child: Stack(
+              children: [
+                TextField(
+                  controller: _searchCtrl,
+                  focusNode: _searchFocus,
+                  cursorColor: kAccent,
+                  textAlignVertical: TextAlignVertical.center,
+                  textInputAction: TextInputAction.search,
+                  // Not typing, the field's own text is hidden and the
+                  // label on top shows it instead (see below).
+                  style: fieldStyle.copyWith(
+                    color: focused ? kText : Colors.transparent,
+                  ),
+                  onChanged: (v) => setState(() => _searchQuery = v),
+                  onSubmitted: (_) {
+                    if (suggestions.isNotEmpty) {
+                      _pickSuggestion(suggestions.first);
+                    }
+                  },
+                  decoration: InputDecoration(
+                    border: InputBorder.none,
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 15),
+                    hintText: focused ? hint : null,
+                    hintStyle: hintStyle,
+                    prefixIcon: TweenAnimationBuilder<Color?>(
+                      tween: ColorTween(end: active ? kAccent : kTextMuted),
+                      duration: kMotion,
+                      curve: kEaseOut,
+                      builder: (_, color, _) =>
+                          Icon(Icons.search, color: color),
+                    ),
+                    prefixIconConstraints: iconBox,
+                    // Always there (empty when there's nothing to clear), so
+                    // the clear button can pop in and out without the text
+                    // width jumping.
+                    suffixIcon: AnimatedSwitcher(
+                      duration: kMotion,
+                      transitionBuilder: (child, anim) => FadeTransition(
+                        opacity: anim,
+                        child: ScaleTransition(
+                          scale: Tween(begin: 0.6, end: 1.0).animate(
+                            CurvedAnimation(parent: anim, curve: kEaseOut),
+                          ),
+                          child: child,
+                        ),
+                      ),
+                      child: (hasText || selected != null)
+                          ? IconButton(
+                              key: const ValueKey('clear'),
+                              icon: const Icon(Icons.cancel, size: 20),
+                              color: kTextMuted,
+                              tooltip: 'Clear',
+                              onPressed: () {
+                                _searchCtrl.clear();
+                                setState(() => _searchQuery = '');
+                                if (selected != null) _clearDestination();
+                              },
+                            )
+                          : const SizedBox(key: ValueKey('no-clear')),
+                    ),
+                    suffixIconConstraints: iconBox,
+                  ),
                 ),
-                suffixIcon: (hasText || selected != null)
-                    ? IconButton(
-                        icon: const Icon(Icons.cancel, size: 20),
-                        color: kTextMuted,
-                        tooltip: 'Clear',
-                        onPressed: () {
-                          _searchCtrl.clear();
-                          setState(() => _searchQuery = '');
-                          if (selected != null) _clearDestination();
-                        },
-                      )
-                    : null,
-              ),
+                // Not typing: the destination's name (or the hint), which
+                // fades and slides when a building is picked, changed or
+                // cleared instead of jumping. It fades away as you start
+                // typing, leaving the field's own text.
+                Positioned.fill(
+                  left: iconBox.maxWidth,
+                  right: iconBox.maxWidth,
+                  child: IgnorePointer(
+                    child: AnimatedOpacity(
+                      opacity: focused ? 0 : 1,
+                      duration: kMotionFast,
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: AnimatedText(
+                          selected?.name ?? hint,
+                          style: selected != null ? fieldStyle : hintStyle,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
           // The suggestion panel unfolds from under the search bar and folds
@@ -5602,53 +5794,57 @@ class _PlaceMapScreenState extends State<PlaceMapScreen>
                       boxShadow: shadow,
                     ),
                     clipBehavior: Clip.antiAlias,
+                    // As you type, rows that stop matching fold away and new
+                    // matches grow in, the panel resizing smoothly; scrolling,
+                    // rows recede under the edges.
                     child: AnimatedSize(
                       duration: kMotion,
                       curve: kEaseOut,
                       alignment: Alignment.topCenter,
-                      child: suggestions.isEmpty
-                          ? Padding(
-                              padding: const EdgeInsets.all(16),
-                              child: Text(
-                                'No buildings match "${_searchQuery.trim()}".',
-                                style: const TextStyle(
-                                  color: kTextMuted,
-                                  fontSize: 13,
-                                ),
-                              ),
-                            )
-                          // At most 5 rows tall; more scroll smoothly inside.
-                          : ConstrainedBox(
-                              constraints: const BoxConstraints(
-                                maxHeight: _suggestionRowHeight *
-                                        _maxVisibleSuggestions +
-                                    (_maxVisibleSuggestions - 1),
-                              ),
-                              child: StaggerScope(
-                                openedAt: _searchOpenedAt,
-                                child: SmoothScroll(
-                                  fade: scrolls ? 14 : 0,
-                                  alwaysShowThumb: scrolls,
-                                  child: ListView.separated(
-                                    shrinkWrap: true,
-                                    physics: scrolls
-                                        ? kScrollPhysics
-                                        : const NeverScrollableScrollPhysics(),
-                                    padding: EdgeInsets.zero,
-                                    itemCount: suggestions.length,
-                                    separatorBuilder: (_, _) =>
-                                        const Divider(height: 1),
-                                    itemBuilder: (context, i) => FadeSlideIn(
-                                      key: ValueKey('sug-${suggestions[i].id}'),
-                                      index: i,
-                                      offsetY: -8,
-                                      duration: kMotion,
-                                      child: _buildSuggestionRow(suggestions[i]),
-                                    ),
-                                  ),
-                                ),
+                      // At most 5 rows tall; more scroll smoothly inside.
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(
+                          maxHeight: _suggestionRowHeight *
+                                  _maxVisibleSuggestions +
+                              _maxVisibleSuggestions,
+                        ),
+                        child: AnimatedRowList(
+                          shrinkWrap: true,
+                          physics: scrolls
+                              ? kScrollPhysics
+                              : const NeverScrollableScrollPhysics(),
+                          openedAt: _searchOpenedAt,
+                          divided: true,
+                          springy: true,
+                          entranceOffset: -8,
+                          entranceDuration: kMotion,
+                          // Back to the top as you type: best match in view.
+                          scrollToTopOn: _searchQuery.trim(),
+                          fade: scrolls ? 14 : 0,
+                          alwaysShowThumb: scrolls,
+                          isEmpty: suggestions.isEmpty,
+                          empty: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Text(
+                              'No buildings match "${_searchQuery.trim()}".',
+                              style: const TextStyle(
+                                color: kTextMuted,
+                                fontSize: 13,
                               ),
                             ),
+                          ),
+                          children: [
+                            // Built only once on screen: each row works out
+                            // its best lot, which is too slow for all ~60 at
+                            // once.
+                            for (final s in suggestions)
+                              Builder(
+                                key: ValueKey('sug-${s.id}'),
+                                builder: (_) => _buildSuggestionRow(s),
+                              ),
+                          ],
+                        ),
+                      ),
                     ),
                   ),
           ),
@@ -5663,6 +5859,7 @@ class _PlaceMapScreenState extends State<PlaceMapScreen>
     final best = _bestParking(bldg);
     final lot = best != null ? _liveLots[best.lotId] : null;
     final free = lot == null ? null : _freeText(lot);
+    final current = bldg.id == _selectedBuilding?.id;
 
     return InkWell(
       onTap: () => _pickSuggestion(bldg),
@@ -5707,6 +5904,11 @@ class _PlaceMapScreenState extends State<PlaceMapScreen>
                 ],
               ),
             ),
+            // The destination you have now (listed first).
+            if (current) ...[
+              const SizedBox(width: 8),
+              const Icon(Icons.check_circle, color: kAccent, size: 18),
+            ],
           ],
         ),
       ),
@@ -6442,11 +6644,15 @@ class _VehicleTabState extends State<_VehicleTab> {
             onPressed: () {
               Navigator.of(ctx).pop();
               final uid = _uid;
-              if (uid != null) {
+              if (uid == null) return;
+              // After the dialog has faded away, so the card's swipe-out
+              // plays in full view instead of behind it.
+              final wait = reduceMotion(context) ? Duration.zero : kMotion;
+              Future.delayed(wait, () {
                 FirebaseDatabase.instance
                     .ref('drivers/$uid/vehicles/$key')
                     .remove();
-              }
+              });
             },
             style: TextButton.styleFrom(foregroundColor: kRed),
             child: const Text('Delete Vehicle'),
@@ -6468,38 +6674,54 @@ class _VehicleTabState extends State<_VehicleTab> {
       stream: _stream,
       builder: (context, snapshot) {
         if (snapshot.hasError) {
-          return Center(
-            child: Text(
-              'Error: ${snapshot.error}',
-              style: const TextStyle(color: kRed),
+          return FadeSwitcher(
+            child: Center(
+              key: const ValueKey('error'),
+              child: Text(
+                'Error: ${snapshot.error}',
+                style: const TextStyle(color: kRed),
+              ),
             ),
           );
         }
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-
-        final rawData = snapshot.data?.snapshot.value;
-        if (rawData is! Map) {
-          return AnimatedAddCard(
-            title: 'No Vehicle Found',
-            subtitle: 'Tap to add a new vehicle to your account',
-            onTap: _openAddVehicleDialog,
+          return const FadeSwitcher(
+            child: Center(
+              key: ValueKey('loading'),
+              child: CircularProgressIndicator(),
+            ),
           );
         }
 
-        return _ListWithBottomAction(
-          actionTitle: 'Add more vehicle',
-          actionIcon: Icons.add,
-          onAction: _openAddVehicleDialog,
-          children: [
+        final rawData = snapshot.data?.snapshot.value;
+        final cards = [
+          if (rawData is Map)
             for (final entry in rawData.entries)
               if (entry.value is Map)
                 _buildVehicleCard(
                   entry.key.toString(),
                   Map<String, dynamic>.from(entry.value as Map),
                 ),
-          ],
+        ];
+
+        // Always the same list, even with no cars left, so the last card
+        // swipes away like the others before the empty card takes over.
+        return FadeSwitcher(
+          child: _ListWithBottomAction(
+            key: const ValueKey('list'),
+            // Deleted cars swipe away to the left.
+            swipeOut: true,
+            isEmpty: cards.isEmpty,
+            empty: AnimatedAddCard(
+              title: 'No Vehicle Found',
+              subtitle: 'Tap to add a new vehicle to your account',
+              onTap: _openAddVehicleDialog,
+            ),
+            actionTitle: 'Add more vehicle',
+            actionIcon: Icons.add,
+            onAction: _openAddVehicleDialog,
+            children: cards,
+          ),
         );
       },
     );
@@ -6579,13 +6801,26 @@ class _VehicleTabState extends State<_VehicleTab> {
 
 /// Smooth-scrolling list of cards followed by a compact, centred action
 /// button. Shared by the Home, Vehicle and Profile tabs.
-class _ListWithBottomAction extends StatefulWidget {
+class _ListWithBottomAction extends StatelessWidget {
   final List<Widget> children;
   final String actionTitle;
   final IconData actionIcon;
   final VoidCallback onAction;
 
+  /// Removed rows swipe off to the left (see [CollapsibleRow.swipeOut]).
+  final bool swipeOut;
+
+  /// There's nothing to list (the last place or car is gone): [empty] is
+  /// shown instead, but only once any deleted rows have finished swiping
+  /// away, so deleting the last card animates like any other.
+  final bool isEmpty;
+  final Widget? empty;
+
   const _ListWithBottomAction({
+    super.key,
+    this.swipeOut = false,
+    this.isEmpty = false,
+    this.empty,
     required this.children,
     required this.actionTitle,
     required this.actionIcon,
@@ -6593,41 +6828,23 @@ class _ListWithBottomAction extends StatefulWidget {
   });
 
   @override
-  State<_ListWithBottomAction> createState() => _ListWithBottomActionState();
-}
-
-class _ListWithBottomActionState extends State<_ListWithBottomAction> {
-  final DateTime _openedAt = DateTime.now();
-
-  @override
   Widget build(BuildContext context) {
-    final children = widget.children;
-    // Rows rise in one after another when the tab opens; rows further down
-    // reveal themselves as they scroll into view (ListView builds lazily).
-    // Keyed rows keep their state, so only newly shown rows animate.
     return SafeArea(
-      child: StaggerScope(
-        openedAt: _openedAt,
-        child: SmoothScroll(
-          child: ListView(
-            physics: kScrollPhysics,
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
-            children: [
-              for (var i = 0; i < children.length; i++)
-                FadeSlideIn(key: children[i].key, index: i, child: children[i]),
-              const SizedBox(height: 8),
-              FadeSlideIn(
-                index: children.length,
-                child: PrimaryButton(
-                  title: widget.actionTitle,
-                  icon: widget.actionIcon,
-                  onPressed: widget.onAction,
-                  compact: true,
-                ),
-              ),
-            ],
+      child: AnimatedRowList(
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+        swipeOut: swipeOut,
+        isEmpty: isEmpty,
+        empty: empty,
+        footer: [
+          const SizedBox(height: 8),
+          PrimaryButton(
+            title: actionTitle,
+            icon: actionIcon,
+            onPressed: onAction,
+            compact: true,
           ),
-        ),
+        ],
+        children: children,
       ),
     );
   }
@@ -6814,15 +7031,23 @@ class _ProfileTabState extends State<_ProfileTab> {
       stream: _stream,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
+          return const FadeSwitcher(
+            child: Center(
+              key: ValueKey('loading'),
+              child: CircularProgressIndicator(),
+            ),
+          );
         }
 
         final rawData = snapshot.data?.snapshot.value;
         if (rawData is! Map || rawData['firstName'] == null) {
-          return AnimatedAddCard(
-            title: 'Profile Incomplete',
-            subtitle: 'Tap to add your contact information',
-            onTap: _openContactDialog,
+          return FadeSwitcher(
+            child: AnimatedAddCard(
+              key: const ValueKey('empty'),
+              title: 'Profile Incomplete',
+              subtitle: 'Tap to add your contact information',
+              onTap: _openContactDialog,
+            ),
           );
         }
 
@@ -6839,7 +7064,9 @@ class _ProfileTabState extends State<_ProfileTab> {
         final fullAddress =
             '$line1\n${data['city']}, ${data['state']} $zip\n${data['country']}';
 
-        return _ListWithBottomAction(
+        return FadeSwitcher(
+          child: _ListWithBottomAction(
+          key: const ValueKey('list'),
           actionTitle: 'Edit Information',
           actionIcon: Icons.edit_outlined,
           onAction: () => _openContactDialog(data: data),
@@ -6908,6 +7135,7 @@ class _ProfileTabState extends State<_ProfileTab> {
                     ),
                     const SizedBox(height: 12),
           ],
+          ),
         );
       },
     );
@@ -7196,12 +7424,18 @@ class FadeSlideIn extends StatefulWidget {
   final double offsetY; // start this many px lower (negative = higher)
   final Duration duration;
 
+  /// Asked once, when first built; false just shows the child (e.g. a list
+  /// row that merely scrolled into view, which should sit still where it
+  /// is). Always animates when not given.
+  final ValueGetter<bool>? animateIf;
+
   const FadeSlideIn({
     super.key,
     required this.child,
     this.index = 0,
     this.offsetY = 14,
     this.duration = kMotionSlow,
+    this.animateIf,
   });
 
   @override
@@ -7219,7 +7453,7 @@ class _FadeSlideInState extends State<FadeSlideIn>
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (_c.status != AnimationStatus.dismissed || _delay != null) return;
-    if (reduceMotion(context)) {
+    if (!(widget.animateIf?.call() ?? true) || reduceMotion(context)) {
       _c.value = 1;
       return;
     }
@@ -7256,6 +7490,532 @@ class _FadeSlideInState extends State<FadeSlideIn>
   }
 }
 
+/// A list row that comes and goes smoothly: with [growIn] (a row just added
+/// to the list) it grows open, so the rows below slide down; when [present]
+/// turns false it fades and collapses, the rows below sliding up, then calls
+/// [onGone]. With [swipeOut] it leaves faster, swiped off to the left first.
+class CollapsibleRow extends StatefulWidget {
+  final Widget child;
+  final bool present;
+  final VoidCallback? onGone;
+  final bool swipeOut;
+
+  /// Asked once, when the row is first built: true only for a row that is
+  /// new to the list. Never for one a lazy list merely built because it
+  /// scrolled into view: a row growing from nothing changes the list's
+  /// length mid-scroll, which made it jump.
+  final ValueGetter<bool>? growIn;
+
+  const CollapsibleRow({
+    super.key,
+    required this.child,
+    this.present = true,
+    this.onGone,
+    this.swipeOut = false,
+    this.growIn,
+  });
+
+  @override
+  State<CollapsibleRow> createState() => _CollapsibleRowState();
+}
+
+class _CollapsibleRowState extends State<CollapsibleRow>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c =
+      AnimationController(vsync: this, duration: kMotion, value: 1);
+  late final Animation<double> _size = CurvedAnimation(
+    parent: _c,
+    curve: Curves.easeOutCubic,
+    reverseCurve: Curves.easeInOutCubic,
+  );
+  bool _started = false;
+
+  /// Swiping out: the whole exit, the share of it spent sliding off to the
+  /// left, and where the gap starts closing (overlapping the slide's end).
+  static const Duration _swipeExit = Duration(milliseconds: 250);
+  static const double _swipePart = 0.65;
+  static const double _closeFrom = 0.5;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final reduce = reduceMotion(context);
+    _c.duration = reduce ? Duration.zero : kMotion;
+    _c.reverseDuration =
+        reduce ? Duration.zero : (widget.swipeOut ? _swipeExit : kMotion);
+    if (_started) return;
+    _started = true;
+    if (!widget.present) {
+      // Built only after it was removed (it was off screen until now): it's
+      // already gone, so it never shows.
+      _c.value = 0;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !widget.present) widget.onGone?.call();
+      });
+    } else if (widget.growIn?.call() ?? false) {
+      _c.forward(from: 0);
+    }
+  }
+
+  @override
+  void didUpdateWidget(CollapsibleRow old) {
+    super.didUpdateWidget(old);
+    if (widget.present == old.present) return;
+    if (widget.present) {
+      _c.forward();
+    } else {
+      _c.reverse().whenCompleteOrCancel(() {
+        if (mounted && !widget.present) widget.onGone?.call();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // One widget structure for every phase, so the row's content keeps its
+    // state (and doesn't replay its entrance) when it starts leaving.
+    return AnimatedBuilder(
+      animation: _c,
+      // A leaving row can't be tapped again while it collapses.
+      child: IgnorePointer(ignoring: !widget.present, child: widget.child),
+      builder: (context, child) {
+        var height = _size.value;
+        var opacity = _c.value;
+        var slide = 0.0;
+        if (widget.swipeOut && !widget.present) {
+          final gone = 1 - _c.value; // 0 -> 1 over the exit
+          // Flicked off to the left, picking up speed as it goes...
+          final swipe =
+              Curves.easeInCubic.transform((gone / _swipePart).clamp(0.0, 1.0));
+          slide = -1.1 * swipe;
+          // Solid for most of the slide, fading only at the end, so no
+          // see-through ghost of the card trails behind.
+          opacity = 1 - ((swipe - 0.6) / 0.4).clamp(0.0, 1.0);
+          // ...then the gap closes, the rows below gliding up and easing to
+          // a soft stop.
+          final close = ((gone - _closeFrom) / (1 - _closeFrom)).clamp(0.0, 1.0);
+          height = 1 - Curves.easeOutCubic.transform(close);
+        }
+        // Not clipped, so a swiped row slides off the screen edge rather
+        // than vanishing at its own edge.
+        final row = Align(
+          alignment: Alignment.topCenter,
+          heightFactor: height.clamp(0.0, 1.0),
+          child: Opacity(
+            opacity: opacity.clamp(0.0, 1.0),
+            child: FractionalTranslation(
+              translation: Offset(slide, 0),
+              child: child,
+            ),
+          ),
+        );
+        return widget.swipeOut ? row : ClipRect(child: row);
+      },
+    );
+  }
+}
+
+/// A scrolling list whose rows come and go smoothly. They rise in one after
+/// another when it opens; rows added later grow in and removed ones (deleted,
+/// filtered out by a search) collapse away, or swipe off with [swipeOut].
+/// With [springy], rows trail a little behind as it scrolls and catch up
+/// (see [ScrollSpring]). Rows are matched by key (unkeyed ones by position),
+/// and the list builds them lazily, so wrap an expensive row in a [Builder].
+class AnimatedRowList extends StatefulWidget {
+  final List<Widget> children;
+
+  /// After the rows, rising in with them (not animated in or out).
+  final List<Widget> footer;
+
+  final bool swipeOut;
+
+  /// Nothing to list: [empty] is shown instead, once removed rows have
+  /// finished leaving (so the last one animates out like any other).
+  final bool isEmpty;
+  final Widget? empty;
+
+  final bool springy;
+
+  /// When this changes (e.g. the search text), the list glides back to the
+  /// top, so the best matches are in view.
+  final Object? scrollToTopOn;
+
+  /// A hairline between rows.
+  final bool divided;
+
+  final bool shrinkWrap;
+  final ScrollPhysics physics;
+  final EdgeInsetsGeometry padding;
+
+  /// When the list opened (for the stagger); defaults to when it was built.
+  final DateTime? openedAt;
+
+  /// The rows' entrance (see [FadeSlideIn]).
+  final double entranceOffset;
+  final Duration entranceDuration;
+
+  /// See [SmoothScroll].
+  final double fade;
+  final bool alwaysShowThumb;
+
+  const AnimatedRowList({
+    super.key,
+    required this.children,
+    this.footer = const [],
+    this.swipeOut = false,
+    this.isEmpty = false,
+    this.empty,
+    this.springy = false,
+    this.scrollToTopOn,
+    this.divided = false,
+    this.shrinkWrap = false,
+    this.physics = kScrollPhysics,
+    this.padding = EdgeInsets.zero,
+    this.openedAt,
+    this.entranceOffset = 14,
+    this.entranceDuration = kMotionSlow,
+    this.fade = 18,
+    this.alwaysShowThumb = false,
+  });
+
+  @override
+  State<AnimatedRowList> createState() => _AnimatedRowListState();
+}
+
+class _AnimatedRowListState extends State<AnimatedRowList> {
+  late final DateTime _openedAt = widget.openedAt ?? DateTime.now();
+  final GlideWheelScrollController _scroll = GlideWheelScrollController();
+
+  @override
+  void dispose() {
+    _sweep?.cancel();
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  /// The rows on screen: the current children plus removed ones that are
+  /// still leaving.
+  late List<_ListRow> _rows = _fresh(widget.children);
+
+  /// A row's identity: its widget key, or (unkeyed) its position.
+  static List<_ListRow> _fresh(List<Widget> children) => [
+        for (var i = 0; i < children.length; i++)
+          _ListRow(children[i].key ?? ValueKey<int>(i), children[i]),
+      ];
+
+  /// Rows added to the list after it opened, and when: they grow in and
+  /// fade up, but only right after being added. A row built later only
+  /// because it scrolled into view just appears, still, at full size.
+  final Map<Key, DateTime> _addedAt = {};
+  static const Duration _addedWindow = Duration(milliseconds: 600);
+
+  /// A removed row normally drops itself once its exit animation ends, but
+  /// one that's off screen was never built and never animates. So once an
+  /// exit's time is up, every row still leaving is dropped regardless;
+  /// otherwise they'd linger in the list as leftovers.
+  Timer? _sweep;
+  static const Duration _exitTime = Duration(milliseconds: 400);
+
+  void _sweepLeftovers() {
+    _sweep?.cancel();
+    _sweep = Timer(_exitTime, () {
+      if (!mounted || !_rows.any((r) => r.leaving)) return;
+      setState(() => _rows.removeWhere((r) => r.leaving));
+    });
+  }
+
+  bool _justAdded(Key key) {
+    final at = _addedAt[key];
+    return at != null && DateTime.now().difference(at) < _addedWindow;
+  }
+
+  @override
+  void didUpdateWidget(AnimatedRowList old) {
+    super.didUpdateWidget(old);
+    final rows = _fresh(widget.children);
+    final now = DateTime.now();
+    final had = {for (final r in _rows) r.key};
+    _addedAt.removeWhere((_, at) => now.difference(at) >= _addedWindow);
+    for (final r in rows) {
+      if (!had.contains(r.key)) _addedAt[r.key] = now;
+    }
+    final kept = {for (final r in rows) r.key};
+    // A removed row stays where it was (after the row it used to follow)
+    // and leaves from there, so the rows below slide up instead of jumping.
+    for (var i = 0; i < _rows.length; i++) {
+      final old = _rows[i];
+      if (kept.contains(old.key)) continue;
+      var at = 0;
+      for (var j = i - 1; j >= 0; j--) {
+        final before = rows.indexWhere((r) => r.key == _rows[j].key);
+        if (before >= 0) {
+          at = before + 1;
+          break;
+        }
+      }
+      rows.insert(at, _ListRow(old.key, old.child, leaving: true));
+    }
+    final newlyLeaving = rows.any(
+      (r) => r.leaving && !_rows.any((o) => o.key == r.key && o.leaving),
+    );
+    _rows = rows;
+    if (newlyLeaving) _sweepLeftovers();
+
+    if (widget.scrollToTopOn != old.scrollToTopOn &&
+        _scroll.hasClients &&
+        _scroll.offset > 0) {
+      if (reduceMotion(context)) {
+        _scroll.jumpTo(0);
+      } else {
+        _scroll.animateTo(0, duration: kMotion, curve: kEaseOut);
+      }
+    }
+  }
+
+  void _drop(Key key) {
+    if (!mounted) return;
+    setState(() => _rows.removeWhere((r) => r.leaving && r.key == key));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final empty = widget.empty;
+    final showEmpty =
+        widget.isEmpty && empty != null && !_rows.any((r) => r.leaving);
+    // Quick, so what's left of the list doesn't linger behind the empty
+    // state (or the other way round).
+    return FadeSwitcher(
+      duration: kMotionFast,
+      child: showEmpty
+          ? KeyedSubtree(key: const ValueKey('empty'), child: empty)
+          : KeyedSubtree(key: const ValueKey('list'), child: _buildList()),
+    );
+  }
+
+  Widget _buildList() {
+    final rows = _rows;
+    final footer = widget.footer;
+    // Rows rise in one after another when the list opens, and rows added
+    // later grow in. The list builds rows lazily, so a row is also built
+    // when it first scrolls into view; that one just appears, at full size,
+    // so nothing moves or changes length under the scroll.
+    bool opening() => DateTime.now().difference(_openedAt) <
+        StaggerScope.openingWindow;
+    return StaggerScope(
+      openedAt: _openedAt,
+      child: SmoothScroll(
+        controller: _scroll,
+        fade: widget.fade,
+        alwaysShowThumb: widget.alwaysShowThumb,
+        child: ListView(
+          shrinkWrap: widget.shrinkWrap,
+          physics: widget.physics,
+          padding: widget.padding,
+          children: [
+            // Callbacks hold the row's own key, never its index: rows come
+            // and go, so an index captured now points at another row (or
+            // past the end) by the time a callback runs.
+            for (final (i, row) in rows.indexed)
+              CollapsibleRow(
+                key: row.key,
+                present: !row.leaving,
+                swipeOut: widget.swipeOut,
+                onGone: () => _drop(row.key),
+                growIn: () => _justAdded(row.key),
+                child: FadeSlideIn(
+                  index: i,
+                  offsetY: widget.entranceOffset,
+                  duration: widget.entranceDuration,
+                  animateIf: () => opening() || _justAdded(row.key),
+                  child: _decorate(i, row.child),
+                ),
+              ),
+            for (var j = 0; j < footer.length; j++)
+              FadeSlideIn(
+                index: rows.length + j,
+                offsetY: widget.entranceOffset,
+                duration: widget.entranceDuration,
+                animateIf: opening,
+                child: footer[j],
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _decorate(int i, Widget row) {
+    if (widget.divided) {
+      // Always there (clear above the first row), so a row keeps its
+      // content's state when it moves to or from the top.
+      row = Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Divider(height: 1, color: i == 0 ? Colors.transparent : null),
+          row,
+        ],
+      );
+    }
+    return widget.springy ? ScrollSpring(child: row) : row;
+  }
+}
+
+class _ListRow {
+  final Key key;
+  final Widget child;
+  final bool leaving;
+  const _ListRow(this.key, this.child, {this.leaving = false});
+}
+
+/// Springy scrolling, like iOS Messages: when you drag or fling the list,
+/// rows nearest the way it's moving go straight along with it, and rows
+/// further back trail a little behind and catch up. The list stretches
+/// slightly as it moves (rows never overlap) and settles back into a tidy
+/// list the moment it stops. Mouse-wheel scrolling stays rigid.
+class ScrollSpring extends StatefulWidget {
+  final Widget child;
+
+  const ScrollSpring({super.key, required this.child});
+
+  @override
+  State<ScrollSpring> createState() => _ScrollSpringState();
+}
+
+class _ScrollSpringState extends State<ScrollSpring>
+    with SingleTickerProviderStateMixin {
+  /// The share of each scroll step the row furthest behind trails by.
+  static const double _maxLag = 0.14;
+
+  /// Furthest a row ever trails (px).
+  static const double _maxOffset = 16;
+
+  /// How quickly a row catches up: about 63% of the way every this many
+  /// seconds (no overshoot, so it settles calmly).
+  static const double _catchUp = 0.09;
+
+  ScrollPosition? _position;
+  double? _lastPixels;
+
+  /// Where the row's centre is, from the top (0) to the bottom (1) of the
+  /// view, as of the last time it could be measured.
+  double _down = 0.5;
+
+  /// How far the row trails its place in the list (px, + = below it).
+  double _offset = 0;
+  bool _reduce = false;
+  late final Ticker _ticker = createTicker(_tick);
+  Duration? _lastTick;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _reduce = reduceMotion(context);
+    final position = Scrollable.maybeOf(context)?.position;
+    if (position != _position) {
+      _position?.removeListener(_onScroll);
+      _position = position?..addListener(_onScroll);
+      _lastPixels = position?.hasPixels == true ? position!.pixels : null;
+    }
+  }
+
+  @override
+  void dispose() {
+    _position?.removeListener(_onScroll);
+    _ticker.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    final p = _position;
+    if (!mounted || p == null || !p.hasPixels) return;
+    final last = _lastPixels;
+    _lastPixels = p.pixels;
+    if (last == null || _reduce) return;
+    // Touch drags and flings only: on a mouse wheel or touchpad glide, rows
+    // still catching up after the list has stopped look like it overshot
+    // and got pulled back.
+    if (p is _GlideWheelPosition && p.wheelGliding) return;
+    final delta = p.pixels - last;
+    if (delta == 0) return;
+    _measure(p);
+    // Scrolling down (content moving up), the top rows lead and lower rows
+    // trail; scrolling up, the other way round.
+    final lag = _maxLag * (delta > 0 ? _down : 1 - _down);
+    _offset = (_offset + delta * lag).clamp(-_maxOffset, _maxOffset);
+    if (!_ticker.isActive) {
+      _lastTick = null;
+      _ticker.start();
+    }
+  }
+
+  /// Updates [_down]. Where the row sits in the list (fixed while scrolling)
+  /// minus how far the list has scrolled, so it's right as the scroll
+  /// changes, before the rows are laid out again.
+  void _measure(ScrollPosition p) {
+    // Mid-layout, geometry can be stale; keep the last value.
+    if (SchedulerBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      return;
+    }
+    final box = context.findRenderObject();
+    if (box is! RenderBox || !box.attached || !box.hasSize) return;
+    final viewport = RenderAbstractViewport.maybeOf(box);
+    if (viewport == null || !p.hasViewportDimension) return;
+    final top = viewport.getOffsetToReveal(box, 0).offset - p.pixels;
+    final h = p.viewportDimension;
+    if (h <= 0) return;
+    _down = ((top + box.size.height / 2) / h).clamp(0.0, 1.0);
+  }
+
+  void _tick(Duration now) {
+    final last = _lastTick;
+    _lastTick = now;
+    final dt = last == null ? 1 / 60 : (now - last).inMicroseconds / 1e6;
+    _offset *= math.exp(-dt / _catchUp);
+    if (_offset.abs() < 0.05) {
+      _offset = 0;
+      _ticker.stop();
+    }
+    setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Transform.translate(
+      offset: Offset(0, _offset),
+      child: widget.child,
+    );
+  }
+}
+
+/// Cross-fades between the states of a screen (loading, empty, list)
+/// instead of swapping them in one frame: deleting the last car fades the
+/// list out as the "add" card fades in. Give each state's widget its own
+/// key.
+class FadeSwitcher extends StatelessWidget {
+  final Widget child;
+  final Duration duration;
+
+  const FadeSwitcher({super.key, required this.child, this.duration = kMotion});
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedSwitcher(
+      duration: reduceMotion(context) ? Duration.zero : duration,
+      switchInCurve: kEaseOut,
+      switchOutCurve: Curves.easeInCubic,
+      child: child,
+    );
+  }
+}
+
 /// Marks when a list first appeared, so [FadeSlideIn] can tell the opening
 /// stagger apart from items that scroll into view later.
 class StaggerScope extends InheritedWidget {
@@ -7263,8 +8023,10 @@ class StaggerScope extends InheritedWidget {
 
   const StaggerScope({super.key, required this.openedAt, required super.child});
 
-  bool get isOpening =>
-      DateTime.now().difference(openedAt) < const Duration(milliseconds: 700);
+  /// How long after opening its rows still count as part of the opening.
+  static const Duration openingWindow = Duration(milliseconds: 700);
+
+  bool get isOpening => DateTime.now().difference(openedAt) < openingWindow;
 
   static StaggerScope? maybeOf(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<StaggerScope>();
@@ -7274,47 +8036,220 @@ class StaggerScope extends InheritedWidget {
 }
 
 /// Smooth, springy scrolling (iOS-style bounce on every platform), always
-/// scrollable so the bounce works even when the content fits.
+/// scrollable so the bounce works even when the content fits. Normal
+/// deceleration: a flick glides on and eases to a stop, like iOS.
 const ScrollPhysics kScrollPhysics = BouncingScrollPhysics(
   parent: AlwaysScrollableScrollPhysics(),
-  decelerationRate: ScrollDecelerationRate.fast,
 );
 
-/// Polished scroll container: slim themed scrollbar plus soft fades at the
-/// top and bottom edges so content melts away instead of being cut off.
-class SmoothScroll extends StatelessWidget {
+/// How quickly a wheel glide closes in on its target: about 63% of the
+/// remaining distance every this many seconds (~95% within 0.27 s).
+const double _wheelGlideTau = 0.09;
+
+/// A scroll controller whose mouse-wheel and touchpad scrolling glides (see
+/// [_GlideWheelPosition]). Touch and drag scrolling are unchanged.
+class GlideWheelScrollController extends ScrollController {
+  @override
+  ScrollPosition createScrollPosition(
+    ScrollPhysics physics,
+    ScrollContext context,
+    ScrollPosition? oldPosition,
+  ) =>
+      _GlideWheelPosition(
+        physics: physics,
+        context: context,
+        initialPixels: initialScrollOffset,
+        keepScrollOffset: keepScrollOffset,
+        oldPosition: oldPosition,
+        debugLabel: debugLabel,
+      );
+}
+
+/// Mouse-wheel (and touchpad) scrolling glides instead of jumping a notch at
+/// a time. There's one target, kept within the list, and the list closes in
+/// on it smoothly every frame; each notch just moves the target on. So quick
+/// notches (or a touchpad's stream of small steps) blend into one continuous
+/// glide that never runs past the end and never restarts its motion, which
+/// is what made a fresh animation per notch stutter.
+class _GlideWheelPosition extends ScrollPositionWithSingleContext {
+  _GlideWheelPosition({
+    required super.physics,
+    required super.context,
+    super.initialPixels,
+    super.keepScrollOffset,
+    super.oldPosition,
+    super.debugLabel,
+  });
+
+  /// True while a wheel glide is moving the list (see [ScrollSpring]).
+  bool get wheelGliding => activity is _WheelGlideActivity;
+
+  @override
+  void pointerScroll(double delta) {
+    final reduce = WidgetsBinding
+        .instance.platformDispatcher.accessibilityFeatures.disableAnimations;
+    if (delta == 0 || reduce) {
+      super.pointerScroll(delta);
+      return;
+    }
+    final current = activity;
+    final from = current is _WheelGlideActivity ? current.target : pixels;
+    final target = (from + delta).clamp(minScrollExtent, maxScrollExtent);
+    if (current is _WheelGlideActivity) {
+      current.target = target;
+    } else if (target != pixels) {
+      beginActivity(
+          _WheelGlideActivity(this, vsync: context.vsync, target: target));
+    }
+  }
+}
+
+/// Moves the list toward [target] a little every frame (see
+/// [_GlideWheelPosition]), going idle once it's there.
+class _WheelGlideActivity extends ScrollActivity {
+  _WheelGlideActivity(
+    _GlideWheelPosition super.delegate, {
+    required TickerProvider vsync,
+    required this.target,
+  }) : _position = delegate {
+    _ticker = vsync.createTicker(_tick)..start();
+  }
+
+  final _GlideWheelPosition _position;
+  double target;
+  late final Ticker _ticker;
+  Duration? _lastTick;
+  double _velocity = 0;
+
+  void _tick(Duration now) {
+    final last = _lastTick;
+    _lastTick = now;
+    final dt = last == null ? 1 / 60 : (now - last).inMicroseconds / 1e6;
+    if (dt <= 0) return;
+    final pixels = _position.pixels;
+    final left = target - pixels;
+    if (left.abs() < 0.5) {
+      _velocity = 0;
+      delegate.setPixels(target);
+      delegate.goIdle();
+      return;
+    }
+    final next = pixels + left * (1 - math.exp(-dt / _wheelGlideTau));
+    _velocity = (next - pixels) / dt;
+    // Ran into an end (the list got shorter mid-glide): stop there.
+    if (delegate.setPixels(next) != 0) delegate.goIdle();
+  }
+
+  @override
+  bool get shouldIgnorePointer => false;
+
+  @override
+  bool get isScrolling => true;
+
+  @override
+  double get velocity => _velocity;
+
+  @override
+  void dispose() {
+    _ticker.dispose();
+    super.dispose();
+  }
+}
+
+/// Polished scroll container: slim themed scrollbar, soft fades at the top
+/// and bottom edges so content melts away instead of being cut off (only at
+/// an edge with more beyond it, so nothing fades when it all fits), and a
+/// gliding mouse wheel. [child] is a scroll view without its own controller
+/// (it picks this one up).
+class SmoothScroll extends StatefulWidget {
   final Widget child; // a scroll view
   final double fade;
   final bool alwaysShowThumb;
+
+  /// To scroll the list from outside; one is made if not given.
+  final GlideWheelScrollController? controller;
 
   const SmoothScroll({
     super.key,
     required this.child,
     this.fade = 18,
     this.alwaysShowThumb = false,
+    this.controller,
   });
 
   @override
+  State<SmoothScroll> createState() => _SmoothScrollState();
+}
+
+class _SmoothScrollState extends State<SmoothScroll> {
+  GlideWheelScrollController? _own;
+
+  GlideWheelScrollController get _controller =>
+      widget.controller ?? (_own ??= GlideWheelScrollController());
+
+  @override
+  void dispose() {
+    _own?.dispose();
+    super.dispose();
+  }
+
+  /// How deep (px) to fade an edge with [hidden] px of content beyond it:
+  /// growing over the first [SmoothScroll.fade] px of scrolling, so the fade
+  /// eases in rather than snapping on.
+  double _fadeFor(double hidden) {
+    final fade = widget.fade;
+    return fade <= 0 ? 0 : fade * (hidden / fade).clamp(0.0, 1.0);
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return Scrollbar(
-      thumbVisibility: alwaysShowThumb,
-      child: ShaderMask(
-        blendMode: BlendMode.dstIn,
-        shaderCallback: (rect) {
-          final f = rect.height <= 0 ? 0.0 : (fade / rect.height).clamp(0.0, 0.5);
-          return LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: const [
-              Colors.transparent,
-              Colors.black,
-              Colors.black,
-              Colors.transparent,
-            ],
-            stops: [0, f, 1 - f, 1],
-          ).createShader(rect);
-        },
-        child: child,
+    // Every platform, not just phones, so web and desktop get the glide too.
+    return PrimaryScrollController(
+      controller: _controller,
+      automaticallyInheritForPlatforms: TargetPlatform.values.toSet(),
+      child: Scrollbar(
+        controller: _controller,
+        thumbVisibility: widget.alwaysShowThumb,
+        // Rows coming or going change what's hidden without any scrolling;
+        // re-check the edges then too.
+        child: NotificationListener<ScrollMetricsNotification>(
+          onNotification: (_) {
+            if (mounted) setState(() {});
+            return false;
+          },
+          child: AnimatedBuilder(
+            animation: _controller,
+            child: widget.child,
+            builder: (context, child) {
+              final p = _controller.hasClients &&
+                      _controller.position.hasContentDimensions
+                  ? _controller.position
+                  : null;
+              final top = p == null ? 0.0 : _fadeFor(p.extentBefore);
+              final bottom = p == null ? 0.0 : _fadeFor(p.extentAfter);
+              return ShaderMask(
+                blendMode: BlendMode.dstIn,
+                shaderCallback: (rect) {
+                  final h = rect.height <= 0 ? 1.0 : rect.height;
+                  final t = (top / h).clamp(0.0, 0.5);
+                  final b = (bottom / h).clamp(0.0, 0.5);
+                  return LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: const [
+                      Colors.transparent,
+                      Colors.black,
+                      Colors.black,
+                      Colors.transparent,
+                    ],
+                    stops: [0, t, 1 - b, 1],
+                  ).createShader(rect);
+                },
+                child: child,
+              );
+            },
+          ),
+        ),
       ),
     );
   }

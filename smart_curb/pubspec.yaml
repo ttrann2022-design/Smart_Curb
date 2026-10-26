@@ -45,6 +45,9 @@ flutter:
   assets:
     - assets/app_icon.png
     - assets/logo.png
+    # Place logos (home page and the add-location list)
+    - assets/FAU_logo.jpg
+    - assets/broward_logo.jpg
     # Campus walking network for A* (generated from OpenStreetMap)
     - assets/campus_walkways.json
     # Walking network around Broward Mall (generated from OpenStreetMap)
