@@ -16,14 +16,35 @@ export const LEAD_STATUSES = [
   { id: "closed", label: "Closed" },
 ];
 
-export const LEAD_LIMITS = { name: 80, email: 120, organization: 120, message: 1000 };
+// Longest allowed length of each field, matching the rules (email, organization
+// and message must be under 120, 120 and 1000).
+export const LEAD_LIMITS = { name: 80, email: 119, organization: 119, message: 999 };
+const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+// Client-side checks, the same as the rules'. Returns { field: message } for each problem.
+export function leadErrors({ name, email, organization, facilityType, message }, facilityIds) {
+  const errors = {};
+  if (!name.trim()) errors.name = "Enter your name.";
+  else if (name.trim().length > LEAD_LIMITS.name) errors.name = `Keep your name under ${LEAD_LIMITS.name + 1} characters.`;
+  if (!EMAIL_RE.test(email.trim())) errors.email = "Enter an email address like name@example.com.";
+  else if (email.trim().length > LEAD_LIMITS.email) errors.email = "That email address is too long.";
+  if (organization.trim().length > LEAD_LIMITS.organization) errors.organization = "Shorten the organization name.";
+  if (!facilityIds.includes(facilityType)) errors.facilityType = "Choose the kind of facility.";
+  if (message.trim().length > LEAD_LIMITS.message) errors.message = `Keep the message under ${LEAD_LIMITS.message + 1} characters.`;
+  return errors;
+}
 
 // The exact shape the rules accept for a new lead. Empty optional fields are left out.
+// Goes to leads/ on the live site and demo/leads in Simulation (including the public demo site).
 export function createLead({ name, email, organization, facilityType, message }) {
   const lead = { name: name.trim(), email: email.trim(), facilityType, status: "new", createdAt: serverTimestamp() };
   if (organization?.trim()) lead.organization = organization.trim();
   if (message?.trim()) lead.message = message.trim();
-  return set(push(ref(database, LEADS_PATH)), lead);
+  const path = dataPath(LEADS_PATH);
+  if (getDataMode() === "sim" && path !== SIM_ROOT + LEADS_PATH) {
+    return Promise.reject(new Error(`Refusing to write outside the simulation: ${path}`));
+  }
+  return set(push(ref(database, path)), lead);
 }
 
 // Status changes from the Requests page. In Simulation they may only touch demo/leads.

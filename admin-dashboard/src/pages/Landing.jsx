@@ -1,8 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "../firebase";
+import { useDataMode } from "../dataMode";
+import { LEAD_LIMITS, createLead, leadErrors } from "../leads";
+import { FACILITIES } from "../site";
 import { DEFAULT_ALERTS, STALL_WORD, statusKey } from "../units";
+import { Button, Input, Notice, Select } from "../components/ui";
 import logo from "../assets/smartcurb-logo.jpg";
 import Icon from "../components/Icon";
 import LotPlan, { StallMark } from "../components/LotPlan";
@@ -196,6 +200,132 @@ function BuiltFor() {
   );
 }
 
+const EMPTY_FORM = { name: "", email: "", organization: "", facilityType: "", message: "", website: "" };
+const FIELD_ORDER = ["name", "email", "organization", "facilityType", "message"];
+
+// One labelled control with its hint and error wired up for screen readers.
+function FormField({ id, label, optional, hint, error, children }) {
+  const describedBy = [hint && `${id}-hint`, error && `${id}-err`].filter(Boolean).join(" ") || undefined;
+  return (
+    <div className="ld-field">
+      <label htmlFor={id} className="sws-field-label">
+        {label}{optional && <span className="ld-optional"> (optional)</span>}
+      </label>
+      {children({ id, "aria-invalid": error ? true : undefined, "aria-describedby": describedBy })}
+      {hint && <span id={`${id}-hint`} className="sws-field-hint">{hint}</span>}
+      {error && <span id={`${id}-err`} className="ld-err"><Icon name="alert" size={13} />{error}</span>}
+    </div>
+  );
+}
+
+function QuoteForm() {
+  const mode = useDataMode();
+  const [form, setForm] = useState(EMPTY_FORM);
+  const [errors, setErrors] = useState({});
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState("");
+  const [sentTo, setSentTo] = useState(null);
+  const formRef = useRef(null);
+  const doneRef = useRef(null);
+
+  const set = (key) => (e) => {
+    setForm((f) => ({ ...f, [key]: e.target.value }));
+    if (errors[key]) setErrors((errs) => { const next = { ...errs }; delete next[key]; return next; });
+  };
+
+  useEffect(() => { if (sentTo) doneRef.current?.focus(); }, [sentTo]);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setFailed("");
+    // Honeypot: people never see this field, so anything in it came from a bot.
+    // Pretend it worked and write nothing.
+    if (form.website) { setSentTo(form.email.trim() || "you"); return; }
+    const errs = leadErrors(form, FACILITIES.map((f) => f.id));
+    setErrors(errs);
+    const first = FIELD_ORDER.find((k) => errs[k]);
+    if (first) { formRef.current?.querySelector(`#q-${first}`)?.focus(); return; }
+    setBusy(true);
+    try {
+      await createLead(form);
+      setSentTo(form.email.trim());
+      setForm(EMPTY_FORM);
+    } catch (err) {
+      setFailed(err.code === "PERMISSION_DENIED"
+        ? "The request was turned away. Check the fields and try again."
+        : "Couldn't send your request. Check your connection and try again.");
+    }
+    setBusy(false);
+  };
+
+  return (
+    <section id="quote" className="ld-sec ld-quote" aria-labelledby="ld-quote-h">
+      <div className="ld-wrap ld-quote-in">
+        <div className="ld-sec-head">
+          <span className="ld-sec-k">Request a quote</span>
+          <h2 id="ld-quote-h" className="ld-sec-h">Tell us about your parking</h2>
+          <p className="ld-sec-sub">
+            Smart Curb is a student prototype, so there's no price list. Tell us what you're working with and the team will reply by email.
+          </p>
+        </div>
+
+        <div className="ld-quote-card">
+          {mode === "sim" && (
+            <Notice tone="sim" title="Simulation">This form saves to the simulation, not to the team&apos;s inbox. Nobody will reply.</Notice>
+          )}
+          {sentTo ? (
+            <div ref={doneRef} tabIndex={-1} className="ld-done" role="status">
+              <span className="ld-done-icon" aria-hidden="true"><Icon name="check" size={20} strokeWidth={2.4} /></span>
+              <h3 className="ld-done-h">Request sent</h3>
+              <p className="ld-done-p">Thanks. {mode === "sim" ? "It's in the simulated Requests list." : `We'll reply to ${sentTo}.`}</p>
+              <button type="button" className="sws-btn sws-btn-link" onClick={() => setSentTo(null)}>Send another request</button>
+            </div>
+          ) : (
+            <form ref={formRef} onSubmit={submit} noValidate className="ld-form">
+              <div className="ld-form-row">
+                <FormField id="q-name" label="Name" error={errors.name}>
+                  {(a) => <Input {...a} name="name" autoComplete="name" maxLength={LEAD_LIMITS.name} value={form.name} onChange={set("name")} />}
+                </FormField>
+                <FormField id="q-email" label="Email" error={errors.email}>
+                  {(a) => <Input {...a} name="email" type="email" inputMode="email" autoComplete="email" spellCheck={false} maxLength={LEAD_LIMITS.email} value={form.email} onChange={set("email")} />}
+                </FormField>
+              </div>
+              <div className="ld-form-row">
+                <FormField id="q-organization" label="Organization" optional error={errors.organization}>
+                  {(a) => <Input {...a} name="organization" autoComplete="organization" maxLength={LEAD_LIMITS.organization} value={form.organization} onChange={set("organization")} />}
+                </FormField>
+                <FormField id="q-facilityType" label="Facility type" error={errors.facilityType}>
+                  {(a) => (
+                    <Select {...a} name="facilityType" value={form.facilityType} onChange={set("facilityType")}>
+                      <option value="" disabled>Choose one</option>
+                      {FACILITIES.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
+                    </Select>
+                  )}
+                </FormField>
+              </div>
+              <FormField id="q-message" label="Message" optional hint={`${form.message.length} of ${LEAD_LIMITS.message} characters. How many spaces, how many lots, anything else useful.`} error={errors.message}>
+                {(a) => <textarea {...a} name="message" rows={5} maxLength={LEAD_LIMITS.message} className="sws-input ld-textarea" value={form.message} onChange={set("message")} />}
+              </FormField>
+
+              {/* Honeypot: hidden from people and screen readers, skipped by Tab. */}
+              <div className="ld-hp" aria-hidden="true">
+                <label htmlFor="q-website">Website</label>
+                <input id="q-website" name="website" type="text" tabIndex={-1} autoComplete="off" value={form.website} onChange={set("website")} />
+              </div>
+
+              {failed && <Notice tone="busy" role="alert">{failed}</Notice>}
+              <div className="ld-form-foot">
+                <Button type="submit" variant="primary" size="lg" busy={busy} disabled={busy}>{busy ? "Sending…" : "Send request"}</Button>
+                <span className="ld-form-note">We only use your details to reply to this request.</span>
+              </div>
+            </form>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function Landing() {
   const navigate = useNavigate();
 
@@ -236,6 +366,7 @@ function Landing() {
         <DemoLot />
         <WhatYouGet />
         <BuiltFor />
+        <QuoteForm />
       </main>
 
       <footer className="ld-foot">

@@ -1166,3 +1166,30 @@ button.lp-stall { background: none; border: 0; padding: 0; margin: 0; font: inhe
   .ld-built-row li:nth-child(odd) { border-left: none; }
   .ld-built-row li:nth-child(n+3) { border-top: 1px solid var(--line); }
 }
+
+/* Quote form */
+.ld-quote-in { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); gap: var(--sp-7); align-items: start; }
+.ld-quote-card { display: flex; flex-direction: column; gap: var(--sp-4); padding: 28px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); min-width: 0; }
+.ld-form { display: flex; flex-direction: column; gap: var(--sp-4); }
+.ld-form-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-4); }
+.ld-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.ld-optional { font-weight: 400; color: var(--dim); }
+.ld-textarea { height: auto; padding: 10px 12px; line-height: 1.5; resize: vertical; min-height: 112px; }
+.ld-err { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--busy-text); }
+.ld-err svg { flex-shrink: 0; }
+.ld-form-foot { display: flex; align-items: center; gap: var(--sp-4); flex-wrap: wrap; }
+.ld-form-note { font-size: 12.5px; color: var(--dim); }
+/* Off-screen rather than display:none, so naive bots still fill it in. */
+.ld-hp { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+.ld-done { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-2); padding: var(--sp-4) 0; }
+.ld-done:focus { outline: none; }
+.ld-done-icon { width: 40px; height: 40px; border-radius: 20px; display: inline-flex; align-items: center; justify-content: center; background: var(--brand-bg); color: var(--brand); margin-bottom: var(--sp-2); }
+.ld-done-h { margin: 0; font-family: var(--mono); font-size: 18px; font-weight: 600; }
+.ld-done-p { margin: 0; font-size: var(--fs-body); color: var(--nav-text); line-height: 1.6; }
+
+@media (max-width: 900px) {
+  .ld-quote-in { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .ld-quote-card { padding: 18px 16px; }
+  .ld-form-row { grid-template-columns: minmax(0, 1fr); }
+  .ld-form-foot .sws-btn { flex: 1 1 100%; }
+}
