@@ -11,7 +11,7 @@ import { PageHeader, Card, StatTile, Notice, EmptyState, Skeleton, LotMeter } fr
 function LotRow({ lot, stats }) {
   const flash = useFlash(stats.occupied);
   return (
-    <div className={`sws-hover${flash ? " sws-flash" : ""}`} style={{ border: `1px solid ${c.line}`, borderRadius: 5, padding: "11px 13px" }}>
+    <div className={`sws-lot-row sws-hover${flash ? " sws-flash" : ""}`} style={{ border: `1px solid ${c.line}`, borderRadius: 5, padding: "11px 13px" }}>
       <LotMeter name={lot.name} {...stats} />
     </div>
   );

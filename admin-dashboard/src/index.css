@@ -346,6 +346,11 @@ button.sws-th[data-active] { color: var(--accent); }
 
   .sws-page-head { padding: 12px 16px !important; }
   .sws-page-body { padding: 16px 16px 32px !important; }
+  .sws-card-head { padding: 12px 14px; }
+  .sws-card-body { padding: 14px; }
+  /* Lot rows drop their own box inside the card; a divider separates them instead. */
+  .sws-lot-row { border: none !important; border-radius: 0 !important; padding: 2px 0 !important; }
+  .sws-lot-row + .sws-lot-row { border-top: 1px solid var(--line) !important; padding-top: 12px !important; }
   /* One line on phones: badge, status, and the switch button; the sentence is dropped. */
   .sws-sim-banner { padding: 6px 16px !important; gap: 10px !important; flex-wrap: nowrap !important; }
   .sws-sim-text, .sws-sim-long { display: none; }
