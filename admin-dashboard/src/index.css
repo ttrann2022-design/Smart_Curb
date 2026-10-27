@@ -1,59 +1,10 @@
-/* ---------- Tokens (mirrored in src/theme.js for inline/SVG use) ---------- */
+/* ---------- Tokens ----------
+   Colours live in src/themes.css (one set per site theme); this file keeps type,
+   spacing, motion and layout. src/theme.js maps its c.* names onto the colour tokens. */
 :root {
-  --bg: #0F0F0D;
-  --side: #090908;
-  --panel: #171714;
-  --panel-2: #1A1A17;
-  --card: #1D1D19;
-  --line: #2B2B25;
-  --line-strong: #3A3A32;
-  --text: #F2F1EA;
-  --dim: #8E8C82;
-  --faint: #5F5E56;
-  --nav-text: #A5A399;
-  /* Older names, kept as aliases of the brand tokens below. */
-  --accent: var(--brand);
-  --on-accent: var(--brand-ink);
-  --accent-bg: var(--brand-bg);
-  --accent-line: var(--brand-line);
-  --open: #8BD44A;
-  --open-bg: #1C2612;
-  --open-text: #B4E86A;
-  --busy: #F2694C;
-  --busy-bg: #221410;
-  --busy-line: #4A2A20;
-  --busy-text: #FF8F74;
-  --warn: #E0A63C;
-  --warn-bg: #26200F;
-  --warn-line: #4A3A1C;
-  --warn-text: #FFC078;
-  --sim: #8FB4FF;
-  --sim-bg: #121A2B;
-  --sim-line: #2A3B5E;
   --mono: 'IBM Plex Mono', ui-monospace, monospace;
   --sans: 'Archivo', system-ui, sans-serif;
   --radius: 6px;
-
-  /* Brand: the accent for actions and identity: primary buttons, links, input focus,
-     the active nav item, badges, checkmarks, role highlights, avatars, active sort.
-     Change these to re-brand; curb status below is separate. */
-  --brand: #C6F24A;
-  --brand-ink: #0F0F0D;    /* text on --brand: 14.8:1 */
-  --brand-hover: #B3DE3A;  /* darker lime for hover: ink still 12.3:1 */
-  --brand-bg: #232B15;     /* lime-tinted surface for badges and the active nav item */
-  --brand-line: #3A4A1F;   /* lime-tinted hairline */
-
-  /* Curb status. --free is only for free-curb status (stalls and "free" counts).
-     It shares the brand's hue today but is its own token, so the two can diverge. */
-  --free: #C6F24A;
-  --occupied: #F2694C;
-  --attention: #E0A63C;
-  --offline: #34342D;
-  --offline-mark: var(--dim);
-  /* Links and the active nav item use the brand. */
-  --link: var(--brand);
-  --nav-active: var(--brand);
-  --nav-active-bg: var(--brand-bg);
 
   /* Type scale. Headings, IDs and numbers use --mono; body text uses --sans. */
   --fs-hero: clamp(96px, 10.5vw, 156px);
@@ -78,8 +29,6 @@
   --dur-slow: 450ms;
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
-
-  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -87,7 +36,7 @@ html, body, #root { margin: 0; padding: 0; height: 100%; }
 body { background: var(--bg); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
 button, input, select, textarea { font-family: inherit; }
 a, button { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
-::selection { background: rgba(242, 241, 234, 0.22); }
+::selection { background: var(--selection); }
 
 /* Visible keyboard focus everywhere, never on mouse click. */
 :focus { outline: none; }
@@ -168,8 +117,8 @@ a, button { touch-action: manipulation; -webkit-tap-highlight-color: transparent
 .sws-btn-danger:hover:not(:disabled) { background: var(--busy-bg); border-color: var(--busy); }
 .sws-btn-ghost { background: transparent; color: var(--dim); padding: 0 8px; }
 .sws-btn-ghost:hover:not(:disabled) { color: var(--text); background: var(--card); }
-.sws-btn-sim { background: var(--sim); color: #0B1220; }
-.sws-btn-sim:hover:not(:disabled) { background: #A9C6FF; }
+.sws-btn-sim { background: var(--sim); color: var(--sim-ink); }
+.sws-btn-sim:hover:not(:disabled) { background: var(--sim-hover); }
 .sws-btn-link { background: none; border: none; padding: 0; height: auto; color: var(--link); font-weight: 600; }
 .sws-btn-link:hover:not(:disabled) { text-decoration: underline; text-underline-offset: 3px; }
 
@@ -247,7 +196,7 @@ button.sws-th { background: none; border: none; padding: 0; cursor: pointer; dis
 button.sws-th:hover { color: var(--text); }
 button.sws-th[data-active] { color: var(--brand); }
 .sws-tbody .sws-trow { transition: background-color 0.12s; }
-.sws-tbody .sws-trow:hover { background: rgba(255, 255, 255, 0.022); }
+.sws-tbody .sws-trow:hover { background: var(--row-tint); }
 
 /* ---------- Skeleton loading ---------- */
 /* A slow opacity pulse (not a background sweep), so it stays on the compositor. */
@@ -285,8 +234,8 @@ button.sws-th[data-active] { color: var(--brand); }
 }
 
 @keyframes sws-flash {
-  0% { box-shadow: 0 0 0 0 rgba(198, 242, 74, 0.55); }
-  100% { box-shadow: 0 0 0 10px rgba(198, 242, 74, 0); }
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--brand) 55%, transparent); }
+  100% { box-shadow: 0 0 0 10px color-mix(in srgb, var(--brand) 0%, transparent); }
 }
 .sws-flash { animation: sws-flash 0.9s ease-out; }
 
@@ -306,7 +255,7 @@ button.sws-th[data-active] { color: var(--brand); }
 .sws-typing span:nth-child(3) { animation-delay: 0.3s; }
 
 .sws-hover { transition: transform 0.18s ease, border-color 0.18s ease; }
-.sws-hover:hover { transform: translateY(-1px); border-color: #45453B; }
+.sws-hover:hover { transform: translateY(-1px); border-color: var(--line-hover); }
 
 .sws-link { font-size: 12.5px; font-weight: 600; color: var(--link); text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
 .sws-link:hover { text-decoration-color: currentColor; }
@@ -319,7 +268,7 @@ button.sws-th[data-active] { color: var(--brand); }
   transition: background-color 0.15s, color 0.15s;
 }
 .sws-nav-link svg { flex-shrink: 0; opacity: 0.8; }
-.sws-nav-link:hover { background: rgba(255, 255, 255, 0.04); color: var(--text); }
+.sws-nav-link:hover { background: var(--hover-tint); color: var(--text); }
 .sws-nav-link.active { background: var(--nav-active-bg); color: var(--nav-active); font-weight: 600; }
 .sws-nav-link.active svg { opacity: 1; }
 .sws-nav-badge { margin-left: auto; height: 18px; padding: 0 6px; font-size: 9.5px; background: transparent; color: var(--faint); box-shadow: inset 0 0 0 1px var(--line); }
@@ -538,7 +487,7 @@ button.lp-stall { background: none; border: 0; padding: 0; margin: 0; font: inhe
   padding: var(--sp-3) var(--sp-3); border-radius: var(--radius); font-size: var(--fs-body);
 }
 .un-head { padding-top: var(--sp-2); padding-bottom: var(--sp-2); }
-.un-body .un-row:hover { background: rgba(242, 241, 234, 0.035); }
+.un-body .un-row:hover { background: var(--soft-tint); }
 .un-c { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .un-id { grid-area: id; display: flex; align-items: center; gap: 10px; }
 .un-id .sws-mono { font-weight: 600; }
@@ -672,7 +621,7 @@ button.lp-stall { background: none; border: 0; padding: 0; margin: 0; font: inhe
 .lt-table th, .lt-table td { padding: 8px clamp(4px, 1.2vw, 10px); text-align: right; white-space: nowrap; }
 .lt-table th:first-child { text-align: left; padding-left: 0; }
 .lt-table tbody th { font-weight: 600; }
-.lt-table tbody tr:hover { background: rgba(242, 241, 234, 0.035); }
+.lt-table tbody tr:hover { background: var(--soft-tint); }
 
 /* ---------- Users & roles ---------- */
 .ur-roles { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--sp-4); }
@@ -695,7 +644,7 @@ button.lp-stall { background: none; border: 0; padding: 0; margin: 0; font: inhe
 /* Ruleless lists, as on Curb units: spacing and a hover tint separate rows. */
 .ur-list { padding: 4px 6px 8px; }
 .ur-row { display: grid; align-items: center; gap: var(--sp-3); padding: 10px 12px; border-radius: var(--radius); min-height: 46px; font-size: var(--fs-body); }
-.ur-list-body .ur-row:hover { background: rgba(242, 241, 234, 0.035); }
+.ur-list-body .ur-row:hover { background: var(--soft-tint); }
 .ur-row.is-pending, .ur-list-body .ur-row.is-pending:hover { background: var(--warn-bg); }
 .ur-head { min-height: 0; padding-top: var(--sp-2); padding-bottom: var(--sp-1); }
 .ur-email { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

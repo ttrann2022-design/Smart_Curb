@@ -24,6 +24,8 @@ function brightnessOf(u) {
 }
 
 // What the curb's LED panel would show: zone colour, brightness and the panel text.
+// It draws the physical matrix (black panel, lit pixels), so its colours are
+// hardware colours and stay the same in every site theme.
 function LedPreview({ color, text, brightness = 100 }) {
   const hex = LED_HEX[color] || c.dim;
   const glow = 0.15 + 0.85 * (brightness / 100);

@@ -230,7 +230,7 @@ function Layout() {
         id="sws-sidebar"
         aria-label="Main"
         className={`sws-sidebar${menuOpen ? " open" : ""}`}
-        style={{ width: 240, flexShrink: 0, background: c.side, borderRight: `1px solid #16160F`, padding: "18px 12px 14px", display: "flex", flexDirection: "column" }}
+        style={{ width: 240, flexShrink: 0, background: c.side, borderRight: `1px solid ${c.sideLine}`, padding: "18px 12px 14px", display: "flex", flexDirection: "column" }}
       >
         <div style={{ padding: "0 4px 22px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
           <Brand />

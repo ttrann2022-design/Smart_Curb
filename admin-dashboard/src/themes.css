@@ -1,0 +1,81 @@
+/* ---------- Colour themes ----------
+   Every colour in the dashboard comes from these tokens (src/theme.js maps its
+   `c.*` names onto them for inline styles). scripts/check-contrast.mjs reads
+   this file, so keep each declaration on one line as `--name: #RRGGBB;`
+   (or rgba(...) for tints, which the check ignores). */
+
+/* Curb status: the same in every theme, and never the accent. A theme whose
+   surfaces can't carry them adjusts its surfaces, never these. */
+:root {
+  --free: #C6F24A;
+  --occupied: #F2694C;
+  --attention: #E0A63C;
+  --offline: #34342D;
+  --offline-mark: #8E8C82;
+}
+
+/* Lime: the default look. Also matches [data-theme="lime"] so a lime preview
+   card renders correctly inside any other theme. */
+:root, [data-theme="lime"] {
+  color-scheme: dark;
+  --bg: #0F0F0D;
+  --side: #090908;
+  --side-line: #16160F;
+  --panel: #171714;
+  --panel-2: #1A1A17;
+  --card: #1D1D19;
+  --line: #2B2B25;
+  --line-strong: #3A3A32;
+  --line-hover: #45453B;
+  --text: #F2F1EA;
+  --dim: #8E8C82;
+  --faint: #5F5E56;
+  --nav-text: #A5A399;
+
+  /* Brand: primary buttons, links, input focus, the active nav item, badges,
+     checkmarks, role highlights, avatars, active sort. */
+  --brand: #C6F24A;
+  --brand-ink: #0F0F0D;
+  --brand-hover: #B3DE3A;
+  --brand-bg: #232B15;
+  --brand-line: #3A4A1F;
+
+  /* Message tones (success, error, warning notices and text). Not curb status. */
+  --open: #8BD44A;
+  --open-bg: #1C2612;
+  --open-text: #B4E86A;
+  --busy: #F2694C;
+  --busy-bg: #221410;
+  --busy-line: #4A2A20;
+  --busy-text: #FF8F74;
+  --warn: #E0A63C;
+  --warn-bg: #26200F;
+  --warn-line: #4A3A1C;
+  --warn-text: #FFC078;
+
+  /* Simulation mode: its own hue, so it's never mistaken for live data or the accent. */
+  --sim: #8FB4FF;
+  --sim-bg: #121A2B;
+  --sim-line: #2A3B5E;
+  --sim-ink: #0B1220;
+  --sim-hover: #A9C6FF;
+  --sim-text: #C9D8F5;
+
+  /* Tints over surfaces (hover, selection). */
+  --hover-tint: rgba(255, 255, 255, 0.04);
+  --row-tint: rgba(255, 255, 255, 0.022);
+  --soft-tint: rgba(242, 241, 234, 0.035);
+  --selection: rgba(242, 241, 234, 0.22);
+}
+
+/* Aliases, recomputed on every themed element (not just inherited from :root),
+   so a preview card with its own data-theme gets its own accent. */
+:root, [data-theme] {
+  --accent: var(--brand);
+  --on-accent: var(--brand-ink);
+  --accent-bg: var(--brand-bg);
+  --accent-line: var(--brand-line);
+  --link: var(--brand);
+  --nav-active: var(--brand);
+  --nav-active-bg: var(--brand-bg);
+}

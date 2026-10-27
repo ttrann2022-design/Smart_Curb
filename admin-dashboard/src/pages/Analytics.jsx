@@ -3,7 +3,6 @@ import { useOutletContext } from "react-router-dom";
 import { ref, onValue, query, limitToLast } from "firebase/database";
 import { database } from "../firebase";
 import { dataPath } from "../dataMode";
-import { c } from "../theme";
 import { StallMark } from "../components/LotPlan";
 import LatencySection from "../components/LatencySection";
 import useWidth from "../useWidth";
@@ -17,12 +16,11 @@ const HOURS_LONG = ["7 AM", "8 AM", "9 AM", "10 AM", "11 AM", "12 PM", "1 PM", "
 // step that still clears the panel surface up to full --occupied. Five bins of 20
 // points; checked with the dataviz validator as a dark-mode ordinal ramp (one hue,
 // monotone lightness, visible steps, low end at 2.15:1 against the panel).
-const hexRgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+// Mixed in CSS from the fixed status colour and the theme's panel, so it follows the theme.
 const BIN_EDGES = [0, 20, 40, 60, 80];
 const RAMP = BIN_EDGES.map((_, i) => {
   const t = 0.45 + (i / (BIN_EDGES.length - 1)) * 0.55;
-  const [s, o] = [hexRgb(c.panel), hexRgb(c.busy)];
-  return `rgb(${s.map((v, k) => Math.round(v + (o[k] - v) * t)).join(",")})`;
+  return `color-mix(in srgb, var(--occupied) ${Math.round(t * 1000) / 10}%, var(--panel))`;
 });
 const heat = (v) => RAMP[Math.max(0, BIN_EDGES.findLastIndex((edge) => v >= edge))];
 
