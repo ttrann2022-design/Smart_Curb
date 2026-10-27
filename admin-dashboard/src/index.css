@@ -646,6 +646,34 @@ button.lp-stall { background: none; border: 0; padding: 0; margin: 0; font: inhe
   .an-facts dd { font-size: 22px; }
 }
 
+/* Transmission latency (Analytics). One panel per leg, small multiples rather than a
+   multi-series chart: the legs run at different scales, and lime, red, amber and grey
+   already mean something. Lines are off-white data ink; "Simulated" uses the sim blue. */
+.an-h2 .lt-sim { margin-left: var(--sp-2); vertical-align: 2px; }
+.lt-sim { background: var(--sim-bg); color: var(--sim); box-shadow: inset 0 0 0 1px var(--sim-line); }
+.lt-stack { display: flex; flex-direction: column; gap: var(--sp-4); margin-top: var(--sp-3); }
+.lt-legs { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: var(--sp-4); }
+.lt-leg { background: var(--panel); border-radius: var(--radius); padding: 16px 18px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.lt-leg-k { font-size: var(--fs-caption); font-weight: 600; letter-spacing: 0.6px; text-transform: uppercase; color: var(--faint); }
+.lt-leg-note { margin: 0; font-size: 12px; color: var(--dim); line-height: 1.45; }
+.lt-median { margin-top: var(--sp-1); font-size: 30px; font-weight: 600; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.lt-median small { font-size: 12px; font-weight: 500; color: var(--dim); }
+.lt-na, .lt-na .sws-mono { color: var(--faint); }
+.lt-stats { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-5); margin: 0; font-size: 12px; }
+.lt-stats dt { color: var(--dim); }
+.lt-stats dd { margin: 2px 0 0; font-size: var(--fs-body); font-weight: 600; font-variant-numeric: tabular-nums; }
+.lt-chart { position: relative; margin-top: var(--sp-2); min-width: 0; }
+.lt-line { fill: none; stroke: var(--text); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.lt-dot { fill: var(--text); stroke: var(--panel); stroke-width: 2; }
+.lt-units { display: flex; flex-direction: column; gap: var(--sp-3); margin-top: 0; }
+.lt-units-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; }
+.lt-h3 { font-family: var(--mono); font-size: var(--fs-body); font-weight: 600; margin: 0; }
+.lt-table { border-collapse: collapse; width: 100%; font-size: var(--fs-body); font-variant-numeric: tabular-nums; }
+.lt-table th, .lt-table td { padding: 8px clamp(4px, 1.2vw, 10px); text-align: right; white-space: nowrap; }
+.lt-table th:first-child { text-align: left; padding-left: 0; }
+.lt-table tbody th { font-weight: 600; }
+.lt-table tbody tr:hover { background: rgba(242, 241, 234, 0.035); }
+
 /* ---------- Users & roles ---------- */
 .ur-roles { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--sp-4); }
 .ur-role { background: var(--panel); border-radius: var(--radius); padding: 18px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }

@@ -1,10 +1,12 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import { ref, onValue, query, limitToLast } from "firebase/database";
 import { database } from "../firebase";
 import { dataPath } from "../dataMode";
 import { c } from "../theme";
 import { StallMark } from "../components/LotPlan";
+import LatencySection from "../components/LatencySection";
+import useWidth from "../useWidth";
 import { PageHeader, EmptyState, Button } from "../components/ui";
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -25,20 +27,6 @@ const RAMP = BIN_EDGES.map((_, i) => {
 const heat = (v) => RAMP[Math.max(0, BIN_EDGES.findLastIndex((edge) => v >= edge))];
 
 const avgOf = (arr) => (arr.length ? arr.reduce((s, v) => s + v, 0) / arr.length : 0);
-
-// Width of an element in CSS pixels, so charts draw at real size and their text stays readable.
-function useWidth() {
-  const el = useRef(null);
-  const [width, setWidth] = useState(0);
-  useLayoutEffect(() => {
-    const node = el.current;
-    if (!node) return undefined;
-    const ro = new ResizeObserver(([entry]) => setWidth(Math.round(entry.contentRect.width)));
-    ro.observe(node);
-    return () => ro.disconnect();
-  }, []);
-  return [el, width];
-}
 
 function Heatmap({ week }) {
   const [hover, setHover] = useState(null);
@@ -282,6 +270,9 @@ function Analytics() {
             </section>
           </>
         )}
+
+        {/* Shown whether or not there is occupancy history. */}
+        <LatencySection mode={mode} delay={180} />
       </div>
     </>
   );

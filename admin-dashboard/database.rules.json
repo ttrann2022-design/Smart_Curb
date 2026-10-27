@@ -134,6 +134,15 @@
       ".read": "auth != null && root.child('users').child(auth.uid).exists()"
     },
 
+    // Transmission latency samples, latency/<unitId>/<sampleId> with optional
+    // eventAgeMs, rxToWriteMs and lastUpdated. Staff read them on Analytics.
+    // No client writes: there is no .write here, and the root denies writes.
+    // The Receiver writes with the legacy database secret, which bypasses these
+    // rules. Simulated samples live under demo/latency (see "demo" below).
+    "latency": {
+      ".read": "auth != null && root.child('users').child(auth.uid).exists()"
+    },
+
     // Driver-app accounts: each driver reads and writes only their own data.
     "drivers": {
       "$uid": {
