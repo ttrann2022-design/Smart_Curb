@@ -44,7 +44,7 @@ export function Card({ title, subtitle, meta, actions, children, body = true, cl
   );
 }
 
-export function StatTile({ label, value, sub, color, animate = true, title }) {
+export function StatTile({ label, value, sub, subColor, color, animate = true, title }) {
   const flash = useFlash(value);
   return (
     <div className={`sws-tile-stat${animate && flash ? " sws-flash" : ""}`} title={title}>
@@ -53,7 +53,7 @@ export function StatTile({ label, value, sub, color, animate = true, title }) {
         <span className="sws-tile-value" style={{ color: color || c.text }}>
           {animate && typeof value === "number" ? <AnimatedNumber value={value} /> : value}
         </span>
-        {sub && <span className="sws-tile-sub">{sub}</span>}
+        {sub && <span className="sws-tile-sub" style={subColor ? { color: subColor } : undefined}>{sub}</span>}
       </div>
     </div>
   );
@@ -75,7 +75,7 @@ export function LotMeter({ name, occupied, total, offline = 0 }) {
         {name && <span style={{ fontSize: 13.5, fontWeight: 600 }}>{name}</span>}
         <span style={{ fontSize: 12, color: c.dim, whiteSpace: "nowrap", marginLeft: name ? "auto" : 0 }}>
           <span className="sws-mono" style={{ color: tone, fontWeight: 600 }}><AnimatedNumber value={occupied} /></span> of {total} occupied
-          {offline > 0 && <> · {offline} offline</>}
+          {offline > 0 && <> · <span style={{ color: c.warn }}>{offline} offline</span></>}
         </span>
       </div>
       <div

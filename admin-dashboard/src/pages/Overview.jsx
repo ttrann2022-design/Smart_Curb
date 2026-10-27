@@ -82,7 +82,7 @@ function Overview() {
         ) : (
           <>
             <div className="sws-enter sws-tiles">
-              <StatTile label="Spots monitored" value={total} sub={offline ? `${offline} offline` : "all reporting"} />
+              <StatTile label="Spots monitored" value={total} sub={offline ? `${offline} offline` : "all reporting"} subColor={offline ? c.warn : undefined} />
               <StatTile label="Available now" value={open} sub={`${pct(open)}%`} color={c.open} title="Share of curbs that are reporting" />
               <StatTile label="Occupied" value={occupied} sub={`${pct(occupied)}%`} color={c.busy} title="Share of curbs that are reporting" />
               <StatTile label="Needs attention" value={alerts.length} sub={`of ${total} units`} color={alerts.length ? c.warn : c.text} />
