@@ -229,7 +229,7 @@ select.sws-input {
 .sws-th { font-size: 11px; font-weight: 700; letter-spacing: 0.7px; color: var(--dim); text-transform: uppercase; white-space: nowrap; }
 button.sws-th { background: none; border: none; padding: 0; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; text-align: left; }
 button.sws-th:hover { color: var(--text); }
-button.sws-th[data-active] { color: var(--accent); }
+button.sws-th[data-active] { color: var(--text); }
 .sws-tbody .sws-trow { transition: background-color 0.12s; }
 .sws-tbody .sws-trow:hover { background: rgba(255, 255, 255, 0.022); }
 
@@ -507,6 +507,54 @@ button.lp-stall { background: none; border: 0; padding: 0; margin: 0; font: inhe
   .lp { --lp-pad: 14px; }
   .lp.is-compact { --lp-pad: 10px; }
   .lp.is-roomy .lp-plan { padding: 18px 20px 14px; }
+}
+
+/* ---------- Curb units list ---------- */
+/* A table without rules: spacing separates rows, a swatch leads each one.
+   Below 860px of its own width it becomes three-line rows. */
+.un-wrap { container-type: inline-size; }
+.un-meta { font-size: var(--fs-caption); font-weight: 600; letter-spacing: 0.6px; text-transform: uppercase; color: var(--faint); margin: 0 0 var(--sp-2); }
+.un-row {
+  display: grid; align-items: center; column-gap: var(--sp-4);
+  grid-template-columns: minmax(110px, 0.8fr) minmax(110px, 1fr) 110px 150px 130px 120px minmax(110px, 1fr);
+  grid-template-areas: "id lot status batt ago led text";
+  padding: var(--sp-3) var(--sp-3); border-radius: var(--radius); font-size: var(--fs-body);
+}
+.un-head { padding-top: var(--sp-2); padding-bottom: var(--sp-2); }
+.un-body .un-row:hover { background: rgba(242, 241, 234, 0.035); }
+.un-c { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.un-id { grid-area: id; display: flex; align-items: center; gap: 10px; }
+.un-id .sws-mono { font-weight: 600; }
+.un-lot { grid-area: lot; }
+.un-status { grid-area: status; }
+.un-batt { grid-area: batt; display: flex; align-items: center; gap: var(--sp-2); }
+.un-ago { grid-area: ago; }
+.un-led { grid-area: led; display: flex; align-items: center; gap: 7px; }
+.un-text { grid-area: text; }
+.un-dim { color: var(--dim); }
+.un-warn { color: var(--attention); }
+.un-bar { width: 56px; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; flex-shrink: 0; }
+.un-bar > span { display: block; height: 100%; background: var(--nav-text); }
+.un-bar.is-low > span { background: var(--attention); }
+.un-led-dot { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+.un-led-dot.is-unknown { border: 1px dashed var(--dim); }
+
+@container (max-width: 860px) {
+  .un-row {
+    grid-template-columns: minmax(0, 1fr) auto auto; row-gap: 6px;
+    grid-template-areas: "id id status" "lot ago batt" "led text text";
+    padding: var(--sp-3) var(--sp-2);
+  }
+  /* Header: just the sort buttons, in a wrapping row. */
+  .un-head { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); padding: 0 var(--sp-2) var(--sp-2); }
+  .un-head > :not([aria-sort]) { display: none; }
+  .un-status, .un-batt { justify-self: end; }
+  .un-ago { justify-self: end; }
+  .un-text { justify-self: end; text-align: right; }
+  .un-lot, .un-ago, .un-led, .un-text { font-size: 12px; }
+  .un-lot, .un-ago { color: var(--dim); }
+  /* "LED not set" / "No text" add nothing in a compact row; real values still show. */
+  .un-row .is-unset { display: none; }
 }
 
 /* ---------- Responsive ---------- */

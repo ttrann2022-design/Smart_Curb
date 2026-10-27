@@ -110,23 +110,6 @@ export function Chips({ options, value, onChange, label }) {
   );
 }
 
-const STATUS_TONE = {
-  open: { color: c.open, label: "Open" },
-  occupied: { color: c.busy, label: "Occupied" },
-  offline: { color: c.faint, label: "Offline" },
-  stale: { color: c.warn, label: "No recent report" },
-};
-
-export function StatusPill({ status, label }) {
-  const tone = STATUS_TONE[status] || STATUS_TONE.offline;
-  return (
-    <span className="sws-pill">
-      <span className="sws-dot" style={{ background: tone.color, boxShadow: status === "offline" ? `inset 0 0 0 1.5px ${c.dim}` : "none" }} />
-      <span style={{ color: status === "offline" ? c.dim : c.text }}>{label || tone.label}</span>
-    </span>
-  );
-}
-
 const NOTICE_ICON = { busy: "alert", warn: "alert", ok: "check", sim: "info", info: "info" };
 
 export function Notice({ tone = "info", title, children, icon, role }) {
