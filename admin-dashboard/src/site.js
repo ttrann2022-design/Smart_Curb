@@ -118,13 +118,15 @@ export function enabledModules(site) {
 }
 
 // Live site settings for the current data mode. Pass the mode so the
-// subscription moves with it. error: the database refused the read.
+// subscription moves with it; until the new mode's value arrives, loaded is
+// false rather than showing the other mode's settings. error: the database refused the read.
 export function useSiteConfig(mode) {
-  const [state, setState] = useState({ loaded: false, site: null, error: false });
+  const [state, setState] = useState({ mode: null, site: null, error: false });
   useEffect(() => onValue(
     ref(database, dataPath(SITE_PATH)),
-    (s) => setState({ loaded: true, site: s.val(), error: false }),
-    () => setState({ loaded: true, site: null, error: true }),
+    (s) => setState({ mode, site: s.val(), error: false }),
+    () => setState({ mode, site: null, error: true }),
   ), [mode]);
-  return state;
+  const loaded = state.mode === mode;
+  return { loaded, site: loaded ? state.site : null, error: loaded && state.error };
 }

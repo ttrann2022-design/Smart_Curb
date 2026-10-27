@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Navigate, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { ref, get, set, update, remove, onValue, serverTimestamp } from "firebase/database";
 import { auth, database, emailKey } from "../firebase";
@@ -170,8 +170,25 @@ function Layout() {
     );
   }
 
+  // First run: managers go through Setup until it's finished. Viewers and operators
+  // never see it. If the database refuses the read (older published rules), don't block.
+  const isManager = role === "manager";
+  const onSetup = location.pathname === "/setup";
+  if (isManager && !siteConfig.loaded) {
+    return (
+      <FullScreen>
+        <span className="sws-spinner" style={{ color: c.brand, width: 20, height: 20 }} aria-hidden="true" />
+        <div role="status" style={{ fontSize: 13, color: c.dim }}>Loading site settings…</div>
+      </FullScreen>
+    );
+  }
+  if (isManager && !siteConfig.error && siteConfig.site?.setupComplete !== true && !onSetup) {
+    return <Navigate to="/setup" replace />;
+  }
+  if (onSetup && !isManager) return <Navigate to="/overview" replace />;
+
   // Setup gets its own bare screen: no sidebar, just the brand and a way out.
-  if (location.pathname === "/setup") {
+  if (onSetup) {
     return (
       <div className="su-shell">
         <a href="#main" className="sws-skip">Skip to content</a>
