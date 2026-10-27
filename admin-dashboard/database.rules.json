@@ -91,6 +91,31 @@
       }
     },
 
+    // Quote requests from the website. Anyone, even signed out, can CREATE one
+    // fully valid lead at a new key. Only managers read them, change status or
+    // delete. Nobody can overwrite a lead or edit its fields after it's created.
+    "leads": {
+      ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'manager'",
+      "$leadId": {
+        // Create: only where nothing exists yet. Delete: managers only.
+        // Status changes go through the status rule below.
+        ".write": "(!data.exists() && newData.exists()) || (data.exists() && !newData.exists() && auth != null && root.child('users').child(auth.uid).child('role').val() === 'manager')",
+        ".validate": "newData.hasChildren(['name', 'email', 'facilityType', 'status', 'createdAt'])",
+        "name": { ".validate": "!data.exists() && newData.isString() && newData.val().length >= 1 && newData.val().length <= 80" },
+        "email": { ".validate": "!data.exists() && newData.isString() && newData.val().length < 120 && newData.val().matches(/^[^@ ]+@[^@ ]+[.][^@ ]+$/)" },
+        "organization": { ".validate": "!data.exists() && newData.isString() && newData.val().length < 120" },
+        "facilityType": { ".validate": "!data.exists() && newData.isString() && newData.val().matches(/^(university|stadium|airport|hospital|shopping|city)$/)" },
+        "message": { ".validate": "!data.exists() && newData.isString() && newData.val().length < 1000" },
+        "createdAt": { ".validate": "!data.exists() && newData.isNumber() && newData.val() === now" },
+        "status": {
+          ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'manager' && data.exists()",
+          // A new lead starts as "new"; managers then move it between the three.
+          ".validate": "newData.isString() && (data.exists() ? newData.val().matches(/^(new|contacted|closed)$/) : newData.val() === 'new')"
+        },
+        "$other": { ".validate": false }
+      }
+    },
+
     // Public read: the lot entrance sign runs signed-out on a TV.
     "lots": {
       ".read": true
