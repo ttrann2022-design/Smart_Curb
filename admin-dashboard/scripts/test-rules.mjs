@@ -60,6 +60,14 @@ const SITE = {
   modules: { permitTiers: true, semesterCalendar: true, eventMode: false },
   setupComplete: true,
 };
+// The REST equivalent of serverTimestamp().
+const SERVER_TIME = { ".sv": "timestamp" };
+// What the website form sends for a new quote request.
+const LEAD = {
+  name: "Priya Raman", email: "priya@example.com", organization: "Westbrook University",
+  facilityType: "university", message: "Two lots to start.", status: "new", createdAt: SERVER_TIME,
+};
+const LEAD_SAVED = { ...LEAD, createdAt: 1760000000000 };
 
 async function seed() {
   const res = await call("PUT", "", OWNER, {
@@ -77,6 +85,7 @@ async function seed() {
     lots: { lot14: { name: "Lot 14" }, lot06: { name: "Lot 6" } },
     latency: { "C-001": { s1: SAMPLE } },
     config: { site: SITE },
+    leads: { lead1: LEAD_SAVED },
   });
   assert.ok(res.ok, `seeding failed: ${res.status}`);
 }
@@ -318,6 +327,133 @@ test("setupComplete can't turn true before the site has a name and facility type
   denied(await patchSite("manager", { setupComplete: true }));
   allowed(await patchSite("manager", { facilityType: "city" }));
   allowed(await patchSite("manager", { setupComplete: true }));
+});
+
+// ---------- Quote requests (leads) ----------
+
+const ALL = ["manager", "operator", "viewer", "driver", "signedOut"];
+const createLead = (who, lead, id = "new1") => call("PUT", `leads/${id}`, AS[who], lead);
+const savedLead = async (id) => (await call("GET", `leads/${id}`, OWNER)).body;
+
+test("anyone, even signed out, can create a valid lead", async () => {
+  for (const [i, who] of ALL.entries()) allowed(await createLead(who, LEAD, `new${i}`));
+  const lead = await savedLead("new4");
+  assert.equal(lead.status, "new");
+  assert.equal(typeof lead.createdAt, "number");
+});
+
+test("organization and message are optional", async () => {
+  const minimal = { ...LEAD };
+  delete minimal.organization;
+  delete minimal.message;
+  allowed(await createLead("signedOut", minimal));
+});
+
+test("a lead's name must be 1 to 80 characters", async () => {
+  denied(await createLead("signedOut", { ...LEAD, name: "" }, "a"));
+  allowed(await createLead("signedOut", { ...LEAD, name: "x".repeat(80) }, "b"));
+  denied(await createLead("signedOut", { ...LEAD, name: "x".repeat(81) }, "c"));
+  denied(await createLead("signedOut", { ...LEAD, name: 42 }, "d"));
+});
+
+test("a lead's email must look like an email and be under 120 characters", async () => {
+  for (const email of ["not an email", "a@b", "@example.com", "a b@example.com", 7]) {
+    denied(await createLead("signedOut", { ...LEAD, email }));
+  }
+  const local = "x".repeat(107); // 107 + "@example.com" = 119
+  allowed(await createLead("signedOut", { ...LEAD, email: `${local}@example.com` }, "ok119"));
+  denied(await createLead("signedOut", { ...LEAD, email: `${local}x@example.com` }, "no120"));
+});
+
+test("organization must be under 120 and message under 1000 characters", async () => {
+  allowed(await createLead("signedOut", { ...LEAD, organization: "o".repeat(119) }, "a"));
+  denied(await createLead("signedOut", { ...LEAD, organization: "o".repeat(120) }, "b"));
+  allowed(await createLead("signedOut", { ...LEAD, message: "m".repeat(999) }, "c"));
+  denied(await createLead("signedOut", { ...LEAD, message: "m".repeat(1000) }, "d"));
+  denied(await createLead("signedOut", { ...LEAD, message: 5 }, "e"));
+});
+
+test("facilityType must be one of the presets", async () => {
+  for (const facilityType of ["university", "stadium", "airport", "hospital", "shopping", "city"]) {
+    allowed(await createLead("signedOut", { ...LEAD, facilityType }, `ft-${facilityType}`));
+  }
+  denied(await createLead("signedOut", { ...LEAD, facilityType: "casino" }));
+  denied(await createLead("signedOut", { ...LEAD, facilityType: "University" }));
+});
+
+test("a new lead's status must be \"new\"", async () => {
+  denied(await createLead("signedOut", { ...LEAD, status: "contacted" }, "a"));
+  denied(await createLead("signedOut", { ...LEAD, status: "closed" }, "b"));
+  denied(await createLead("manager", { ...LEAD, status: "closed" }, "c"));
+});
+
+test("createdAt must be the server timestamp", async () => {
+  denied(await createLead("signedOut", { ...LEAD, createdAt: 1760000000000 }, "a"));
+  denied(await createLead("signedOut", { ...LEAD, createdAt: Date.now() + 86400000 }, "b"));
+  denied(await createLead("signedOut", { ...LEAD, createdAt: "now" }, "c"));
+});
+
+test("required fields can't be left out and extra fields are rejected", async () => {
+  for (const field of ["name", "email", "facilityType", "status", "createdAt"]) {
+    const lead = { ...LEAD };
+    delete lead[field];
+    denied(await createLead("signedOut", lead, `missing-${field}`));
+  }
+  denied(await createLead("signedOut", { ...LEAD, phone: "555 0100" }));
+  denied(await createLead("signedOut", { ...LEAD, status: "new", priority: "high" }));
+  // A lone field at a new key isn't a lead.
+  denied(await call("PUT", "leads/lone/status", AS.signedOut, "new"));
+});
+
+test("a lead can't be overwritten, even by a manager", async () => {
+  for (const who of ALL) {
+    denied(await createLead(who, LEAD, "lead1"));
+    denied(await call("PATCH", "leads/lead1", AS[who], { name: "Changed", message: "Changed" }));
+    denied(await call("PUT", "leads/lead1/email", AS[who], "changed@example.com"));
+  }
+  denied(await call("PUT", "leads", AS.manager, { lead1: LEAD }));
+  assert.deepEqual(await savedLead("lead1"), LEAD_SAVED);
+});
+
+test("only managers can read leads", async () => {
+  const r = await call("GET", "leads", AS.manager);
+  allowed(r);
+  assert.deepEqual(r.body.lead1, LEAD_SAVED);
+  allowed(await call("GET", "leads/lead1", AS.manager));
+  for (const who of ["operator", "viewer", "driver", "signedOut"]) {
+    denied(await call("GET", "leads", AS[who]));
+    denied(await call("GET", "leads/lead1", AS[who]));
+    denied(await call("GET", "leads/lead1/email", AS[who]));
+  }
+});
+
+test("managers move a lead between new, contacted and closed", async () => {
+  for (const status of ["contacted", "closed", "new"]) {
+    allowed(await call("PATCH", "leads/lead1", AS.manager, { status }));
+    assert.equal((await savedLead("lead1")).status, status);
+  }
+  denied(await call("PATCH", "leads/lead1", AS.manager, { status: "archived" }));
+  denied(await call("DELETE", "leads/lead1/status", AS.manager));
+  denied(await call("PATCH", "leads/lead1", AS.manager, { status: "closed", name: "Changed" }));
+  denied(await call("PATCH", "leads/ghost", AS.manager, { status: "contacted" }));
+});
+
+test("only managers can change a lead's status", async () => {
+  for (const who of ["operator", "viewer", "driver", "signedOut"]) {
+    denied(await call("PATCH", "leads/lead1", AS[who], { status: "closed" }));
+    denied(await call("PUT", "leads/lead1/status", AS[who], "contacted"));
+  }
+  assert.equal((await savedLead("lead1")).status, "new");
+});
+
+test("only managers can delete a lead", async () => {
+  for (const who of ["operator", "viewer", "driver", "signedOut"]) {
+    denied(await call("DELETE", "leads/lead1", AS[who]));
+  }
+  assert.ok(await savedLead("lead1"));
+  allowed(await call("DELETE", "leads/lead1", AS.manager));
+  assert.equal(await savedLead("lead1"), null);
+  denied(await call("DELETE", "leads", AS.manager));
 });
 
 // ---------- Simulation area ----------

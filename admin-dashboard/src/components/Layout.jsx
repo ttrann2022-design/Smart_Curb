@@ -7,6 +7,7 @@ import { c, mono } from "../theme";
 import logo from "../assets/smartcurb-logo.jpg";
 import { DEMO_BUILD, useDataMode } from "../dataMode";
 import { MODULES, enabledModules, useSiteConfig } from "../site";
+import { useLeads } from "../leads";
 import { stopSimulation, watchSimulation } from "../demo/simulator";
 import DataModeSwitch from "./DataModeSwitch";
 import SimBanner from "./SimBanner";
@@ -20,6 +21,7 @@ const navItems = [
   { label: "Assistant", to: "/assistant", icon: "assistant" },
   { label: "Analytics", to: "/analytics", icon: "analytics" },
   { label: "Users & roles", to: "/users", icon: "users" },
+  { label: "Requests", to: "/requests", icon: "inbox", managerOnly: true },
   { label: "Simulation", to: "/simulation", icon: "simulation", simOnly: true },
   { label: "Settings", to: "/settings", icon: "settings" },
 ];
@@ -69,6 +71,9 @@ function Layout() {
   useEffect(() => (mode === "sim" ? watchSimulation(setSim) : undefined), [mode]);
   const simActive = !!(sim.running || sim.elsewhere);
   const siteConfig = useSiteConfig(mode);
+  // Quote requests: managers only (the database refuses everyone else).
+  const leadsState = useLeads(mode, role === "manager");
+  const newLeads = leadsState.leads.filter((l) => l.status === "new").length;
 
   useEffect(() => {
     let stopRole = () => {};
@@ -203,7 +208,7 @@ function Layout() {
         </header>
         {mode === "sim" && <SimBanner />}
         <main id="main" tabIndex={-1} className="su-main">
-          <Outlet key={mode} context={{ role, mode, siteConfig }} />
+          <Outlet key={mode} context={{ role, mode, siteConfig, leadsState }} />
         </main>
       </div>
     );
@@ -235,7 +240,7 @@ function Layout() {
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 2, flexGrow: 1 }}>
-          {navItems.filter((item) => !item.simOnly || mode === "sim").map((item) => (
+          {navItems.filter((item) => (!item.simOnly || mode === "sim") && (!item.managerOnly || role === "manager")).map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
@@ -247,6 +252,12 @@ function Layout() {
               {item.simOnly && (
                 <span className={`sws-badge sws-nav-badge${simActive ? " on" : ""}`} title={simActive ? "Simulation is running" : "Simulation is stopped"}>
                   {simActive ? "ON" : "OFF"}
+                </span>
+              )}
+              {item.to === "/requests" && newLeads > 0 && (
+                // Keyed by count so it pops when a new request arrives.
+                <span key={newLeads} className="sws-badge sws-nav-badge is-count sws-pop">
+                  {newLeads}<span className="sws-sr-only"> new</span>
                 </span>
               )}
             </NavLink>
@@ -324,7 +335,7 @@ function Layout() {
         <main id="main" tabIndex={-1} className="sws-main" style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
           {/* Keyed by path so each route fades in (.sws-route); query changes don't refade. */}
           <div key={location.pathname} className="sws-route">
-            <Outlet key={mode} context={{ role, mode, siteConfig }} />
+            <Outlet key={mode} context={{ role, mode, siteConfig, leadsState }} />
           </div>
         </main>
       </div>
