@@ -1142,3 +1142,12 @@ button.lp-stall { background: none; border: 0; padding: 0; margin: 0; font: inhe
   .ld-form-row { grid-template-columns: minmax(0, 1fr); }
   .ld-form-foot .sws-btn { flex: 1 1 100%; }
 }
+
+/* ---------- Theme change ---------- */
+/* Switching site theme: the new colours apply at once and the page fades in
+   briefly (opacity only, on the root). No fade with reduced motion. */
+@keyframes sws-theme-in { from { opacity: 0.55; } }
+html.sws-theme-fade #root { animation: sws-theme-in var(--dur-base) var(--ease-out); }
+@media (prefers-reduced-motion: reduce) {
+  html.sws-theme-fade #root { animation: none; }
+}

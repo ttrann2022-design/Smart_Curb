@@ -6,6 +6,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Smart Wheel Stop · Admin</title>
     <meta name="theme-color" content="#0F0F0D" />
+    <script>
+      // Apply the last site theme before first paint, so a themed dashboard doesn't
+      // flash the default first. Staff pages only: the landing page, sign-in and the
+      // lot sign always use the default. Layout reconciles with the database value.
+      // Keep the key and theme list in step with src/themes.js.
+      (function () {
+        try {
+          if (!/^\/(overview|lots|units|assistant|analytics|users|requests|simulation|demo|settings|setup|modules)(\/|$)/.test(location.pathname)) return;
+          var t = localStorage.getItem("sws-theme");
+          if (/^(lime|paper|midnight|ember|mint|violet)$/.test(t)) document.documentElement.setAttribute("data-theme", t);
+        } catch (e) { /* storage blocked: the default look until the database answers */ }
+      })();
+    </script>
     <meta name="description" content="Smart Wheel Stop admin console: live parking curb status, LED control, and analytics." />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
