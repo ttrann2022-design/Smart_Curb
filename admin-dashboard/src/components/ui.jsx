@@ -59,6 +59,36 @@ export function StatTile({ label, value, sub, color, animate = true, title }) {
   );
 }
 
+// How full a lot is, as a colour. The lot label and its bar both use it.
+function fullnessTone(pct) {
+  return pct >= 90 ? c.busy : pct >= 70 ? c.warn : c.open;
+}
+
+// "N of M occupied" over a bar showing the same share. Offline curbs count
+// toward M but are never occupied.
+export function LotMeter({ name, occupied, total, offline = 0 }) {
+  const pct = total ? Math.round((occupied / total) * 100) : 0;
+  const tone = fullnessTone(pct);
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "4px 12px", flexWrap: "wrap", marginBottom: 8 }}>
+        {name && <span style={{ fontSize: 13.5, fontWeight: 600 }}>{name}</span>}
+        <span style={{ fontSize: 12, color: c.dim, whiteSpace: "nowrap", marginLeft: name ? "auto" : 0 }}>
+          <span className="sws-mono" style={{ color: tone, fontWeight: 600 }}><AnimatedNumber value={occupied} /></span> of {total} occupied
+          {offline > 0 && <> · {offline} offline</>}
+        </span>
+      </div>
+      <div
+        role="meter" aria-valuemin={0} aria-valuemax={total} aria-valuenow={occupied}
+        aria-valuetext={`${occupied} of ${total} occupied`} aria-label={name ? `${name} occupancy` : "Lot occupancy"}
+        style={{ height: 6, borderRadius: 3, background: c.line, overflow: "hidden" }}
+      >
+        <div style={{ width: `${pct}%`, height: 6, background: tone, transition: "width 0.6s ease, background-color 0.6s ease" }} />
+      </div>
+    </div>
+  );
+}
+
 export function Button({ variant = "secondary", size, block, icon, iconRight, busy, children, className = "", type = "button", ...props }) {
   const cls = ["sws-btn", `sws-btn-${variant}`, size && `sws-btn-${size}`, block && "sws-btn-block", className].filter(Boolean).join(" ");
   return (

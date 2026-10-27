@@ -6,7 +6,7 @@ import { dataPath, getDataMode } from "../dataMode";
 import { c, mono, LED_HEX, LED_COLORS } from "../theme";
 import { useFlash } from "../motion";
 import { useNow, batteryText, cleanText, formatAgo, formatExact, statusKey } from "../units";
-import { PageHeader, Card, Chips, Button, Field, Input, StatusPill, EmptyState, Notice, StatusText } from "../components/ui";
+import { PageHeader, Card, Chips, Button, Field, Input, StatusPill, EmptyState, Notice, StatusText, LotMeter } from "../components/ui";
 
 const BRIGHTNESS_DEBOUNCE_MS = 300;
 
@@ -217,17 +217,19 @@ function LotDetail() {
           <div className="sws-stack" style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
             <Card
               title="Curb units"
-              meta={lotUnits.length ? `${lotCounts.open} open · ${lotCounts.occupied} occupied${lotCounts.offline ? ` · ${lotCounts.offline} offline` : ""}` : null}
               delay={60}
               style={{ flex: 1 }}
             >
               {lotUnits.length === 0 ? (
                 <EmptyState icon="units" title="No curbs in this lot">Curbs appear here once they're registered to this lot.</EmptyState>
               ) : (
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(96px, 1fr))", gap: 8 }}>
-                  {lotUnits.map(([id, u]) => (
-                    <CurbTile key={id} id={id} unit={u} selected={id === selectedUnit} onPick={() => pickUnit(id)} />
-                  ))}
+                <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                  <LotMeter occupied={lotCounts.occupied} total={lotUnits.length} offline={lotCounts.offline} />
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(96px, 1fr))", gap: 8 }}>
+                    {lotUnits.map(([id, u]) => (
+                      <CurbTile key={id} id={id} unit={u} selected={id === selectedUnit} onPick={() => pickUnit(id)} />
+                    ))}
+                  </div>
                 </div>
               )}
             </Card>

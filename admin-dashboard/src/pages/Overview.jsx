@@ -4,29 +4,15 @@ import { ref, onValue } from "firebase/database";
 import { database } from "../firebase";
 import { dataPath } from "../dataMode";
 import { c } from "../theme";
-import AnimatedNumber from "../components/AnimatedNumber";
 import { useFlash } from "../motion";
 import { useAlertSettings, useNow, unitIssues, formatAgo } from "../units";
-import { PageHeader, Card, StatTile, Notice, EmptyState, Skeleton } from "../components/ui";
+import { PageHeader, Card, StatTile, Notice, EmptyState, Skeleton, LotMeter } from "../components/ui";
 
 function LotRow({ lot, stats }) {
-  const fill = stats.total ? Math.round(((stats.total - stats.open) / stats.total) * 100) : 0;
-  const tone = fill >= 90 ? c.busy : fill >= 70 ? c.warn : c.open;
-  const flash = useFlash(stats.open);
+  const flash = useFlash(stats.occupied);
   return (
     <div className={`sws-hover${flash ? " sws-flash" : ""}`} style={{ border: `1px solid ${c.line}`, borderRadius: 5, padding: "11px 13px" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
-        <span style={{ fontSize: 13.5, fontWeight: 600 }}>{lot.name}</span>
-        <span style={{ fontSize: 12, color: c.dim, whiteSpace: "nowrap" }}>
-          <span className="sws-mono" style={{ color: c.text }}><AnimatedNumber value={stats.open} /></span> of {stats.total} open
-        </span>
-      </div>
-      <div
-        role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={fill} aria-label={`${lot.name} ${fill}% full`}
-        style={{ height: 6, borderRadius: 3, background: c.line, overflow: "hidden" }}
-      >
-        <div style={{ width: `${fill}%`, height: 6, background: tone, transition: "width 0.6s ease, background-color 0.6s ease" }} />
-      </div>
+      <LotMeter name={lot.name} {...stats} />
     </div>
   );
 }
@@ -59,13 +45,14 @@ function Overview() {
 
   const unitList = Object.values(units);
   const stats = {};
-  Object.keys(lots).forEach((id) => { stats[id] = { total: 0, open: 0 }; });
+  Object.keys(lots).forEach((id) => { stats[id] = { total: 0, occupied: 0, offline: 0 }; });
   // Curbs whose lot doesn't match any lot ID still count, under "Unassigned".
-  const unassigned = { total: 0, open: 0 };
+  const unassigned = { total: 0, occupied: 0, offline: 0 };
   unitList.forEach((u) => {
     const s = stats[u.lot] || unassigned;
     s.total += 1;
-    if (u.online && !u.occupied) s.open += 1;
+    if (!u.online) s.offline += 1;
+    else if (u.occupied) s.occupied += 1;
   });
 
   const total = unitList.length;
@@ -108,7 +95,7 @@ function Overview() {
                 ) : (
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     {Object.entries(lots).map(([id, lot]) => (
-                      <LotRow key={id} lot={lot} stats={stats[id] || { total: 0, open: 0 }} />
+                      <LotRow key={id} lot={lot} stats={stats[id] || { total: 0, occupied: 0, offline: 0 }} />
                     ))}
                     {unassigned.total > 0 && (
                       <LotRow lot={{ name: "Unassigned curbs" }} stats={unassigned} />
