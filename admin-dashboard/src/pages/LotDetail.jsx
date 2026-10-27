@@ -4,9 +4,9 @@ import { ref, onValue, update } from "firebase/database";
 import { database } from "../firebase";
 import { dataPath, getDataMode } from "../dataMode";
 import { c, mono, LED_HEX, LED_COLORS } from "../theme";
-import { useFlash } from "../motion";
-import { useNow, batteryText, cleanText, formatAgo, formatExact, statusKey } from "../units";
-import { PageHeader, Card, Chips, Button, Field, Input, StatusPill, EmptyState, Notice, StatusText, LotMeter } from "../components/ui";
+import { useAlertSettings, useNow, batteryText, cleanText, formatAgo, formatExact, statusKey, STALL_WORD } from "../units";
+import LotPlan, { StallMark } from "../components/LotPlan";
+import { PageHeader, Card, Chips, Button, Field, Input, EmptyState, Notice, StatusText } from "../components/ui";
 
 const BRIGHTNESS_DEBOUNCE_MS = 300;
 
@@ -14,34 +14,6 @@ const BRIGHTNESS_DEBOUNCE_MS = 300;
 function brightnessOf(u) {
   const v = u?.ledBrightness;
   return typeof v === "number" && Number.isFinite(v) ? Math.min(100, Math.max(0, Math.round(v))) : 100;
-}
-
-function unitTone(u) {
-  if (!u.online) return { bg: "#1F1F1B", border: "#3A3A32", text: c.dim };
-  if (u.occupied) return { bg: "#2A1713", border: c.busy, text: c.busyText };
-  return { bg: c.openBg, border: c.open, text: c.openText };
-}
-
-function CurbTile({ id, unit, selected, onPick }) {
-  const tone = unitTone(unit);
-  const status = statusKey(unit);
-  const flash = useFlash(status);
-  return (
-    <button
-      type="button"
-      onClick={onPick}
-      aria-pressed={selected}
-      aria-label={`Curb ${id}, ${status}`}
-      className={`sws-tile${flash ? " sws-flash" : ""}`}
-      style={{
-        height: 56, borderRadius: 5, cursor: "pointer", fontFamily: mono, fontSize: 12, fontWeight: 600,
-        background: tone.bg, color: tone.text, border: `1px solid ${tone.border}`,
-        boxShadow: selected ? `0 0 0 2px ${c.bg}, 0 0 0 4px ${c.accent}` : "none",
-      }}
-    >
-      {id}
-    </button>
-  );
 }
 
 // What the curb's LED panel would show: zone colour, brightness and the panel text.
@@ -57,16 +29,15 @@ function LedPreview({ color, text, brightness = 100 }) {
         background: "radial-gradient(circle, rgba(255,255,255,0.05) 1px, transparent 1.4px) 0 0 / 5px 5px, #070706",
         border: `1px solid ${c.lineStrong}`,
         display: "flex", alignItems: "center", justifyContent: "center",
-        transition: "box-shadow 0.3s",
         boxShadow: `inset 0 -3px 0 ${hex}`,
       }}
     >
-      <span aria-hidden="true" style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 6, background: hex, boxShadow: `0 0 14px ${hex}`, opacity: glow, transition: "background-color 0.3s" }} />
-      <span aria-hidden="true" style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 6, background: hex, boxShadow: `0 0 14px ${hex}`, opacity: glow, transition: "background-color 0.3s" }} />
+      <span aria-hidden="true" style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 6, background: hex, boxShadow: `0 0 14px ${hex}`, opacity: glow, transition: "opacity var(--dur-base) var(--ease-out)" }} />
+      <span aria-hidden="true" style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 6, background: hex, boxShadow: `0 0 14px ${hex}`, opacity: glow, transition: "opacity var(--dur-base) var(--ease-out)" }} />
       <span style={{
         fontFamily: mono, fontWeight: 700, fontSize: text && text.length > 12 ? 15 : 19, letterSpacing: 2,
         color: text ? "#FFF6D8" : c.faint, textShadow: text ? `0 0 6px ${hex}, 0 0 14px ${hex}` : "none",
-        padding: "0 18px", whiteSpace: "nowrap", overflow: "hidden", opacity: text ? glow : 1,
+        padding: "0 18px", whiteSpace: "nowrap", overflow: "hidden", opacity: text ? glow : 1, transition: "opacity var(--dur-base) var(--ease-out)",
       }}>
         {text || "NO TEXT"}
       </span>
@@ -76,7 +47,7 @@ function LedPreview({ color, text, brightness = 100 }) {
 
 function InfoRow({ label, value, title }) {
   return (
-    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 12.5 }}>
+    <div style={{ display: "flex", justifyContent: "space-between", gap: "var(--sp-3)", fontSize: "var(--fs-body)" }}>
       <dt style={{ color: c.dim }}>{label}</dt>
       <dd title={title} style={{ fontWeight: 600, margin: 0, textAlign: "right" }}>{value}</dd>
     </div>
@@ -97,8 +68,10 @@ function LotDetail() {
   // { timer, id, path, value, sim }: the path is fixed when the change is made, so a
   // write that lands after switching mode or curb still goes where it was meant to.
   const pendingBrightness = useRef(null);
+  const panelRef = useRef(null);
   const { role, mode } = useOutletContext();
   const now = useNow();
+  const alertSettings = useAlertSettings();
   const canEdit = role === "operator" || role === "manager";
   // ?lot=<id> (e.g. from an Overview lot row) picks the lot on arrival.
   const [params, setParams] = useSearchParams();
@@ -124,10 +97,6 @@ function LotDetail() {
   const savedBrightness = brightnessOf(unit);
   const brightness = brightnessDraft ?? savedBrightness;
   const dirty = !!unit && (ledColor !== savedColor || panelText.trim() !== savedText);
-  const lotCounts = lotUnits.reduce((s, [, u]) => {
-    s[statusKey(u)] += 1;
-    return s;
-  }, { open: 0, occupied: 0, offline: 0 });
 
   // Brightness writes on its own (not through Apply), once the slider settles:
   // on release, or BRIGHTNESS_DEBOUNCE_MS after the last arrow key.
@@ -187,6 +156,27 @@ function LotDetail() {
     setStatus(null);
   };
 
+  // Picking a curb in the plan. Under 900px the curb panel stacks below the plan,
+  // so bring it into view (instantly when reduced motion is on). The next frame
+  // runs after React has rendered the new curb's panel.
+  const selectCurb = (id) => {
+    pickUnit(id);
+    if (!window.matchMedia("(max-width: 900px)").matches) return;
+    const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+    requestAnimationFrame(() => panelRef.current?.scrollIntoView({ behavior, block: "start" }));
+  };
+
+  // Zone colour is a radio group: arrow keys move the choice, like native radios.
+  const onZoneKey = (e) => {
+    const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+    if (!step) return;
+    e.preventDefault();
+    const i = (LED_COLORS.indexOf(ledColor) + step + LED_COLORS.length) % LED_COLORS.length;
+    setLedColor(LED_COLORS[i]);
+    setStatus(null);
+    e.currentTarget.querySelectorAll("[role=radio]")[i]?.focus();
+  };
+
   const applyChanges = async () => {
     if (!selectedUnit || !canEdit || !dirty) return;
     setSaving(true);
@@ -219,36 +209,41 @@ function LotDetail() {
         </div>
 
         {selectedLot && (
-          <div className="sws-stack" style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
-            <Card
-              title="Curb units"
-              delay={60}
-              style={{ flex: 1 }}
-            >
-              {lotUnits.length === 0 ? (
+          <div className="sws-stack" style={{ display: "flex", gap: "var(--sp-7)", alignItems: "flex-start" }}>
+            {lotUnits.length === 0 ? (
+              <Card delay={60} style={{ flex: "0 1 560px" }}>
                 <EmptyState icon="units" title="No curbs in this lot">Curbs appear here once they're registered to this lot.</EmptyState>
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                  <LotMeter occupied={lotCounts.occupied} total={lotUnits.length} offline={lotCounts.offline} />
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(96px, 1fr))", gap: 8 }}>
-                    {lotUnits.map(([id, u]) => (
-                      <CurbTile key={id} id={id} unit={u} selected={id === selectedUnit} onPick={() => pickUnit(id)} />
-                    ))}
-                  </div>
-                </div>
-              )}
-            </Card>
+              </Card>
+            ) : (
+              <div style={{ flex: "0 1 560px", minWidth: 0 }}>
+                {/* 560px fits a 14-stall row, so the curb panel sits right beside the plan.
+                    Keyed by lot so a newly picked lot enters like on the Overview. */}
+                <LotPlan
+                  key={selectedLot}
+                  name={lots[selectedLot]?.name || selectedLot}
+                  units={lotUnits}
+                  alerts={alertSettings}
+                  now={now}
+                  selected={selectedUnit}
+                  onSelect={selectCurb}
+                />
+              </div>
+            )}
 
             <Card delay={120} style={{ width: 340, flexShrink: 0 }}>
               {!unit ? (
                 <EmptyState icon="units" title="No curb selected">Select a curb to see its status and control its LED panel.</EmptyState>
               ) : (
-                <div key={selectedUnit} className="sws-enter" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-                    <h2 style={{ fontFamily: mono, fontSize: 17, fontWeight: 600, margin: 0 }}>Curb {selectedUnit}</h2>
-                    <StatusPill status={statusKey(unit)} />
+                // scroll-margin clears the sticky top bar and Simulation banner on phones.
+                <div ref={panelRef} key={selectedUnit} className="sws-enter" style={{ display: "flex", flexDirection: "column", gap: "var(--sp-4)", scrollMarginTop: 120 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "var(--sp-3)" }}>
+                    <h2 style={{ fontFamily: mono, fontSize: 17, fontWeight: 600, margin: 0 }}>Curb <span translate="no">{selectedUnit}</span></h2>
+                    <span className="sws-pill">
+                      <StallMark status={statusKey(unit)} swatch />
+                      {STALL_WORD[statusKey(unit)]}
+                    </span>
                   </div>
-                  <dl style={{ display: "flex", flexDirection: "column", gap: 8, margin: 0 }}>
+                  <dl style={{ display: "flex", flexDirection: "column", gap: "var(--sp-2)", margin: 0 }}>
                     <InfoRow label="Online" value={unit.online ? "Yes" : "No"} />
                     <InfoRow label="Battery" value={batteryText(unit)} />
                     <InfoRow label="Last change" value={formatAgo(unit.lastUpdated, now) || "—"} title={formatExact(unit.lastUpdated)} />
@@ -270,13 +265,14 @@ function LotDetail() {
                     <fieldset disabled={!canEdit} style={{ border: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 12, minWidth: 0 }}>
                       <div className="sws-field">
                         <span className="sws-field-label" id="zone-colour">Zone colour</span>
-                        <div role="radiogroup" aria-labelledby="zone-colour" style={{ display: "flex", gap: 8 }}>
+                        <div role="radiogroup" aria-labelledby="zone-colour" onKeyDown={onZoneKey} style={{ display: "flex", gap: "var(--sp-2)" }}>
                           {LED_COLORS.map((name) => (
                             <button
                               key={name}
                               type="button"
                               role="radio"
                               aria-checked={ledColor === name}
+                              tabIndex={ledColor === name ? 0 : -1}
                               aria-label={name}
                               title={name}
                               onClick={() => { setLedColor(name); setStatus(null); }}
@@ -284,8 +280,7 @@ function LotDetail() {
                                 flex: 1, height: 38, borderRadius: 5, background: LED_HEX[name],
                                 cursor: canEdit ? "pointer" : "not-allowed", opacity: canEdit || ledColor === name ? 1 : 0.35,
                                 border: `1px solid ${c.line}`,
-                                boxShadow: ledColor === name ? `0 0 0 2px ${c.panel}, 0 0 0 4px ${c.accent}` : "none",
-                                transition: "box-shadow 0.15s",
+                                boxShadow: ledColor === name ? `0 0 0 2px ${c.panel}, 0 0 0 4px ${c.text}` : "none",
                               }}
                             />
                           ))}

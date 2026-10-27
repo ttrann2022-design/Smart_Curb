@@ -56,7 +56,7 @@ function Signup() {
 
   return (
     <AuthShell>
-      <form onSubmit={handleSignUp} className="sws-auth-form" style={{ width: 380, display: "flex", flexDirection: "column", gap: 16 }} noValidate>
+      <form onSubmit={handleSignUp} className="sws-auth-form sws-enter" style={{ width: 380, display: "flex", flexDirection: "column", gap: "var(--sp-4)" }} noValidate>
         <div>
           <h2 style={{ fontFamily: mono, fontSize: 24, margin: "0 0 6px" }}>Create your account</h2>
           <div style={{ fontSize: 13.5, color: c.dim, lineHeight: 1.5 }}>
@@ -80,9 +80,9 @@ function Signup() {
           {busy ? "Creating account…" : "Create account"}
         </Button>
 
-        <div style={{ fontSize: 13, color: c.dim, textAlign: "center", marginTop: 4 }}>
+        <div style={{ fontSize: "var(--fs-body)", color: c.dim, textAlign: "center", marginTop: "var(--sp-1)" }}>
           Already have an account?{" "}
-          <Link to="/" style={{ color: c.accent, fontWeight: 600, textDecoration: "none" }}>Sign in</Link>
+          <Link to="/" className="sws-btn sws-btn-link" style={{ fontSize: "var(--fs-body)" }}>Sign in</Link>
         </div>
       </form>
     </AuthShell>

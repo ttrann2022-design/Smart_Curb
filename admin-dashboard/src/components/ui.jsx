@@ -22,9 +22,10 @@ export function PageHeader({ title, subtitle, live, actions }) {
   );
 }
 
-export function Card({ title, subtitle, meta, actions, children, body = true, className = "", style, delay, as: Tag = "section" }) {
+// plain: the panel surface without a border or header rule.
+export function Card({ title, subtitle, meta, actions, children, body = true, plain, className = "", style, delay, as: Tag = "section" }) {
   return (
-    <Tag className={`sws-card${delay !== undefined ? " sws-enter" : ""} ${className}`} style={{ ...(delay !== undefined ? { "--d": `${delay}ms` } : null), ...style }}>
+    <Tag className={`sws-card${plain ? " is-plain" : ""}${delay !== undefined ? " sws-enter" : ""} ${className}`} style={{ ...(delay !== undefined ? { "--d": `${delay}ms` } : null), ...style }}>
       {(title || actions || meta) && (
         <div className="sws-card-head">
           <div style={{ minWidth: 0 }}>
@@ -54,36 +55,6 @@ export function StatTile({ label, value, sub, subColor, color, animate = true, t
           {animate && typeof value === "number" ? <AnimatedNumber value={value} /> : value}
         </span>
         {sub && <span className="sws-tile-sub" style={subColor ? { color: subColor } : undefined}>{sub}</span>}
-      </div>
-    </div>
-  );
-}
-
-// How full a lot is, as a colour. The lot label and its bar both use it.
-function fullnessTone(pct) {
-  return pct >= 90 ? c.busy : pct >= 70 ? c.warn : c.open;
-}
-
-// "N of M occupied" over a bar showing the same share. Offline curbs count
-// toward M but are never occupied.
-export function LotMeter({ name, occupied, total, offline = 0 }) {
-  const pct = total ? Math.round((occupied / total) * 100) : 0;
-  const tone = fullnessTone(pct);
-  return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "4px 12px", flexWrap: "wrap", marginBottom: 8 }}>
-        {name && <span className="sws-meter-name">{name}</span>}
-        <span style={{ fontSize: 12, color: c.dim, whiteSpace: "nowrap", marginLeft: name ? "auto" : 0 }}>
-          <span className="sws-mono" style={{ color: tone, fontWeight: 600 }}><AnimatedNumber value={occupied} /></span> of {total} occupied
-          {offline > 0 && <> · <span style={{ color: c.warn }}>{offline} offline</span></>}
-        </span>
-      </div>
-      <div
-        role="meter" aria-valuemin={0} aria-valuemax={total} aria-valuenow={occupied}
-        aria-valuetext={`${occupied} of ${total} occupied`} aria-label={name ? `${name} occupancy` : "Lot occupancy"}
-        style={{ height: 6, borderRadius: 3, background: c.line, overflow: "hidden" }}
-      >
-        <div style={{ width: `${pct}%`, height: 6, background: tone, transition: "width 0.6s ease, background-color 0.6s ease" }} />
       </div>
     </div>
   );
@@ -137,23 +108,6 @@ export function Chips({ options, value, onChange, label }) {
         </button>
       ))}
     </div>
-  );
-}
-
-const STATUS_TONE = {
-  open: { color: c.open, label: "Open" },
-  occupied: { color: c.busy, label: "Occupied" },
-  offline: { color: c.faint, label: "Offline" },
-  stale: { color: c.warn, label: "No recent report" },
-};
-
-export function StatusPill({ status, label }) {
-  const tone = STATUS_TONE[status] || STATUS_TONE.offline;
-  return (
-    <span className="sws-pill">
-      <span className="sws-dot" style={{ background: tone.color, boxShadow: status === "offline" ? `inset 0 0 0 1.5px ${c.dim}` : "none" }} />
-      <span style={{ color: status === "offline" ? c.dim : c.text }}>{label || tone.label}</span>
-    </span>
   );
 }
 

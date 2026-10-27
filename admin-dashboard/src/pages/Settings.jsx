@@ -42,12 +42,12 @@ function PasswordForm() {
   };
 
   return (
-    <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+    <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: "var(--sp-3)" }}>
       <input type="text" autoComplete="username" value={auth.currentUser?.email || ""} readOnly hidden />
       <Field label="Current password">
         <Input type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} />
       </Field>
-      <div className="sws-form-row" style={{ display: "flex", gap: 12 }}>
+      <div className="sws-form-row" style={{ display: "flex", gap: "var(--sp-3)" }}>
         <Field label="New password" hint="At least 6 characters." style={{ flex: 1 }}>
           <Input type="password" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} />
         </Field>
@@ -105,9 +105,9 @@ function AlertsForm({ saved, canEdit }) {
           </div>
         </Field>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: 14, borderRadius: 6, border: `1px solid ${c.line}`, background: c.bg }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-3)", padding: 14, borderRadius: "var(--radius)", background: c.bg }}>
           <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: canEdit ? "pointer" : "default" }}>
-            <input type="checkbox" checked={staleEnabled} onChange={(e) => setStaleEnabled(e.target.checked)} style={{ width: 16, height: 16, accentColor: c.accent, margin: 0 }} />
+            <input type="checkbox" checked={staleEnabled} onChange={(e) => setStaleEnabled(e.target.checked)} style={{ width: 16, height: 16, accentColor: c.text, margin: 0 }} />
             <span style={{ fontSize: 13.5, fontWeight: 600 }}>Flag curbs that stop reporting</span>
             <span className="sws-badge" style={{ marginLeft: "auto", background: staleEnabled ? c.warnBg : c.card, color: staleEnabled ? c.warn : c.dim }}>{staleEnabled ? "ON" : "OFF"}</span>
           </label>
@@ -153,10 +153,10 @@ function Settings() {
       <PageHeader title="Settings" subtitle="Your account, where data comes from, and when to raise alerts" />
 
       <div className="sws-page-body sws-narrow">
-        <Card title="Account" delay={0}>
+        <Card plain title="Account" delay={0}>
           <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
-              <div aria-hidden="true" style={{ width: 42, height: 42, borderRadius: 21, background: c.navBg, color: c.accent, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: mono, fontWeight: 600, fontSize: 16 }}>
+              <div aria-hidden="true" style={{ width: 42, height: 42, borderRadius: 21, background: c.brandBg, color: c.brand, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: mono, fontWeight: 600, fontSize: 16 }}>
                 {(user?.email || "?")[0].toUpperCase()}
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -165,8 +165,8 @@ function Settings() {
               </div>
               <Button icon="logout" onClick={handleSignOut}>Sign out</Button>
             </div>
-            <div style={{ borderTop: `1px solid ${c.line}`, paddingTop: 16, display: "flex", flexDirection: "column", gap: 12 }}>
-              <h3 style={{ fontSize: 13.5, fontWeight: 600, margin: 0 }}>Change password</h3>
+            <div style={{ paddingTop: "var(--sp-2)", display: "flex", flexDirection: "column", gap: "var(--sp-3)" }}>
+              <h3 style={{ fontFamily: mono, fontSize: "var(--fs-body)", fontWeight: 600, margin: 0 }}>Change password</h3>
               <PasswordForm />
             </div>
           </div>
@@ -174,13 +174,14 @@ function Settings() {
 
         {DEMO_BUILD ? (
           // The demo build is locked to simulated data, so there's no switch to explain.
-          <Card title="Data source" delay={60}>
+          <Card plain title="Data source" delay={60}>
             <Notice tone="sim" title="Demo site: simulated data only">
               This site never shows or changes real curbs.
             </Notice>
           </Card>
         ) : (
           <Card
+            plain
             title="Data source"
             delay={60}
             subtitle="Live shows the real curbs, including C-095 from the hardware Receiver. Simulation shows a separate set of simulated curbs for demos and testing. Switching only changes what this browser shows; it never moves or changes any data."
@@ -191,7 +192,7 @@ function Settings() {
           </Card>
         )}
 
-        <Card title="Alert thresholds" delay={120} subtitle="Shared by everyone. These decide what shows up under Needs attention and Active alerts.">
+        <Card plain title="Alert thresholds" delay={120} subtitle="Shared by everyone. These decide what shows up under Needs attention and Active alerts.">
           <AlertsForm key={JSON.stringify(alerts)} saved={alerts} canEdit={role === "manager"} />
         </Card>
       </div>

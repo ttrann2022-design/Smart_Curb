@@ -147,7 +147,7 @@ function Layout() {
   if (phase === "checking") {
     return (
       <FullScreen>
-        <span className="sws-spinner" style={{ color: c.accent, width: 20, height: 20 }} aria-hidden="true" />
+        <span className="sws-spinner" style={{ color: c.brand, width: 20, height: 20 }} aria-hidden="true" />
         <div role="status" style={{ fontSize: 13, color: c.dim }}>Signing you in…</div>
       </FullScreen>
     );
@@ -230,12 +230,12 @@ function Layout() {
           </a>
 
           <div style={{ padding: "10px 12px", borderRadius: 6, background: c.card, display: "flex", alignItems: "center", gap: 10 }}>
-            <div aria-hidden="true" style={{ width: 30, height: 30, borderRadius: 15, background: c.panel2, color: c.text, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: mono, fontWeight: 600, fontSize: 13, flexShrink: 0 }}>
+            <div aria-hidden="true" style={{ width: 30, height: 30, borderRadius: 15, background: c.brandBg, color: c.brand, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: mono, fontWeight: 600, fontSize: 13, flexShrink: 0 }}>
               {(userEmail || "?")[0].toUpperCase()}
             </div>
             <div style={{ minWidth: 0, flex: 1 }}>
               <div title={userEmail} style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{userEmail}</div>
-              <div style={{ fontFamily: mono, fontSize: 10, fontWeight: 600, letterSpacing: 0.8, color: c.dim, marginTop: 2 }}>{role.toUpperCase()}</div>
+              <div style={{ fontFamily: mono, fontSize: 10, fontWeight: 600, letterSpacing: 0.8, color: c.brand, marginTop: 2 }}>{role.toUpperCase()}</div>
             </div>
             <button type="button" onClick={handleSignOut} aria-label="Sign out" title="Sign out" className="sws-btn sws-btn-ghost sws-btn-sm" style={{ padding: "0 7px" }}>
               <Icon name="logout" size={16} />

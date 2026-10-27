@@ -70,7 +70,7 @@ function Login() {
 
   return (
     <AuthShell>
-      <form onSubmit={handleSignIn} className="sws-auth-form" style={{ width: 380, display: "flex", flexDirection: "column", gap: 16 }} noValidate>
+      <form onSubmit={handleSignIn} className="sws-auth-form sws-enter" style={{ width: 380, display: "flex", flexDirection: "column", gap: "var(--sp-4)" }} noValidate>
         <div>
           <h2 style={{ fontFamily: mono, fontSize: 24, margin: "0 0 6px" }}>Sign in</h2>
           <div style={{ fontSize: 13.5, color: c.dim }}>Use the work email your manager invited.</div>
@@ -90,7 +90,7 @@ function Login() {
         </Field>
 
         <div style={{ display: "flex", justifyContent: "flex-end", marginTop: -6 }}>
-          <button type="button" onClick={handleReset} className="sws-btn sws-btn-link" style={{ fontSize: 13 }}>
+          <button type="button" onClick={handleReset} className="sws-btn sws-btn-link" style={{ fontSize: "var(--fs-body)" }}>
             Forgot password?
           </button>
         </div>
@@ -99,9 +99,9 @@ function Login() {
           {busy ? "Signing in…" : "Sign in"}
         </Button>
 
-        <div style={{ fontSize: 13, color: c.dim, textAlign: "center", marginTop: 4 }}>
+        <div style={{ fontSize: "var(--fs-body)", color: c.dim, textAlign: "center", marginTop: "var(--sp-1)" }}>
           Been invited?{" "}
-          <Link to="/signup" style={{ color: c.accent, fontWeight: 600, textDecoration: "none" }}>Create your account</Link>
+          <Link to="/signup" className="sws-btn sws-btn-link" style={{ fontSize: "var(--fs-body)" }}>Create your account</Link>
         </div>
       </form>
     </AuthShell>
