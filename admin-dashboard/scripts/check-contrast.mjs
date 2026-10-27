@@ -8,6 +8,7 @@
 //   - curb status colours on every surface they're drawn on: 3:1 as graphics,
 //     4.5:1 where used as text (free counts, attention text)
 //   - message tones (success, error, warning) and Simulation colours (4.5:1)
+//   - small labels listed in LABELS, using the colour their rule in index.css sets (4.5:1)
 // Status colours are fixed on :root and may not be overridden by any theme. A theme
 // whose own surfaces can't carry them (Paper) declares dark "status insets" with
 // [data-theme="x"] :is(...), and the status checks run against those instead.
@@ -16,6 +17,15 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { THEME_IDS } from "../src/themes.js";
 
 const CSS = new URL("../src/themes.css", import.meta.url);
+const APP_CSS = new URL("../src/index.css", import.meta.url);
+// Small labels that once used --faint and fell below 4.5:1. Their colour is read
+// from index.css, so swapping one back to a fainter token fails the check.
+// inset: the label sits inside a Paper status inset, so it's checked on those tokens.
+const LABELS = [
+  { selector: ".sws-nav-badge", name: "nav badge", surfaces: ["--side", "--bg"] },
+  { selector: ".lp-readout-k", name: "lot plan Last change", surfaces: ["--bg", "--panel", "--panel-2", "--card"], inset: true },
+  { selector: ".un-meta", name: "units count", surfaces: ["--bg", "--panel", "--panel-2", "--card"], inset: true },
+];
 const STATUS = ["--free", "--occupied", "--attention", "--offline", "--offline-mark"];
 const SURFACES = ["--bg", "--side", "--panel", "--panel-2", "--card"];
 const DATA_SURFACES = ["--bg", "--panel", "--panel-2", "--card"];
@@ -45,7 +55,7 @@ export function contrast(a, b) {
 }
 
 // Every check for one theme: [group, fgToken, bgToken, minimum, tokens to read from].
-function checksFor(theme, tokens, inset) {
+function checksFor(theme, tokens, inset, labels = []) {
   const out = [];
   const add = (group, fg, bgs, min, t = tokens) => bgs.forEach((bg) => out.push({ group, fg, bg, min, t }));
 
@@ -81,12 +91,27 @@ function checksFor(theme, tokens, inset) {
   add("Simulation", "--sim-text", ["--sim-bg"], 4.5);
   add("Simulation", "--sim-ink", ["--sim", "--sim-hover"], 4.5);
 
+  for (const l of labels) add("Labels", l.token, l.surfaces, 4.5, l.inset && inset ? inset : tokens);
+
   return out.map((c) => ({ ...c, theme, ratio: contrast(c.t[c.fg], c.t[c.bg]) }));
 }
 
-export function checkContrast(css = readFileSync(CSS, "utf8")) {
+// The colour token each label's base rule uses in index.css.
+function labelTokens(appCss, problems) {
+  appCss = appCss.replace(/\/\*[\s\S]*?\*\//g, "");
+  return LABELS.flatMap((l) => {
+    const esc = l.selector.replace(/[.-]/g, "\\$&");
+    const rule = new RegExp(`(?:^|\\n)\\s*${esc}\\s*\\{([^}]*)\\}`).exec(appCss);
+    const token = rule && /(?:^|;)\s*color:\s*var\((--[\w-]+)\)/.exec(rule[1])?.[1];
+    if (!token) { problems.push(`index.css has no "${l.selector} { color: var(--…) }" rule for the ${l.name}.`); return []; }
+    return [{ ...l, token }];
+  });
+}
+
+export function checkContrast(css = readFileSync(CSS, "utf8"), appCss = readFileSync(APP_CSS, "utf8")) {
   const blocks = parse(css);
   const problems = [];
+  const labels = labelTokens(appCss, problems);
   const fixed = Object.assign({}, ...blocks.filter((b) => b.selector === ":root").map((b) => b.tokens));
   const lime = blocks.find((b) => b.selector.split(",").map((s) => s.trim()).includes('[data-theme="lime"]'));
   if (!lime) problems.push("themes.css has no lime block.");
@@ -104,7 +129,7 @@ export function checkContrast(css = readFileSync(CSS, "utf8")) {
     const tokens = { ...fixed, ...lime.tokens, ...own.tokens };
     const insetBlock = blocks.find((b) => b.selector.startsWith(`[data-theme="${theme}"] :is(`));
     const inset = insetBlock ? { ...tokens, ...insetBlock.tokens } : null;
-    results.push(...checksFor(theme, tokens, inset));
+    results.push(...checksFor(theme, tokens, inset, labels));
   }
   const failures = results.filter((r) => r.ratio < r.min);
   return { results, failures, problems };

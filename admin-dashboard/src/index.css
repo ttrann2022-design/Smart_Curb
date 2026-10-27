@@ -271,7 +271,7 @@ button.sws-th[data-active] { color: var(--brand); }
 .sws-nav-link:hover { background: var(--hover-tint); color: var(--text); }
 .sws-nav-link.active { background: var(--nav-active-bg); color: var(--nav-active); font-weight: 600; }
 .sws-nav-link.active svg { opacity: 1; }
-.sws-nav-badge { margin-left: auto; height: 18px; padding: 0 6px; font-size: 9.5px; background: transparent; color: var(--faint); box-shadow: inset 0 0 0 1px var(--line); }
+.sws-nav-badge { margin-left: auto; height: 18px; padding: 0 6px; font-size: 9.5px; background: transparent; color: var(--dim); box-shadow: inset 0 0 0 1px var(--line); }
 .sws-nav-link.active .sws-nav-badge { color: var(--brand); box-shadow: inset 0 0 0 1px var(--brand-line); }
 .sws-nav-badge.on { background: var(--sim-bg) !important; color: var(--sim) !important; box-shadow: inset 0 0 0 1px var(--sim-line) !important; }
 .sws-seg:hover:not([aria-checked="true"]) { color: var(--text) !important; }
@@ -327,7 +327,7 @@ a.lp-name:hover { text-decoration: underline; text-underline-offset: 4px; }
 
 .lp-readout { margin-top: 10px; min-height: 18px; display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-3); font-size: 12px; color: var(--dim); }
 .lp-readout .sws-mono { color: var(--text); font-weight: 600; }
-.lp-readout-k { font-size: 10.5px; font-weight: 600; letter-spacing: 0.6px; text-transform: uppercase; color: var(--faint); }
+.lp-readout-k { font-size: 10.5px; font-weight: 600; letter-spacing: 0.6px; text-transform: uppercase; color: var(--dim); }
 
 /* Curb block. Each status has its own fill layer; changing status crossfades
    their opacity, so colour eases without animating anything but opacity. */
@@ -479,7 +479,7 @@ button.lp-stall { background: none; border: 0; padding: 0; margin: 0; font: inhe
 /* A table without rules: spacing separates rows, a swatch leads each one.
    Below 860px of its own width it becomes three-line rows. */
 .un-wrap { container-type: inline-size; }
-.un-meta { font-size: var(--fs-caption); font-weight: 600; letter-spacing: 0.6px; text-transform: uppercase; color: var(--faint); margin: 0 0 var(--sp-2); }
+.un-meta { font-size: var(--fs-caption); font-weight: 600; letter-spacing: 0.6px; text-transform: uppercase; color: var(--dim); margin: 0 0 var(--sp-2); }
 .un-row {
   display: grid; align-items: center; column-gap: var(--sp-4);
   grid-template-columns: minmax(110px, 0.8fr) minmax(110px, 1fr) 110px 150px 130px 120px minmax(110px, 1fr);
