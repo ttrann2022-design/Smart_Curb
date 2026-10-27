@@ -53,6 +53,13 @@ async function call(method, path, token, body) {
 
 const RECEIVER_FIELDS = { occupied: true, lastUpdated: 1760000000000, lastSnapshot: "snap.jpg" };
 const SAMPLE = { eventAgeMs: 210, rxToWriteMs: 48, lastUpdated: 1760000000000 };
+const SITE = {
+  siteName: "North Campus",
+  contact: { name: "Dana Ops", email: "dana@example.com", phone: "555 0100" },
+  facilityType: "university",
+  modules: { permitTiers: true, semesterCalendar: true, eventMode: false },
+  setupComplete: true,
+};
 
 async function seed() {
   const res = await call("PUT", "", OWNER, {
@@ -64,8 +71,12 @@ async function seed() {
     units: {
       "C-001": { lot: "lot14", ledColor: "blue", panelText: "LOT 14", ...RECEIVER_FIELDS },
       "C-002": { lot: "lot14", ledColor: "red", panelText: "LOT 14", ledBrightness: 40, ...RECEIVER_FIELDS },
+      // Reported in, but not in a lot yet.
+      "C-050": { online: true, ...RECEIVER_FIELDS },
     },
+    lots: { lot14: { name: "Lot 14" }, lot06: { name: "Lot 6" } },
     latency: { "C-001": { s1: SAMPLE } },
+    config: { site: SITE },
   });
   assert.ok(res.ok, `seeding failed: ${res.status}`);
 }
@@ -174,6 +185,38 @@ test("anyone can read units (the lot sign runs signed out)", async () => {
   allowed(await call("GET", "units", null));
 });
 
+// ---------- Assigning curbs to lots (Setup, Connect curbs) ----------
+
+test("a manager can put a reported curb into a lot", async () => {
+  allowed(await patchUnit("manager", { lot: "lot06" }, "C-050"));
+  const unit = (await call("GET", "units/C-050", null)).body;
+  assert.equal(unit.lot, "lot06");
+  assert.equal(unit.occupied, RECEIVER_FIELDS.occupied);
+  assert.equal(unit.lastUpdated, RECEIVER_FIELDS.lastUpdated);
+});
+
+test("a manager can move a curb to another lot", async () => {
+  allowed(await patchUnit("manager", { lot: "lot06" }, "C-001"));
+});
+
+test("operators and viewers cannot change a curb's lot", async () => {
+  denied(await patchUnit("operator", { lot: "lot06" }, "C-050"));
+  denied(await patchUnit("viewer", { lot: "lot06" }, "C-050"));
+  denied(await patchUnit("signedOut", { lot: "lot06" }, "C-050"));
+  denied(await patchUnit("driver", { lot: "lot06" }, "C-050"));
+  assert.equal((await call("GET", "units/C-050/lot", null)).body, null);
+});
+
+test("a curb can only go into a lot that exists", async () => {
+  denied(await patchUnit("manager", { lot: "lot99" }, "C-050"));
+  denied(await patchUnit("manager", { lot: 6 }, "C-050"));
+});
+
+test("assigning a lot can't create a unit that never reported", async () => {
+  denied(await patchUnit("manager", { lot: "lot06" }, "C-999"));
+  assert.equal((await call("GET", "units/C-999", null)).body, null);
+});
+
 // ---------- Latency samples (read-only) ----------
 
 test("staff can read latency samples", async () => {
@@ -202,6 +245,81 @@ test("no client can write latency samples, even a manager", async () => {
   assert.deepEqual((await call("GET", "latency/C-001/s1", OWNER)).body, SAMPLE);
 });
 
+// ---------- Site config (Setup wizard) ----------
+
+const patchSite = (who, fields) => call("PATCH", "config/site", AS[who], fields);
+
+test("staff can read the site config", async () => {
+  for (const who of ["viewer", "operator", "manager"]) {
+    const r = await call("GET", "config/site", AS[who]);
+    allowed(r);
+    assert.deepEqual(r.body, SITE);
+  }
+});
+
+test("signed-out users and driver accounts cannot read the site config", async () => {
+  denied(await call("GET", "config/site", AS.signedOut));
+  denied(await call("GET", "config", AS.signedOut));
+  denied(await call("GET", "config/site", AS.driver));
+});
+
+test("a manager can write the whole site config", async () => {
+  allowed(await call("PUT", "config/site", AS.manager, { ...SITE, siteName: "Stadium Lots", facilityType: "stadium", modules: { eventMode: true } }));
+  const site = (await call("GET", "config/site", OWNER)).body;
+  assert.equal(site.siteName, "Stadium Lots");
+  assert.deepEqual(site.modules, { eventMode: true });
+});
+
+test("a manager can save one wizard step at a time", async () => {
+  await call("DELETE", "config/site", OWNER);
+  allowed(await patchSite("manager", { siteName: "North Campus", contact: { name: "Dana Ops", email: "dana@example.com" }, setupComplete: false }));
+  allowed(await patchSite("manager", { facilityType: "hospital", modules: { patientPriority: true, staffShifts: false } }));
+  allowed(await patchSite("manager", { setupComplete: true }));
+});
+
+test("operators and viewers cannot write the site config", async () => {
+  for (const who of ["operator", "viewer"]) {
+    denied(await patchSite(who, { siteName: "Mine now" }));
+    denied(await patchSite(who, { setupComplete: false }));
+    denied(await call("PUT", "config/site", AS[who], SITE));
+    denied(await call("DELETE", "config/site", AS[who]));
+  }
+  assert.deepEqual((await call("GET", "config/site", OWNER)).body, SITE);
+});
+
+test("signed-out users and driver accounts cannot write the site config", async () => {
+  denied(await patchSite("signedOut", { siteName: "x" }));
+  denied(await patchSite("driver", { siteName: "x" }));
+});
+
+test("nothing else under config is writable, even by a manager", async () => {
+  denied(await call("PUT", "config/other", AS.manager, { a: 1 }));
+  denied(await call("PUT", "config", AS.manager, { site: SITE }));
+});
+
+test("site config fields are validated", async () => {
+  denied(await patchSite("manager", { siteName: "" }));
+  denied(await patchSite("manager", { siteName: "x".repeat(81) }));
+  denied(await patchSite("manager", { siteName: 7 }));
+  denied(await patchSite("manager", { facilityType: "casino" }));
+  denied(await patchSite("manager", { modules: { teleporter: true } }));
+  denied(await patchSite("manager", { modules: { eventMode: "yes" } }));
+  denied(await patchSite("manager", { setupComplete: "true" }));
+  denied(await patchSite("manager", { contact: { name: "Dana Ops", email: "not an email" } }));
+  denied(await patchSite("manager", { contact: { name: "Dana Ops" } }));
+  denied(await patchSite("manager", { contact: { ...SITE.contact, fax: "555" } }));
+  denied(await patchSite("manager", { theme: "midnight" }));
+});
+
+test("setupComplete can't turn true before the site has a name and facility type", async () => {
+  await call("DELETE", "config/site", OWNER);
+  denied(await patchSite("manager", { setupComplete: true }));
+  allowed(await patchSite("manager", { siteName: "North Campus", setupComplete: false }));
+  denied(await patchSite("manager", { setupComplete: true }));
+  allowed(await patchSite("manager", { facilityType: "city" }));
+  allowed(await patchSite("manager", { setupComplete: true }));
+});
+
 // ---------- Simulation area ----------
 
 test("staff can write simulated latency under demo/latency, others cannot", async () => {
@@ -213,4 +331,33 @@ test("staff can write simulated latency under demo/latency, others cannot", asyn
 test("staff can write ledBrightness under demo/, signed-out users cannot", async () => {
   allowed(await call("PATCH", "demo/units/C-001", AS.viewer, { ledBrightness: 30 }));
   denied(await call("PATCH", "demo/units/C-001", null, { ledBrightness: 30 }));
+});
+
+test("staff can still write the rest of the simulation area", async () => {
+  allowed(await call("PATCH", "", AS.operator, {
+    "demo/lots/lot06": { name: "Lot 6", units: { "C-001": true } },
+    "demo/units/C-001": { lot: "lot06", occupied: true, online: true },
+    "demo/history/week": { Mon: [1, 2] },
+    "demo/simLock": { owner: "x", heartbeat: 1 },
+  }));
+  allowed(await call("PATCH", "demo/units/C-090", AS.manager, { lot: "lot06" }));
+  denied(await call("PATCH", "demo/units/C-090", AS.driver, { lot: "lot06" }));
+});
+
+test("only managers write the simulated site config, with the same validation", async () => {
+  allowed(await call("PUT", "demo/config/site", AS.manager, SITE));
+  allowed(await call("PATCH", "demo/config/site", AS.manager, { setupComplete: false }));
+  for (const who of ["operator", "viewer", "driver", "signedOut"]) {
+    denied(await call("PATCH", "demo/config/site", AS[who], { siteName: "Mine now" }));
+  }
+  denied(await call("PATCH", "demo/config/site", AS.manager, { facilityType: "casino" }));
+  denied(await call("PATCH", "demo/config/site", AS.manager, { theme: "midnight" }));
+  denied(await call("PUT", "demo/config/other", AS.manager, { a: 1 }));
+  // A staff write to the whole demo/ node would skip these rules, so it's refused.
+  denied(await call("PUT", "demo", AS.manager, { config: { site: { siteName: "x" } } }));
+});
+
+test("simulated site config never reaches the real config/site", async () => {
+  allowed(await call("PATCH", "demo/config/site", AS.manager, { siteName: "Simulated Site" }));
+  assert.deepEqual((await call("GET", "config/site", OWNER)).body, SITE);
 });

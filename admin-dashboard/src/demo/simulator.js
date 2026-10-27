@@ -336,3 +336,27 @@ export async function restoreAllCurbs() {
   await commit(all, changes);
   return `Brought ${Object.keys(changes).length} curb(s) back online.`;
 }
+
+// Newly installed curbs: they've reported in but aren't in a lot yet, so
+// Setup's Connect curbs step lists them. The last one is offline. Numbered
+// from C-201 so they never share an ID with a real curb like C-095.
+export async function addNewSimCurbs(count = 3) {
+  const all = await readUnits();
+  let n = Math.max(200, ...Object.keys(all).map((id) => Number(id.replace(/^C-/, "")) || 0));
+  const now = Date.now();
+  const updates = {};
+  const ids = [];
+  for (let i = 0; i < count; i++) {
+    n += 1;
+    const id = "C-" + String(n).padStart(3, "0");
+    ids.push(id);
+    updates[simPath(`units/${id}`)] = {
+      occupied: Math.random() < 0.4,
+      battery: 70 + Math.floor(Math.random() * 31),
+      online: i < count - 1,
+      lastUpdated: now - Math.floor(Math.random() * 20 * 60000),
+    };
+  }
+  await writeSim(updates);
+  return `Installed ${ids.join(", ")}. They're not in a lot yet: a manager can assign them in Settings → Site setup.`;
+}

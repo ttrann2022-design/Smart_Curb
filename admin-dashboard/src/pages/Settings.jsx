@@ -7,6 +7,7 @@ import { c, mono } from "../theme";
 import { DEFAULT_ALERTS, useAlertSettings } from "../units";
 import { stopSimulation } from "../demo/simulator";
 import { DEMO_BUILD } from "../dataMode";
+import { MODULES, enabledModules, facilityById } from "../site";
 import DataModeSwitch from "../components/DataModeSwitch";
 import { PageHeader, Card, Button, Field, Input, StatusText, Notice } from "../components/ui";
 
@@ -136,8 +137,46 @@ function AlertsForm({ saved, canEdit }) {
   );
 }
 
+function SiteSummary({ siteConfig, canEdit }) {
+  const navigate = useNavigate();
+  const site = siteConfig.site;
+  const facility = facilityById(site?.facilityType);
+  const modules = enabledModules(site);
+  const contact = site?.contact;
+  const rows = [
+    ["Site name", site?.siteName],
+    ["Contact", contact && [contact.name, contact.email, contact.phone].filter(Boolean).join(" · ")],
+    ["Facility type", facility?.label],
+    ["Modules on", facility && (modules.length ? modules.map((id) => MODULES[id].label).join(", ") : "None")],
+  ];
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+      {siteConfig.error ? (
+        <Notice tone="warn">Couldn't read the site settings. The database may not allow it yet.</Notice>
+      ) : (
+        <dl style={{ display: "flex", flexDirection: "column", gap: "var(--sp-2)", margin: 0 }}>
+          {rows.map(([label, value]) => (
+            <div key={label} style={{ display: "flex", gap: "var(--sp-3)", fontSize: "var(--fs-body)", flexWrap: "wrap" }}>
+              <dt style={{ color: c.dim, width: 120, flexShrink: 0 }}>{label}</dt>
+              <dd style={{ margin: 0, fontWeight: value ? 600 : 400, color: value ? c.text : c.dim, minWidth: 0, flex: "1 1 200px", overflowWrap: "anywhere" }}>{value || "Not set"}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {canEdit ? (
+        <div>
+          <Button icon="settings" onClick={() => navigate("/setup")}>Reopen setup</Button>
+        </div>
+      ) : (
+        <Notice tone="info" icon="lock">Only managers can change the site setup.</Notice>
+      )}
+    </div>
+  );
+}
+
 function Settings() {
-  const { role } = useOutletContext();
+  const { role, mode, siteConfig } = useOutletContext();
   const alerts = useAlertSettings();
   const navigate = useNavigate();
   const user = auth.currentUser;
@@ -192,7 +231,16 @@ function Settings() {
           </Card>
         )}
 
-        <Card plain title="Alert thresholds" delay={120} subtitle="Shared by everyone. These decide what shows up under Needs attention and Active alerts.">
+        <Card
+          plain
+          title="Site setup"
+          delay={120}
+          subtitle={`The site, its facility type and modules, chosen in Setup.${mode === "sim" && !DEMO_BUILD ? " Simulation has its own site setup, separate from live." : ""}`}
+        >
+          <SiteSummary siteConfig={siteConfig} canEdit={role === "manager"} />
+        </Card>
+
+        <Card plain title="Alert thresholds" delay={180} subtitle="Shared by everyone. These decide what shows up under Needs attention and Active alerts.">
           <AlertsForm key={JSON.stringify(alerts)} saved={alerts} canEdit={role === "manager"} />
         </Card>
       </div>
