@@ -72,7 +72,7 @@ export function LotMeter({ name, occupied, total, offline = 0 }) {
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "4px 12px", flexWrap: "wrap", marginBottom: 8 }}>
-        {name && <span style={{ fontSize: 13.5, fontWeight: 600 }}>{name}</span>}
+        {name && <span className="sws-meter-name">{name}</span>}
         <span style={{ fontSize: 12, color: c.dim, whiteSpace: "nowrap", marginLeft: name ? "auto" : 0 }}>
           <span className="sws-mono" style={{ color: tone, fontWeight: 600 }}><AnimatedNumber value={occupied} /></span> of {total} occupied
           {offline > 0 && <> · <span style={{ color: c.warn }}>{offline} offline</span></>}

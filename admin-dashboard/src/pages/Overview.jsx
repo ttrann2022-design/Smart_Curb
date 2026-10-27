@@ -119,6 +119,20 @@ function Overview() {
                 <div key={i} className="sws-tile-stat"><Skeleton width="55%" height={11} /><Skeleton width="40%" height={26} /></div>
               ))}
             </div>
+            <div className="sws-stack" aria-busy="true" style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
+              <Card title="Parking lots" style={{ flex: 2 }}>
+                <div className="sws-lot-grid">
+                  {[0, 1].map((i) => (
+                    <div key={i} className="sws-lot-row"><Skeleton width="45%" height={13} style={{ marginBottom: 10 }} /><Skeleton height={6} /></div>
+                  ))}
+                </div>
+              </Card>
+              <Card title="Active alerts" style={{ flex: 1 }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+                  {[0, 1].map((i) => <Skeleton key={i} height={58} />)}
+                </div>
+              </Card>
+            </div>
           </>
         ) : (
           <>
@@ -157,10 +171,12 @@ function Overview() {
                 <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
                   {alerts.length === 0 && <EmptyState icon="check" title="All units healthy">Nothing needs attention right now.</EmptyState>}
                   {alerts.slice(0, MAX_ALERTS).map(([id, u, issue]) => {
+                    // translate="no" keeps browser auto-translate away from the curb ID.
+                    const curb = <>Curb <span translate="no">{id}</span> in {lotName(u)}</>;
                     const text = {
-                      offline: `Curb ${id} in ${lotName(u)} is not reporting.`,
-                      stale: `Curb ${id} in ${lotName(u)} last reported ${formatAgo(u.lastUpdated, now)}.`,
-                      lowBattery: `Curb ${id} in ${lotName(u)} is at ${u.battery}%.`,
+                      offline: <>{curb} is not reporting.</>,
+                      stale: <>{curb} last reported {formatAgo(u.lastUpdated, now)}.</>,
+                      lowBattery: <>{curb} is at {u.battery}%.</>,
                     }[issue];
                     return (
                       <div key={id} className="sws-enter">
