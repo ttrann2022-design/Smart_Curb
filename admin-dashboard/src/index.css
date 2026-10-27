@@ -143,8 +143,9 @@ a, button { touch-action: manipulation; -webkit-tap-highlight-color: transparent
 .sws-btn-lg { height: 46px; padding: 0 22px; font-size: 14px; }
 .sws-btn-block { width: 100%; }
 
-.sws-btn-primary { background: var(--accent); color: var(--on-accent); }
-.sws-btn-primary:hover:not(:disabled) { background: #D3F76B; }
+/* Off-white, not lime: lime means "free" only. */
+.sws-btn-primary { background: var(--text); color: var(--bg); }
+.sws-btn-primary:hover:not(:disabled) { background: #D6D5CC; }
 .sws-btn-secondary { background: var(--bg); color: var(--text); border-color: var(--line); }
 .sws-btn-secondary:hover:not(:disabled) { border-color: var(--line-strong); background: var(--card); }
 .sws-btn-danger { background: var(--bg); color: var(--busy); border-color: var(--busy-line); }
