@@ -52,6 +52,7 @@ async function call(method, path, token, body) {
 }
 
 const RECEIVER_FIELDS = { occupied: true, lastUpdated: 1760000000000, lastSnapshot: "snap.jpg" };
+const SAMPLE = { eventAgeMs: 210, rxToWriteMs: 48, lastUpdated: 1760000000000 };
 
 async function seed() {
   const res = await call("PUT", "", OWNER, {
@@ -64,6 +65,7 @@ async function seed() {
       "C-001": { lot: "lot14", ledColor: "blue", panelText: "LOT 14", ...RECEIVER_FIELDS },
       "C-002": { lot: "lot14", ledColor: "red", panelText: "LOT 14", ledBrightness: 40, ...RECEIVER_FIELDS },
     },
+    latency: { "C-001": { s1: SAMPLE } },
   });
   assert.ok(res.ok, `seeding failed: ${res.status}`);
 }
@@ -172,7 +174,41 @@ test("anyone can read units (the lot sign runs signed out)", async () => {
   allowed(await call("GET", "units", null));
 });
 
+// ---------- Latency samples (read-only) ----------
+
+test("staff can read latency samples", async () => {
+  for (const who of ["viewer", "operator", "manager"]) {
+    const r = await call("GET", "latency", AS[who]);
+    allowed(r);
+    assert.deepEqual(r.body["C-001"].s1, SAMPLE);
+    allowed(await call("GET", "latency/C-001/s1", AS[who]));
+  }
+});
+
+test("signed-out users and driver accounts cannot read latency samples", async () => {
+  denied(await call("GET", "latency", AS.signedOut));
+  denied(await call("GET", "latency/C-001", AS.signedOut));
+  denied(await call("GET", "latency", AS.driver));
+  denied(await call("GET", "latency/C-001/s1", AS.driver));
+});
+
+test("no client can write latency samples, even a manager", async () => {
+  for (const who of ["manager", "operator", "viewer", "driver", "signedOut"]) {
+    denied(await call("PUT", "latency/C-001/s2", AS[who], SAMPLE));
+    denied(await call("PATCH", "latency/C-001/s1", AS[who], { rxToWriteMs: 1 }));
+    denied(await call("DELETE", "latency/C-001", AS[who]));
+    denied(await call("PUT", "latency", AS[who], {}));
+  }
+  assert.deepEqual((await call("GET", "latency/C-001/s1", OWNER)).body, SAMPLE);
+});
+
 // ---------- Simulation area ----------
+
+test("staff can write simulated latency under demo/latency, others cannot", async () => {
+  allowed(await call("PUT", "demo/latency/C-001/s0", AS.viewer, SAMPLE));
+  denied(await call("PUT", "demo/latency/C-001/s1", null, SAMPLE));
+  denied(await call("PUT", "demo/latency/C-001/s1", AS.driver, SAMPLE));
+});
 
 test("staff can write ledBrightness under demo/, signed-out users cannot", async () => {
   allowed(await call("PATCH", "demo/units/C-001", AS.viewer, { ledBrightness: 30 }));

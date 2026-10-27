@@ -1,6 +1,6 @@
 import {
   ref, get, update, onValue, push, remove, runTransaction, onDisconnect,
-  query, orderByKey, limitToLast, endBefore,
+  query, orderByKey, limitToLast, endBefore, serverTimestamp,
 } from "firebase/database";
 import { auth, database } from "../firebase";
 import { SIM_ROOT } from "../dataMode";
@@ -29,6 +29,34 @@ export const DEMO_LOT_COUNT = Object.keys(DEMO_LOTS).length;
 
 const TICK_MS = 2000;
 const LIVE_KEEP = 200;
+// Synthetic latency samples kept per simulated curb: sample keys cycle s0..s24,
+// so demo/latency stays bounded however long the simulation runs.
+const LATENCY_KEEP = 25;
+let latencySeq = 0;
+
+// One synthetic sample, shaped like the Receiver's latency/<unitId>/<sampleId>.
+// Mostly quick, with an occasional slow outlier; about 1 in 10 lacks eventAgeMs,
+// as a Receiver that can't tell when the curb saw the event would send.
+function latencySample(lastUpdated) {
+  const sample = { rxToWriteMs: Math.round(35 + Math.random() * 55 + (Math.random() < 0.06 ? 250 + Math.random() * 600 : 0)), lastUpdated };
+  if (Math.random() < 0.9) {
+    sample.eventAgeMs = Math.round(140 + Math.random() * 220 + (Math.random() < 0.05 ? 700 + Math.random() * 1500 : 0));
+  }
+  return sample;
+}
+
+// A few recent samples for each curb, spread over the last half hour.
+function buildLatency(unitIds) {
+  const latency = {};
+  const now = Date.now();
+  unitIds.forEach((id) => {
+    const n = Math.floor(Math.random() * 4);
+    for (let i = 0; i < n; i++) {
+      (latency[id] ||= {})["s" + i] = latencySample(now - Math.floor(Math.random() * 30 * 60000));
+    }
+  });
+  return latency;
+}
 const LOCK_PATH = simPath("simLock");
 const LOCK_STALE_MS = 15000;
 const SESSION = Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -99,8 +127,9 @@ export async function resetDemoData() {
     [simPath("lots")]: lots,
     [simPath("units")]: units,
     [simPath("history")]: { week: buildWeek() },
+    [simPath("latency")]: buildLatency(Object.keys(units)),
   });
-  return `Loaded ${Object.keys(units).length} simulated curbs across ${Object.keys(lots).length} lots, plus a week of history.`;
+  return `Loaded ${Object.keys(units).length} simulated curbs across ${Object.keys(lots).length} lots, plus a week of history and latency samples.`;
 }
 
 function applyChanges(units, changes) {
@@ -217,6 +246,15 @@ function tick() {
 
   writeSim({ [simPath("simLock/heartbeat")]: now }).catch(() => {});
   commit(latestUnits, changes).catch(() => {});
+
+  // Each simulated curb event also reports a latency sample, server-timestamped like the Receiver's.
+  const samples = {};
+  Object.entries(changes).forEach(([id, fields]) => {
+    if (!("occupied" in fields)) return;
+    latencySeq += 1;
+    samples[simPath(`latency/${id}/s${latencySeq % LATENCY_KEEP}`)] = latencySample(serverTimestamp());
+  });
+  if (Object.keys(samples).length) writeSim(samples).catch(() => {});
 
   tickCount += 1;
   if (tickCount % 3 === 0) recordSnapshot().catch(() => {});
