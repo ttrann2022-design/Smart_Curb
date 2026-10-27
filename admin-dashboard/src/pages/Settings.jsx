@@ -118,7 +118,7 @@ function AlertsForm({ saved, canEdit }) {
             Leave this off until the Receiver sends a regular heartbeat. Right now <span className="sws-mono">lastUpdated</span> only changes when a car arrives or leaves,
             so a curb in a quiet spot would be flagged even though it's working.
           </div>
-          <label style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", opacity: staleEnabled ? 1 : 0.5 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", opacity: staleEnabled ? 1 : "var(--disabled-opacity)" }}>
             <span style={{ fontSize: 13 }}>Flag after</span>
             <Input type="number" min="1" max="10080" step="1" inputMode="numeric" value={staleMinutes} disabled={!staleEnabled || !canEdit} onChange={(e) => setStaleMinutes(e.target.value)} style={{ width: 96, fontFamily: mono }} />
             <span style={{ fontSize: 13 }}>minutes without a report</span>

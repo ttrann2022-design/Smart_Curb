@@ -65,6 +65,9 @@ function checksFor(theme, tokens, inset) {
   if (inset) {
     add("Inset text", "--text", DATA_SURFACES, 4.5, inset);
     add("Inset text", "--dim", DATA_SURFACES, 4.5, inset);
+    // Accent used inside an inset (active sort, links, buttons).
+    add("Inset text", "--brand", [...DATA_SURFACES, "--brand-bg"], 4.5, inset);
+    add("Inset text", "--brand-ink", ["--brand", "--brand-hover"], 4.5, inset);
   }
 
   add("Message tones", "--open-text", ["--open-bg"], 4.5);

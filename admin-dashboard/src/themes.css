@@ -66,6 +66,8 @@
   --row-tint: rgba(255, 255, 255, 0.022);
   --soft-tint: rgba(242, 241, 234, 0.035);
   --selection: rgba(242, 241, 234, 0.22);
+  /* How far a disabled row's text fades. Not a colour, but it decides contrast. */
+  --disabled-opacity: 0.5;
 }
 
 /* Aliases, recomputed on every themed element (not just inherited from :root),
@@ -123,6 +125,8 @@
   --row-tint: rgba(27, 27, 23, 0.03);
   --soft-tint: rgba(27, 27, 23, 0.04);
   --selection: rgba(45, 106, 30, 0.22);
+  /* Dark text at half opacity is too faint on a light page (3.2:1); 0.7 gives about 6:1. */
+  --disabled-opacity: 0.7;
   /* Ring around status swatches drawn on light surfaces. */
   --status-ring: #1F201A;
 }
@@ -248,6 +252,20 @@
   --hover-tint: rgba(255, 255, 255, 0.04);
   --row-tint: rgba(255, 255, 255, 0.022);
   --soft-tint: rgba(242, 241, 234, 0.035);
+  /* Paper's green, lightened to read on the dark inset (active sort, links). */
+  --brand: #8FCB6B;
+  --brand-ink: #0F1A09;
+  --brand-hover: #7DB959;
+  --brand-bg: #26331C;
+  --brand-line: #3C5229;
+  /* Aliases resolve where they're declared, so re-declare them for the inset. */
+  --accent: var(--brand);
+  --on-accent: var(--brand-ink);
+  --accent-bg: var(--brand-bg);
+  --accent-line: var(--brand-line);
+  --link: var(--brand);
+  --nav-active: var(--brand);
+  --nav-active-bg: var(--brand-bg);
 }
 /* The insets that aren't already panels get the dark surface and some room. */
 :where([data-theme="paper"]) :is(.lp, .ov-summary, .ov-attn-list, .un-wrap) {
