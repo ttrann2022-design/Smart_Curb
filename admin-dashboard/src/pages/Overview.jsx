@@ -93,7 +93,7 @@ function Overview() {
                 {Object.keys(lots).length === 0 && unassigned.total === 0 ? (
                   <EmptyState icon="lots" title="No lots yet">Lots appear here once they're added to the database.</EmptyState>
                 ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  <div className="sws-lot-grid">
                     {Object.entries(lots).map(([id, lot]) => (
                       <LotRow key={id} lot={lot} stats={stats[id] || { total: 0, occupied: 0, offline: 0 }} />
                     ))}
