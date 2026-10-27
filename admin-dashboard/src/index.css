@@ -116,6 +116,9 @@ a, button { touch-action: manipulation; -webkit-tap-highlight-color: transparent
 .sws-card-sub { font-size: 12.5px; color: var(--dim); margin-top: 3px; line-height: 1.5; }
 .sws-card-meta { font-size: 12px; color: var(--dim); }
 .sws-card-body { padding: 16px 18px; }
+/* Plain card: the panel surface without a border or header rule; spacing separates. */
+.sws-card.is-plain { border-color: transparent; }
+.sws-card.is-plain > .sws-card-head { border-bottom-color: transparent; padding-bottom: 0; }
 
 .sws-label { font-size: var(--fs-caption); font-weight: 600; letter-spacing: 0.5px; color: var(--dim); text-transform: uppercase; }
 .sws-note { font-size: 12.5px; color: var(--dim); line-height: 1.55; }
@@ -201,7 +204,7 @@ select.sws-input {
 .sws-badge {
   display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border-radius: 4px;
   font-family: var(--mono); font-size: 10.5px; font-weight: 600; letter-spacing: 0.6px; white-space: nowrap;
-  background: var(--accent-bg); color: var(--accent);
+  background: var(--card); color: var(--nav-text);
 }
 
 /* ---------- Notices ---------- */
@@ -627,6 +630,44 @@ button.lp-stall { background: none; border: 0; padding: 0; margin: 0; font: inhe
   .an-panel { padding: 14px; }
   .an-facts { gap: var(--sp-3) var(--sp-6); }
   .an-facts dd { font-size: 22px; }
+}
+
+/* ---------- Users & roles ---------- */
+.ur-roles { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--sp-4); }
+.ur-role { background: var(--panel); border-radius: var(--radius); padding: 18px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+/* Your own role: a neutral off-white outline, never a lime tint. */
+.ur-role.is-mine { box-shadow: inset 0 0 0 1px var(--nav-text); }
+.ur-role-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+.ur-role-name { font-family: var(--mono); font-size: var(--fs-section); font-weight: 600; margin: 0; display: flex; align-items: center; gap: var(--sp-2); }
+.ur-role-who { font-size: 12px; color: var(--dim); margin-top: 3px; }
+.ur-you { height: 18px; padding: 0 6px; color: var(--text); box-shadow: inset 0 0 0 1px var(--line-strong); background: transparent; }
+.ur-perms { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
+.ur-perms li { font-size: 12.5px; display: flex; align-items: center; gap: var(--sp-2); }
+.ur-perms .is-yes svg { color: var(--text); }
+.ur-perms .is-no { color: var(--faint); }
+
+.ur-form { padding: 14px 18px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.ur-done { margin: 0 18px 14px; padding: 10px 12px; border-radius: var(--radius); background: var(--panel-2); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: var(--fs-body); }
+.ur-done > svg { color: var(--text); flex-shrink: 0; }
+
+/* Ruleless lists, as on Curb units: spacing and a hover tint separate rows. */
+.ur-list { padding: 4px 6px 8px; }
+.ur-row { display: grid; align-items: center; gap: var(--sp-3); padding: 10px 12px; border-radius: var(--radius); min-height: 46px; font-size: var(--fs-body); }
+.ur-list-body .ur-row:hover { background: rgba(242, 241, 234, 0.035); }
+.ur-row.is-pending, .ur-list-body .ur-row.is-pending:hover { background: var(--warn-bg); }
+.ur-head { min-height: 0; padding-top: var(--sp-2); padding-bottom: var(--sp-1); }
+.ur-email { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ur-invite { grid-template-columns: minmax(0, 1fr) auto; }
+.ur-invite-who { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap; }
+.ur-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.ur-people { grid-template-columns: minmax(200px, 2fr) 150px minmax(150px, 1fr); }
+.ur-list { container-type: inline-size; }
+@container (max-width: 560px) {
+  .ur-people { grid-template-columns: minmax(0, 1fr) auto; row-gap: var(--sp-1); }
+  .ur-people .ur-seen { grid-column: 1 / -1; }
+  .ur-head.ur-people { display: none; }
+  /* Invites stack too, so the email gets the full width. */
+  .ur-invite { grid-template-columns: minmax(0, 1fr); row-gap: var(--sp-1); }
 }
 
 /* ---------- Responsive ---------- */

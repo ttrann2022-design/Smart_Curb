@@ -22,9 +22,10 @@ export function PageHeader({ title, subtitle, live, actions }) {
   );
 }
 
-export function Card({ title, subtitle, meta, actions, children, body = true, className = "", style, delay, as: Tag = "section" }) {
+// plain: the panel surface without a border or header rule.
+export function Card({ title, subtitle, meta, actions, children, body = true, plain, className = "", style, delay, as: Tag = "section" }) {
   return (
-    <Tag className={`sws-card${delay !== undefined ? " sws-enter" : ""} ${className}`} style={{ ...(delay !== undefined ? { "--d": `${delay}ms` } : null), ...style }}>
+    <Tag className={`sws-card${plain ? " is-plain" : ""}${delay !== undefined ? " sws-enter" : ""} ${className}`} style={{ ...(delay !== undefined ? { "--d": `${delay}ms` } : null), ...style }}>
       {(title || actions || meta) && (
         <div className="sws-card-head">
           <div style={{ minWidth: 0 }}>
