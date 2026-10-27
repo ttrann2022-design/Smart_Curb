@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { ref, onValue } from "firebase/database";
+import { ref, onValue, update } from "firebase/database";
 import { database } from "./firebase";
-import { dataPath } from "./dataMode";
+import { SIM_ROOT, dataPath, getDataMode } from "./dataMode";
 
 // Site settings, written by the Setup wizard:
 //   config/site = { siteName, contact: { name, email, phone }, facilityType, modules: { <id>: bool }, setupComplete }
@@ -108,6 +108,18 @@ export const FACILITIES = [
     },
   },
 ];
+
+// Every write Setup makes goes through here. In Simulation it may only touch
+// demo/config and demo/units; anything else is refused before it reaches the database.
+const SIM_SETUP_ROOTS = [SIM_ROOT + "config/", SIM_ROOT + "units/"];
+
+export function writeSetup(path, values) {
+  const full = dataPath(path);
+  if (getDataMode() === "sim" && !SIM_SETUP_ROOTS.some((root) => full.startsWith(root))) {
+    return Promise.reject(new Error(`Refusing to write outside the simulation: ${full}`));
+  }
+  return update(ref(database, full), values);
+}
 
 export const facilityById = (id) => FACILITIES.find((f) => f.id === id) || null;
 

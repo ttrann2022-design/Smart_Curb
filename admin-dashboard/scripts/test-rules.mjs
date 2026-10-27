@@ -332,3 +332,32 @@ test("staff can write ledBrightness under demo/, signed-out users cannot", async
   allowed(await call("PATCH", "demo/units/C-001", AS.viewer, { ledBrightness: 30 }));
   denied(await call("PATCH", "demo/units/C-001", null, { ledBrightness: 30 }));
 });
+
+test("staff can still write the rest of the simulation area", async () => {
+  allowed(await call("PATCH", "", AS.operator, {
+    "demo/lots/lot06": { name: "Lot 6", units: { "C-001": true } },
+    "demo/units/C-001": { lot: "lot06", occupied: true, online: true },
+    "demo/history/week": { Mon: [1, 2] },
+    "demo/simLock": { owner: "x", heartbeat: 1 },
+  }));
+  allowed(await call("PATCH", "demo/units/C-090", AS.manager, { lot: "lot06" }));
+  denied(await call("PATCH", "demo/units/C-090", AS.driver, { lot: "lot06" }));
+});
+
+test("only managers write the simulated site config, with the same validation", async () => {
+  allowed(await call("PUT", "demo/config/site", AS.manager, SITE));
+  allowed(await call("PATCH", "demo/config/site", AS.manager, { setupComplete: false }));
+  for (const who of ["operator", "viewer", "driver", "signedOut"]) {
+    denied(await call("PATCH", "demo/config/site", AS[who], { siteName: "Mine now" }));
+  }
+  denied(await call("PATCH", "demo/config/site", AS.manager, { facilityType: "casino" }));
+  denied(await call("PATCH", "demo/config/site", AS.manager, { theme: "midnight" }));
+  denied(await call("PUT", "demo/config/other", AS.manager, { a: 1 }));
+  // A staff write to the whole demo/ node would skip these rules, so it's refused.
+  denied(await call("PUT", "demo", AS.manager, { config: { site: { siteName: "x" } } }));
+});
+
+test("simulated site config never reaches the real config/site", async () => {
+  allowed(await call("PATCH", "demo/config/site", AS.manager, { siteName: "Simulated Site" }));
+  assert.deepEqual((await call("GET", "config/site", OWNER)).body, SITE);
+});

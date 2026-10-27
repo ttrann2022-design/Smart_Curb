@@ -184,7 +184,31 @@
     // only dashboard staff can write. Real curbs never live here.
     "demo": {
       ".read": true,
-      ".write": "auth != null && root.child('users').child(auth.uid).exists()"
+      // Simulated site settings follow the same rules as config/site, so Setup
+      // behaves the same in Simulation: only managers write, same validation.
+      "config": {
+        "site": {
+          ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'manager'",
+          "siteName": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 80" },
+          "contact": {
+            ".validate": "newData.hasChildren(['name', 'email'])",
+            "name": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 80" },
+            "email": { ".validate": "newData.isString() && newData.val().length <= 120 && newData.val().matches(/^[^@ ]+@[^@ ]+[.][^@ ]+$/)" },
+            "phone": { ".validate": "newData.isString() && newData.val().length <= 40" },
+            "$other": { ".validate": false }
+          },
+          "facilityType": { ".validate": "newData.isString() && newData.val().matches(/^(university|stadium|airport|hospital|shopping|city)$/)" },
+          "modules": {
+            "$module": { ".validate": "newData.isBoolean() && $module.matches(/^(eventMode|gateRouting|demandPricing|tailgateZones|permitTiers|semesterCalendar|rateTiers|patientPriority|staffShifts|dwellLimits|meteredParking|enforcementRouting)$/)" }
+          },
+          "setupComplete": { ".validate": "newData.isBoolean() && (newData.val() === false || (newData.parent().child('siteName').exists() && newData.parent().child('facilityType').exists()))" },
+          "$other": { ".validate": false }
+        }
+      },
+      // Everything else under demo/ (units, lots, history, latency, simLock): any staff account.
+      "$other": {
+        ".write": "auth != null && root.child('users').child(auth.uid).exists()"
+      }
     }
   }
 }

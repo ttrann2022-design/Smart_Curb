@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { Navigate, useNavigate, useOutletContext } from "react-router-dom";
-import { ref, onValue, update } from "firebase/database";
+import { ref, onValue } from "firebase/database";
 import { database } from "../firebase";
 import { dataPath } from "../dataMode";
+import { addNewSimCurbs } from "../demo/simulator";
 import { c, mono, LED_HEX, LED_COLORS } from "../theme";
-import { FACILITIES, MODULES, SITE_PATH, facilityById } from "../site";
+import { FACILITIES, MODULES, SITE_PATH, facilityById, writeSetup } from "../site";
 import { useNow, formatAgo, formatExact } from "../units";
 import Icon from "../components/Icon";
 import { Card, Button, Field, Input, Select, Notice, EmptyState, Skeleton, StatusText } from "../components/ui";
@@ -128,8 +129,22 @@ function CurbsStep({ mode }) {
   // Curbs assigned during this visit stay listed, so the manager sees what they did.
   const [assignedHere, setAssignedHere] = useState({});
   const [busyId, setBusyId] = useState(null);
+  const [installing, setInstalling] = useState(false);
   const [msg, setMsg] = useState(null);
   const now = useNow();
+
+  // Simulation only: new simulated curbs (demo/units) to try this step with.
+  const install = async () => {
+    setInstalling(true);
+    setMsg(null);
+    try {
+      await addNewSimCurbs();
+      setMsg({ ok: true, text: "Installed 3 simulated curbs. Put them in a lot below." });
+    } catch (err) {
+      setMsg({ ok: false, text: "Couldn't add simulated curbs: " + err.message });
+    }
+    setInstalling(false);
+  };
 
   useEffect(() => {
     const stopUnits = onValue(ref(database, dataPath("units")), (s) => setUnits(s.val() || {}), () => setUnits({}));
@@ -154,7 +169,7 @@ function CurbsStep({ mode }) {
     setBusyId(id);
     setMsg(null);
     try {
-      await update(ref(database, dataPath(`units/${id}`)), { lot });
+      await writeSetup(`units/${id}`, { lot });
       setAssignedHere((a) => ({ ...a, [id]: lot }));
       setChoice((ch) => { const next = { ...ch }; delete next[id]; return next; });
       setMsg({ ok: true, text: `${id} is now in ${lots[lot]?.name || lot}.` });
@@ -176,10 +191,14 @@ function CurbsStep({ mode }) {
         body={false}
         title="Curbs without a lot"
         subtitle={rows.length ? `${waiting.length} waiting · ${online} online · ${waiting.length - online} offline` : null}
+        actions={mode === "sim" && (
+          <Button size="sm" variant="sim" icon="simulation" onClick={install} disabled={installing} busy={installing}>Install 3 simulated curbs</Button>
+        )}
       >
         {rows.length === 0 ? (
           <EmptyState icon="check" title="Every curb that has reported is in a lot">
             New curbs appear here as soon as they report in. You can finish setup.
+            {mode === "sim" && " To try this step, install some simulated curbs."}
           </EmptyState>
         ) : (
           <ul className="su-curbs">
@@ -255,7 +274,7 @@ function Wizard({ saved, mode }) {
     setBusy(true);
     setMsg(null);
     try {
-      await update(ref(database, dataPath(SITE_PATH)), fields);
+      await writeSetup(SITE_PATH, fields);
       return true;
     } catch (err) {
       setMsg({ ok: false, text: err.code === "PERMISSION_DENIED" ? "Only managers can change site settings." : "Couldn't save: " + err.message });
