@@ -146,6 +146,56 @@ function DemoLot() {
   );
 }
 
+// Only what the prototype actually does today.
+const FEATURES = [
+  { icon: "lots", title: "Every lot at a glance", text: "Each lot drawn as a plan, with free, occupied and offline spaces updating live." },
+  { icon: "alert", title: "Alerts that matter", text: "Curbs that go offline or run low on battery are flagged before anyone has to go looking." },
+  { icon: "sign", title: "Lot entrance signs", text: "A full-screen free-space count for a display at each entrance. It needs no sign-in." },
+  { icon: "units", title: "LED zones and panel text", text: "Set each curb's zone colour and message from the dashboard. Not yet wired to the curb hardware." },
+  { icon: "analytics", title: "Analytics", text: "Occupancy through the day and week, and how quickly changes reach the screen." },
+  { icon: "users", title: "Roles for your team", text: "Viewers watch, operators change zones and text, managers handle users and setup." },
+];
+
+function WhatYouGet() {
+  return (
+    <section id="features" className="ld-sec" aria-labelledby="ld-feat-h">
+      <div className="ld-wrap">
+        <div className="ld-sec-head">
+          <span className="ld-sec-k">What you get</span>
+          <h2 id="ld-feat-h" className="ld-sec-h">A dashboard built around the curbs</h2>
+        </div>
+        <ul className="ld-feats">
+          {FEATURES.map((f, i) => (
+            <li key={f.title} className="ld-feat sws-enter" style={{ "--d": `${i * 50}ms` }}>
+              <Icon name={f.icon} size={20} />
+              <h3 className="ld-feat-h">{f.title}</h3>
+              <p className="ld-feat-p">{f.text}</p>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </section>
+  );
+}
+
+const BUILT_FOR = ["Campuses", "Stadiums", "Airports", "Hospitals", "Shopping centers", "Cities"];
+
+function BuiltFor() {
+  return (
+    <section id="built-for" className="ld-sec ld-built" aria-labelledby="ld-built-h">
+      <div className="ld-wrap">
+        <h2 id="ld-built-h" className="ld-sec-k ld-built-h">Built for</h2>
+        <ul className="ld-built-row">
+          {BUILT_FOR.map((name) => <li key={name}>{name}</li>)}
+        </ul>
+        <p className="ld-built-note">
+          Designed with these in mind: each facility type gets its own zone presets in setup. Smart Curb isn't installed at any of them yet.
+        </p>
+      </div>
+    </section>
+  );
+}
+
 function Landing() {
   const navigate = useNavigate();
 
@@ -184,6 +234,8 @@ function Landing() {
 
         <HowItWorks />
         <DemoLot />
+        <WhatYouGet />
+        <BuiltFor />
       </main>
 
       <footer className="ld-foot">
