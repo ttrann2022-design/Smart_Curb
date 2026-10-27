@@ -164,8 +164,12 @@ function Layout() {
     );
   }
 
+  // Pages scroll the window. The Assistant keeps a viewport-high layout so only
+  // its conversation scrolls and the question box stays in view.
+  const fixedHeight = location.pathname === "/assistant";
+
   return (
-    <div className="sws-shell" style={{ display: "flex", height: "100vh", background: c.bg, color: c.text }}>
+    <div className={`sws-shell${fixedHeight ? " sws-shell-fixed" : ""}`} style={{ display: "flex", minHeight: "100dvh", background: c.bg, color: c.text }}>
       <a href="#main" className="sws-skip">Skip to content</a>
       {menuOpen && <div className="sws-backdrop" onClick={closeMenu} aria-hidden="true" />}
 
@@ -231,7 +235,7 @@ function Layout() {
         </div>
       </nav>
 
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+      <div className="sws-content" style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
         <div className="sws-topbar">
           <Brand size={32} />
           <button
@@ -247,7 +251,7 @@ function Layout() {
           </button>
         </div>
         {mode === "sim" && <SimBanner />}
-        <main id="main" tabIndex={-1} className="sws-main" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", minWidth: 0, overflowY: "auto" }}>
+        <main id="main" tabIndex={-1} className="sws-main" style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
           <Outlet key={mode} context={{ role, mode }} />
         </main>
       </div>

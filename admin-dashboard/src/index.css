@@ -280,13 +280,20 @@ button.sws-th[data-active] { color: var(--accent); }
 .sws-topbar { display: none; }
 .sws-backdrop { display: none; }
 
+/* The window scrolls; the Assistant pins the shell to the viewport and scrolls inside. */
+.sws-shell-fixed { height: 100dvh; }
+.sws-shell-fixed .sws-main { min-height: 0; overflow-y: auto; }
+
+@media (min-width: 901px) {
+  .sws-sidebar { position: sticky; top: 0; height: 100dvh; overflow-y: auto; }
+  .sws-sim-banner { position: sticky; top: 0; z-index: 20; }
+}
+
 @media (max-width: 1100px) {
   .sws-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 900px) {
-  .sws-shell { height: 100dvh !important; }
-
   .sws-topbar {
     display: flex;
     align-items: center;
@@ -296,6 +303,9 @@ button.sws-th[data-active] { color: var(--accent); }
     flex-shrink: 0;
     background: var(--panel);
     border-bottom: 1px solid var(--line);
+    position: sticky;
+    top: 0;
+    z-index: 30;
   }
   .sws-menu-btn {
     width: 40px;
@@ -335,7 +345,10 @@ button.sws-th[data-active] { color: var(--accent); }
 
   .sws-page-head { padding: 12px 16px !important; }
   .sws-page-body { padding: 16px 16px 32px !important; }
-  .sws-sim-banner { padding: 8px 16px !important; }
+  /* One line on phones: badge, status, and the switch button; the sentence is dropped. */
+  .sws-sim-banner { padding: 6px 16px !important; gap: 10px !important; flex-wrap: nowrap !important; }
+  .sws-sim-text, .sws-sim-long { display: none; }
+  .sws-sim-state { margin-left: auto; }
 
   .sws-stack { flex-direction: column !important; align-items: stretch !important; }
   .sws-stack > * { width: 100% !important; flex: 0 0 auto !important; }
