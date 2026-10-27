@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useOutletContext } from "react-router-dom";
+import { useOutletContext, useSearchParams } from "react-router-dom";
 import { ref, onValue, update } from "firebase/database";
 import { database } from "../firebase";
 import { dataPath, getDataMode } from "../dataMode";
@@ -100,12 +100,16 @@ function LotDetail() {
   const { role, mode } = useOutletContext();
   const now = useNow();
   const canEdit = role === "operator" || role === "manager";
+  // ?lot=<id> (e.g. from an Overview lot row) picks the lot on arrival.
+  const [params, setParams] = useSearchParams();
+  const requestedLot = useRef(params.get("lot"));
 
   useEffect(() => {
     const stopLots = onValue(ref(database, dataPath("lots")), (snap) => {
       const data = snap.val() || {};
       setLots(data);
-      setSelectedLot((prev) => (prev && data[prev] ? prev : Object.keys(data)[0] || null));
+      const wanted = requestedLot.current;
+      setSelectedLot((prev) => (prev && data[prev] ? prev : wanted && data[wanted] ? wanted : Object.keys(data)[0] || null));
     });
     const stopUnits = onValue(ref(database, dataPath("units")), (snap) => setUnits(snap.val() || {}));
     return () => { stopLots(); stopUnits(); };
@@ -169,6 +173,7 @@ function LotDetail() {
     setSelectedLot(id);
     setSelectedUnit(null);
     setStatus(null);
+    setParams({ lot: id }, { replace: true });
   };
 
   const pickUnit = (id) => {

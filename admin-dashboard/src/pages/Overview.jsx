@@ -6,16 +6,28 @@ import { dataPath } from "../dataMode";
 import { c } from "../theme";
 import { useFlash } from "../motion";
 import { useAlertSettings, useNow, unitIssues, formatAgo } from "../units";
-import { PageHeader, Card, StatTile, Notice, EmptyState, Skeleton, LotMeter } from "../components/ui";
+import { PageHeader, Card, StatTile, Notice, EmptyState, Skeleton, LotMeter, Button } from "../components/ui";
 
-function LotRow({ lot, stats }) {
+// Unassigned curbs have no lot page, so only real lots become links.
+function LotRow({ id, lot, stats }) {
   const flash = useFlash(stats.occupied);
+  const meter = <LotMeter name={lot.name} {...stats} />;
+  if (!id) return <div className={`sws-lot-row${flash ? " sws-flash" : ""}`}>{meter}</div>;
   return (
-    <div className={`sws-lot-row sws-hover${flash ? " sws-flash" : ""}`} style={{ border: `1px solid ${c.line}`, borderRadius: 5, padding: "11px 13px" }}>
-      <LotMeter name={lot.name} {...stats} />
-    </div>
+    <Link to={`/lots?lot=${encodeURIComponent(id)}`} className={`sws-lot-row sws-hover${flash ? " sws-flash" : ""}`}>
+      {meter}
+    </Link>
   );
 }
+
+// If neither data nor an error arrives in this long (e.g. no network), stop waiting.
+const LOAD_TIMEOUT_MS = 15000;
+
+const LOAD_ERROR_COPY = {
+  denied: "Your account can’t read curb data. Check that you’re signed in with an account that has dashboard access, then try again.",
+  timeout: "The database didn’t respond. Check your connection, then try again.",
+  failed: "The database couldn’t be reached. Check your connection and sign-in, then try again.",
+};
 
 const ISSUE_ORDER = { offline: 0, stale: 1, lowBattery: 2 };
 const MAX_ALERTS = 6;
@@ -30,18 +42,37 @@ function Overview() {
   const [lots, setLots] = useState({});
   const [units, setUnits] = useState({});
   const [loading, setLoading] = useState(true);
+  // null, or a key of LOAD_ERROR_COPY. Bumping attempt re-subscribes.
+  const [loadError, setLoadError] = useState(null);
+  const [attempt, setAttempt] = useState(0);
   const alertSettings = useAlertSettings();
   const now = useNow();
   const { mode } = useOutletContext();
 
   useEffect(() => {
-    const stopLots = onValue(ref(database, dataPath("lots")), (snap) => {
-      setLots(snap.val() || {});
+    const fail = (err) => {
+      setLoadError(/permission/i.test(err?.message || "") ? "denied" : "failed");
       setLoading(false);
-    });
-    const stopUnits = onValue(ref(database, dataPath("units")), (snap) => setUnits(snap.val() || {}));
-    return () => { stopLots(); stopUnits(); };
-  }, []);
+    };
+    const timer = setTimeout(() => {
+      setLoadError((e) => e || "timeout");
+      setLoading(false);
+    }, LOAD_TIMEOUT_MS);
+    const stopLots = onValue(ref(database, dataPath("lots")), (snap) => {
+      clearTimeout(timer);
+      setLots(snap.val() || {});
+      setLoadError((e) => (e === "timeout" ? null : e));
+      setLoading(false);
+    }, fail);
+    const stopUnits = onValue(ref(database, dataPath("units")), (snap) => setUnits(snap.val() || {}), fail);
+    return () => { clearTimeout(timer); stopLots(); stopUnits(); };
+  }, [attempt]);
+
+  const retry = () => {
+    setLoadError(null);
+    setLoading(true);
+    setAttempt((n) => n + 1);
+  };
 
   const unitList = Object.values(units);
   const stats = {};
@@ -73,14 +104,27 @@ function Overview() {
       <PageHeader title="Overview" subtitle={mode === "sim" ? "Simulated curbs, updating live" : "Live from the curbs"} live />
 
       <div className="sws-page-body">
-        {loading ? (
-          <div className="sws-tiles" aria-busy="true">
-            {[0, 1, 2, 3].map((i) => (
-              <div key={i} className="sws-tile-stat"><Skeleton width="55%" height={11} /><Skeleton width="40%" height={26} /></div>
-            ))}
+        {loadError ? (
+          <div role="alert">
+            <Notice tone="busy" title="Couldn’t load curb data">
+              {LOAD_ERROR_COPY[loadError]}
+              <div style={{ marginTop: 10 }}><Button size="sm" onClick={retry}>Try again</Button></div>
+            </Notice>
           </div>
+        ) : loading ? (
+          <>
+            <p className="sws-sr-only" role="status">Loading…</p>
+            <div className="sws-tiles" aria-busy="true">
+              {[0, 1, 2, 3].map((i) => (
+                <div key={i} className="sws-tile-stat"><Skeleton width="55%" height={11} /><Skeleton width="40%" height={26} /></div>
+              ))}
+            </div>
+          </>
         ) : (
           <>
+            <p className="sws-sr-only" role="status">
+              {alerts.length === 1 ? "1 unit needs attention" : `${alerts.length || "No"} units need attention`}
+            </p>
             <div className="sws-enter sws-tiles">
               <StatTile label="Spots monitored" value={total} sub={offline ? `${offline} offline` : "all reporting"} subColor={offline ? c.warn : undefined} />
               <StatTile label="Available now" value={open} sub={`${pct(open)}%`} color={c.open} title="Share of curbs that are reporting" />
@@ -91,11 +135,11 @@ function Overview() {
             <div className="sws-stack" style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
               <Card title="Parking lots" delay={80} style={{ flex: 2 }}>
                 {Object.keys(lots).length === 0 && unassigned.total === 0 ? (
-                  <EmptyState icon="lots" title="No lots yet">Lots appear here once they're added to the database.</EmptyState>
+                  <EmptyState icon="lots" title="No lots yet">Lots appear here once they’re added to the database.</EmptyState>
                 ) : (
                   <div className="sws-lot-grid">
                     {Object.entries(lots).map(([id, lot]) => (
-                      <LotRow key={id} lot={lot} stats={stats[id] || { total: 0, occupied: 0, offline: 0 }} />
+                      <LotRow key={id} id={id} lot={lot} stats={stats[id] || { total: 0, occupied: 0, offline: 0 }} />
                     ))}
                     {unassigned.total > 0 && (
                       <LotRow lot={{ name: "Unassigned curbs" }} stats={unassigned} />
@@ -127,8 +171,8 @@ function Overview() {
                     );
                   })}
                   {alerts.length > 0 && (
-                    <Link to="/units?filter=attention" style={{ fontSize: 12.5, fontWeight: 600, color: c.accent, textDecoration: "none", marginTop: 4 }}>
-                      {alerts.length > MAX_ALERTS ? `View all ${alerts.length} in Curb units →` : "View in Curb units →"}
+                    <Link to="/units?filter=attention" className="sws-link" style={{ marginTop: 4 }}>
+                      {alerts.length > MAX_ALERTS ? `View all ${alerts.length} in Curb units` : "View in Curb units"} <span aria-hidden="true">→</span>
                     </Link>
                   )}
                 </div>

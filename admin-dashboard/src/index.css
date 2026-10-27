@@ -249,7 +249,10 @@ button.sws-th[data-active] { color: var(--accent); }
 .sws-typing span:nth-child(3) { animation-delay: 0.3s; }
 
 .sws-hover { transition: transform 0.18s ease, border-color 0.18s ease; }
-.sws-hover:hover { transform: translateY(-1px); border-color: #45453B !important; }
+.sws-hover:hover { transform: translateY(-1px); border-color: #45453B; }
+
+.sws-link { font-size: 12.5px; font-weight: 600; color: var(--accent); text-decoration: none; }
+.sws-link:hover { text-decoration: underline; }
 
 .sws-tile { transition: background-color 0.5s ease, border-color 0.5s ease, color 0.5s ease, transform 0.18s ease; }
 .sws-tile:hover { transform: translateY(-1px); }
@@ -279,6 +282,7 @@ button.sws-th[data-active] { color: var(--accent); }
 
 /* Overview lots: one column, two on wide screens so the bars don't stretch. */
 .sws-lot-grid { display: flex; flex-direction: column; gap: 10px; }
+.sws-lot-row { display: block; border: 1px solid var(--line); border-radius: 5px; padding: 11px 13px; color: inherit; text-decoration: none; }
 @media (min-width: 1200px) {
   .sws-lot-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
@@ -355,8 +359,8 @@ button.sws-th[data-active] { color: var(--accent); }
   .sws-card-head { padding: 12px 14px; }
   .sws-card-body { padding: 14px; }
   /* Lot rows drop their own box inside the card; a divider separates them instead. */
-  .sws-lot-row { border: none !important; border-radius: 0 !important; padding: 2px 0 !important; }
-  .sws-lot-row + .sws-lot-row { border-top: 1px solid var(--line) !important; padding-top: 12px !important; }
+  .sws-lot-row { border: none; border-radius: 0; padding: 2px 0; }
+  .sws-lot-row + .sws-lot-row { border-top: 1px solid var(--line); padding-top: 12px; }
   /* One line on phones: badge, status, and the switch button; the sentence is dropped. */
   .sws-sim-banner { padding: 6px 16px !important; gap: 10px !important; flex-wrap: nowrap !important; }
   .sws-sim-text, .sws-sim-long { display: none; }
