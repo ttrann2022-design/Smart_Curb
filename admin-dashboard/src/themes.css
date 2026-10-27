@@ -229,9 +229,10 @@
 /* Paper's status insets. Lime "free" can't reach 3:1 on any light surface, and
    status colours never change, so wherever Paper draws curb status (lot plans,
    the Overview summary, attention list and hardware card, the Units table,
-   Analytics charts, theme previews) the surface turns dark: these regions
+   Analytics charts, Paper's own theme preview) the surface turns dark: these regions
    re-declare the dark surface and text tokens, and everything inside follows. */
-[data-theme="paper"] :is(.lp, .ov-summary, .ov-hw, .ov-attn-list, .un-wrap, .an-panel, .tp-plan) {
+[data-theme="paper"] :is(.lp, .ov-summary, .ov-hw, .ov-attn-list, .un-wrap, .an-panel),
+.tp-card[data-theme="paper"] .tp-plan {
   color-scheme: dark;
   --bg: #1A1B16;
   --panel: #22231D;
