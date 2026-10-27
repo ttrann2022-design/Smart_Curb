@@ -32,7 +32,7 @@ function CopyLinkButton({ email }) {
     }
   };
   return (
-    <Button variant="ghost" size="sm" icon={copied ? "check" : "copy"} onClick={copy} aria-label={`Copy sign-up link for ${email}`} style={{ color: copied ? c.text : undefined }}>
+    <Button variant="ghost" size="sm" icon={copied ? "check" : "copy"} onClick={copy} aria-label={`Copy sign-up link for ${email}`} style={{ color: copied ? c.brand : undefined }}>
       {copied ? "Copied" : "Copy sign-up link"}
     </Button>
   );

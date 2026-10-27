@@ -11,10 +11,11 @@
   --dim: #8E8C82;
   --faint: #5F5E56;
   --nav-text: #A5A399;
-  --accent: #C6F24A;
-  --on-accent: #12110F;
-  --accent-bg: #232B15;
-  --accent-line: #3A4A1F;
+  /* Older names, kept as aliases of the brand tokens below. */
+  --accent: var(--brand);
+  --on-accent: var(--brand-ink);
+  --accent-bg: var(--brand-bg);
+  --accent-line: var(--brand-line);
   --open: #8BD44A;
   --open-bg: #1C2612;
   --open-text: #B4E86A;
@@ -33,16 +34,26 @@
   --sans: 'Archivo', system-ui, sans-serif;
   --radius: 6px;
 
-  /* Curb status. Lime means free and nothing else: never nav, links or decoration. */
+  /* Brand: the accent for actions and identity: primary buttons, links, input focus,
+     the active nav item, badges, checkmarks, role highlights, avatars, active sort.
+     Change these to re-brand; curb status below is separate. */
+  --brand: #C6F24A;
+  --brand-ink: #0F0F0D;    /* text on --brand: 14.8:1 */
+  --brand-hover: #B3DE3A;  /* darker lime for hover: ink still 12.3:1 */
+  --brand-bg: #232B15;     /* lime-tinted surface for badges and the active nav item */
+  --brand-line: #3A4A1F;   /* lime-tinted hairline */
+
+  /* Curb status. --free is only for free-curb status (stalls and "free" counts).
+     It shares the brand's hue today but is its own token, so the two can diverge. */
   --free: #C6F24A;
   --occupied: #F2694C;
   --attention: #E0A63C;
   --offline: #34342D;
   --offline-mark: var(--dim);
-  /* Navigation and links are off-white. */
-  --link: var(--text);
-  --nav-active: var(--text);
-  --nav-active-bg: rgba(242, 241, 234, 0.07);
+  /* Links and the active nav item use the brand. */
+  --link: var(--brand);
+  --nav-active: var(--brand);
+  --nav-active-bg: var(--brand-bg);
 
   /* Type scale. Headings, IDs and numbers use --mono; body text uses --sans. */
   --fs-hero: clamp(96px, 10.5vw, 156px);
@@ -146,9 +157,11 @@ a, button { touch-action: manipulation; -webkit-tap-highlight-color: transparent
 .sws-btn-lg { height: 46px; padding: 0 22px; font-size: 14px; }
 .sws-btn-block { width: 100%; }
 
-/* Off-white, not lime: lime means "free" only. */
-.sws-btn-primary { background: var(--text); color: var(--bg); }
-.sws-btn-primary:hover:not(:disabled) { background: #D6D5CC; }
+/* Brand button. Keyboard focus is an off-white ring 2px out, so a dark gap always
+   separates it from the lime (an off-white ring touching lime would be 1.14:1). */
+.sws-btn-primary { background: var(--brand); color: var(--brand-ink); }
+.sws-btn-primary:hover:not(:disabled) { background: var(--brand-hover); }
+.sws-btn-primary:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
 .sws-btn-secondary { background: var(--bg); color: var(--text); border-color: var(--line); }
 .sws-btn-secondary:hover:not(:disabled) { border-color: var(--line-strong); background: var(--card); }
 .sws-btn-danger { background: var(--bg); color: var(--busy); border-color: var(--busy-line); }
@@ -167,8 +180,8 @@ a, button { touch-action: manipulation; -webkit-tap-highlight-color: transparent
 }
 .sws-input::placeholder { color: var(--faint); }
 .sws-input:hover:not(:disabled) { border-color: var(--line-strong); }
-/* Focus: an off-white ring just outside the field (not lime: lime means free only). */
-.sws-input:focus-visible, .sws-input:focus { outline: 2px solid var(--text); outline-offset: 2px; border-color: var(--line-strong); }
+/* Focus: a brand ring just outside the field, with the field border picking it up. */
+.sws-input:focus-visible, .sws-input:focus { outline: 2px solid var(--brand); outline-offset: 2px; border-color: var(--brand-line); }
 .sws-input:disabled { opacity: 0.55; cursor: not-allowed; }
 .sws-input-lg { height: 46px; font-size: 14px; }
 .sws-input[aria-invalid="true"] { border-color: var(--busy); }
@@ -204,7 +217,7 @@ select.sws-input {
 .sws-badge {
   display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border-radius: 4px;
   font-family: var(--mono); font-size: 10.5px; font-weight: 600; letter-spacing: 0.6px; white-space: nowrap;
-  background: var(--card); color: var(--nav-text);
+  background: var(--brand-bg); color: var(--brand);
 }
 
 /* ---------- Notices ---------- */
@@ -232,7 +245,7 @@ select.sws-input {
 .sws-th { font-size: 11px; font-weight: 700; letter-spacing: 0.7px; color: var(--dim); text-transform: uppercase; white-space: nowrap; }
 button.sws-th { background: none; border: none; padding: 0; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; text-align: left; }
 button.sws-th:hover { color: var(--text); }
-button.sws-th[data-active] { color: var(--text); }
+button.sws-th[data-active] { color: var(--brand); }
 .sws-tbody .sws-trow { transition: background-color 0.12s; }
 .sws-tbody .sws-trow:hover { background: rgba(255, 255, 255, 0.022); }
 
@@ -310,7 +323,7 @@ button.sws-th[data-active] { color: var(--text); }
 .sws-nav-link.active { background: var(--nav-active-bg); color: var(--nav-active); font-weight: 600; }
 .sws-nav-link.active svg { opacity: 1; }
 .sws-nav-badge { margin-left: auto; height: 18px; padding: 0 6px; font-size: 9.5px; background: transparent; color: var(--faint); box-shadow: inset 0 0 0 1px var(--line); }
-.sws-nav-link.active .sws-nav-badge { color: var(--nav-text); box-shadow: inset 0 0 0 1px var(--line-strong); }
+.sws-nav-link.active .sws-nav-badge { color: var(--brand); box-shadow: inset 0 0 0 1px var(--brand-line); }
 .sws-nav-badge.on { background: var(--sim-bg) !important; color: var(--sim) !important; box-shadow: inset 0 0 0 1px var(--sim-line) !important; }
 .sws-seg:hover:not([aria-checked="true"]) { color: var(--text) !important; }
 
@@ -339,7 +352,8 @@ button.sws-th[data-active] { color: var(--text); }
 .lp-in { width: fit-content; max-width: 100%; }
 
 .lp-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-4); margin-bottom: var(--sp-3); }
-.lp-name { font-family: var(--mono); font-size: 15px; font-weight: 600; color: var(--link); text-decoration: none; min-width: 0; overflow-wrap: anywhere; }
+/* Lot names are headings that link: off-white, so they never read as a lime "free" count. */
+.lp-name { font-family: var(--mono); font-size: 15px; font-weight: 600; color: var(--text); text-decoration: none; min-width: 0; overflow-wrap: anywhere; }
 a.lp-name:hover { text-decoration: underline; text-underline-offset: 4px; }
 .lp-count { font-size: 12.5px; color: var(--dim); white-space: nowrap; }
 .lp-free-n { font-family: var(--mono); font-size: 15px; font-weight: 600; color: var(--free); font-variant-numeric: tabular-nums; }
@@ -635,20 +649,20 @@ button.lp-stall { background: none; border: 0; padding: 0; margin: 0; font: inhe
 /* ---------- Users & roles ---------- */
 .ur-roles { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--sp-4); }
 .ur-role { background: var(--panel); border-radius: var(--radius); padding: 18px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
-/* Your own role: a neutral off-white outline, never a lime tint. */
-.ur-role.is-mine { box-shadow: inset 0 0 0 1px var(--nav-text); }
+/* Your own role: a brand outline over a faint brand tint. */
+.ur-role.is-mine { background: color-mix(in srgb, var(--brand) 5%, var(--panel)); box-shadow: inset 0 0 0 1px var(--brand-line); }
 .ur-role-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
 .ur-role-name { font-family: var(--mono); font-size: var(--fs-section); font-weight: 600; margin: 0; display: flex; align-items: center; gap: var(--sp-2); }
 .ur-role-who { font-size: 12px; color: var(--dim); margin-top: 3px; }
-.ur-you { height: 18px; padding: 0 6px; color: var(--text); box-shadow: inset 0 0 0 1px var(--line-strong); background: transparent; }
+.ur-you { height: 18px; padding: 0 6px; color: var(--brand-ink); background: var(--brand); }
 .ur-perms { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
 .ur-perms li { font-size: 12.5px; display: flex; align-items: center; gap: var(--sp-2); }
-.ur-perms .is-yes svg { color: var(--text); }
+.ur-perms .is-yes svg { color: var(--brand); }
 .ur-perms .is-no { color: var(--faint); }
 
 .ur-form { padding: 14px 18px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .ur-done { margin: 0 18px 14px; padding: 10px 12px; border-radius: var(--radius); background: var(--panel-2); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: var(--fs-body); }
-.ur-done > svg { color: var(--text); flex-shrink: 0; }
+.ur-done > svg { color: var(--brand); flex-shrink: 0; }
 
 /* Ruleless lists, as on Curb units: spacing and a hover tint separate rows. */
 .ur-list { padding: 4px 6px 8px; }
@@ -684,7 +698,7 @@ button.lp-stall { background: none; border: 0; padding: 0; margin: 0; font: inhe
 .as-avatar {
   width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0; margin-top: 2px;
   display: flex; align-items: center; justify-content: center;
-  background: var(--panel-2); color: var(--text); box-shadow: inset 0 0 0 1px var(--line-strong);
+  background: var(--brand-bg); color: var(--brand);
 }
 .as-bubble { max-width: min(600px, 85%); padding: 11px 15px; font-size: var(--fs-body); line-height: 1.6; white-space: pre-line; overflow-wrap: anywhere; background: var(--panel); color: var(--text); border-radius: 3px 12px 12px 12px; }
 /* Your messages: a lighter neutral surface, never lime. */

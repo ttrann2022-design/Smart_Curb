@@ -156,7 +156,7 @@ function Settings() {
         <Card plain title="Account" delay={0}>
           <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
-              <div aria-hidden="true" style={{ width: 42, height: 42, borderRadius: 21, background: c.panel2, color: c.text, boxShadow: `inset 0 0 0 1px ${c.lineStrong}`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: mono, fontWeight: 600, fontSize: 16 }}>
+              <div aria-hidden="true" style={{ width: 42, height: 42, borderRadius: 21, background: c.brandBg, color: c.brand, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: mono, fontWeight: 600, fontSize: 16 }}>
                 {(user?.email || "?")[0].toUpperCase()}
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>

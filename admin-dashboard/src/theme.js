@@ -1,7 +1,10 @@
 // Mirrors the CSS variables in index.css, for inline styles and SVG.
 export const c = {
   bg: "#0F0F0D", side: "#090908", panel: "#171714", panel2: "#1A1A17", line: "#2B2B25", lineStrong: "#3A3A32",
-  text: "#F2F1EA", dim: "#8E8C82", faint: "#5F5E56", accent: "#C6F24A", onAccent: "#12110F",
+  text: "#F2F1EA", dim: "#8E8C82", faint: "#5F5E56",
+  // Brand accent for actions and identity (mirrors --brand*). accent/onAccent are older aliases.
+  brand: "#C6F24A", brandInk: "#0F0F0D", brandBg: "#232B15", brandLine: "#3A4A1F",
+  accent: "#C6F24A", onAccent: "#0F0F0D",
   open: "#8BD44A", busy: "#F2694C", warn: "#E0A63C",
   openBg: "#1C2612", openText: "#B4E86A", busyBg: "#221410", busyLine: "#4A2A20", busyText: "#FF8F74",
   warnBg: "#26200F", warnLine: "#4A3A1C", warnText: "#FFC078",
