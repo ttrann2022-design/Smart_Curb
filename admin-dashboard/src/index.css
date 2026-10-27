@@ -1062,3 +1062,77 @@ button.lp-stall { background: none; border: 0; padding: 0; margin: 0; font: inhe
   .ld-brand span { display: none; }
   .ld-hero-cta .sws-btn { flex: 1 1 100%; }
 }
+
+/* How it works: four steps joined by links; a lime pulse runs each link in turn. */
+.ld-flow { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-6); }
+.ld-flow-step { position: relative; display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.ld-flow-icon {
+  width: 56px; height: 56px; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center;
+  background: var(--panel); border: 1px solid var(--line-strong); color: var(--text); margin-bottom: var(--sp-2);
+}
+.ld-flow-n { font-family: var(--mono); font-size: var(--fs-caption); color: var(--faint); letter-spacing: 1px; }
+.ld-flow-h { margin: 0; font-family: var(--mono); font-size: 16px; font-weight: 600; }
+.ld-flow-p { margin: 0; font-size: var(--fs-body); line-height: 1.6; color: var(--nav-text); }
+/* The link runs from the right of this icon to the left of the next one. */
+.ld-flow-link {
+  position: absolute; top: 27px; left: calc(56px + 12px); right: calc(-1 * var(--sp-6) + 12px); height: 2px;
+  background: repeating-linear-gradient(90deg, var(--line-strong) 0 6px, transparent 6px 11px);
+}
+.ld-flow-link::after {
+  content: ""; position: absolute; right: -1px; top: -4px; width: 0; height: 0;
+  border-left: 7px solid var(--line-strong); border-top: 5px solid transparent; border-bottom: 5px solid transparent;
+}
+.ld-flow-pulse { position: absolute; inset: 0; overflow: hidden; }
+.ld-flow-pulse::before {
+  content: ""; position: absolute; top: -2px; left: 0; width: 100%; height: 6px;
+  background: linear-gradient(90deg, transparent calc(100% - 28px), var(--brand) calc(100% - 6px), transparent 100%);
+  transform: translateX(-100%);
+  animation: ld-pulse-x 3.2s var(--ease-in-out) infinite;
+  animation-delay: calc(var(--i) * 0.8s);
+}
+@keyframes ld-pulse-x {
+  0% { transform: translateX(-100%); opacity: 1; }
+  25% { transform: translateX(0); opacity: 1; }
+  26%, 100% { transform: translateX(0); opacity: 0; }
+}
+@keyframes ld-pulse-y {
+  0% { transform: translateY(-100%); opacity: 1; }
+  25% { transform: translateY(0); opacity: 1; }
+  26%, 100% { transform: translateY(0); opacity: 0; }
+}
+
+/* Demo lot */
+.ld-demo { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: var(--sp-7); align-items: center; }
+.ld-legend { list-style: none; margin: 0 0 var(--sp-5); padding: 0; display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-5); font-size: var(--fs-body); color: var(--nav-text); }
+.ld-legend li { display: inline-flex; align-items: center; gap: 8px; }
+.ld-demo-ctl { display: flex; align-items: center; gap: var(--sp-4); flex-wrap: wrap; }
+.ld-demo-pick { margin: 0; font-size: var(--fs-body); color: var(--dim); }
+.ld-demo-pick .sws-mono { color: var(--text); font-weight: 600; }
+.ld-demo-plan { position: relative; display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+/* Sim blue, like Simulation mode in the dashboard: never mistaken for live data. */
+.ld-demo-badge {
+  align-self: flex-start; display: inline-flex; align-items: center; height: 24px; padding: 0 9px; border-radius: 4px;
+  font-family: var(--mono); font-size: 10.5px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase;
+  color: var(--sim); background: var(--sim-bg); box-shadow: inset 0 0 0 1px var(--sim-line);
+}
+
+@media (max-width: 900px) {
+  .ld-flow { grid-template-columns: minmax(0, 1fr); gap: var(--sp-5); }
+  .ld-flow-step { display: grid; grid-template-columns: 56px minmax(0, 1fr); column-gap: var(--sp-4); row-gap: 2px; align-items: start; }
+  .ld-flow-icon { grid-row: 1 / span 3; margin-bottom: 0; }
+  /* Vertical link down to the next icon. */
+  .ld-flow-link {
+    top: calc(56px + 8px); bottom: calc(-1 * var(--sp-5) + 8px); left: 27px; right: auto; width: 2px; height: auto;
+    background: repeating-linear-gradient(180deg, var(--line-strong) 0 6px, transparent 6px 11px);
+  }
+  .ld-flow-link::after { right: auto; left: -4px; top: auto; bottom: -1px; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 7px solid var(--line-strong); border-bottom: 0; }
+  .ld-flow-pulse::before {
+    top: 0; left: -2px; width: 6px; height: 100%;
+    background: linear-gradient(180deg, transparent calc(100% - 28px), var(--brand) calc(100% - 6px), transparent 100%);
+    transform: translateY(-100%); animation-name: ld-pulse-y;
+  }
+  .ld-demo { grid-template-columns: minmax(0, 1fr); gap: var(--sp-5); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ld-flow-pulse { display: none; }
+}
