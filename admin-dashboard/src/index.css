@@ -557,6 +557,78 @@ button.lp-stall { background: none; border: 0; padding: 0; margin: 0; font: inhe
   .un-row .is-unset { display: none; }
 }
 
+/* ---------- Analytics ---------- */
+/* Charts sit on plain panel surfaces under mono headings. Marks use the status
+   colours (occupied red here); all text uses text tokens, mono and tabular. */
+.an-body { gap: 36px; padding-top: 30px; }
+.an-stack { display: flex; flex-direction: column; gap: var(--sp-4); }
+.an-section { display: flex; flex-direction: column; min-width: 0; }
+.an-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; }
+.an-h2 { font-family: var(--mono); font-size: var(--fs-section); font-weight: 600; margin: 0; text-wrap: balance; }
+.an-sub { margin: 6px 0 0; font-size: var(--fs-body); color: var(--dim); line-height: 1.55; max-width: 760px; }
+.an-meta { font-size: var(--fs-caption); font-weight: 600; letter-spacing: 0.6px; text-transform: uppercase; color: var(--faint); }
+.an-panel { background: var(--panel); border-radius: var(--radius); padding: 20px; margin-top: var(--sp-3); min-width: 0; }
+
+/* Summary: one hero number, then a slim row of facts. */
+.an-summary { display: flex; align-items: flex-end; flex-wrap: wrap; gap: var(--sp-5) var(--sp-8); }
+.an-hero { display: flex; flex-direction: column; gap: 10px; }
+.an-hero-n { font-family: var(--mono); font-size: clamp(64px, 7vw, 104px); font-weight: 600; line-height: 0.85; letter-spacing: -0.04em; font-variant-numeric: tabular-nums; }
+.an-hero-l { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-body); color: var(--dim); }
+.an-facts { display: flex; flex-wrap: wrap; gap: var(--sp-3) 44px; margin: 0; }
+.an-facts > div { display: grid; grid-template-columns: auto 1fr; grid-template-areas: "k k" "v s"; align-items: baseline; column-gap: var(--sp-2); }
+.an-facts dt { grid-area: k; font-size: var(--fs-caption); font-weight: 600; letter-spacing: 0.6px; text-transform: uppercase; color: var(--faint); margin-bottom: 6px; }
+.an-facts dd { grid-area: v; margin: 0; font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.an-facts span { grid-area: s; font-size: 12px; color: var(--dim); }
+
+/* Heatmap: fits its width (no sideways scroll); a 2px surface gap between cells. */
+.an-heat { container-type: inline-size; display: grid; grid-template-columns: 36px repeat(14, minmax(0, 1fr)); gap: 2px; }
+.an-hour { font-family: var(--mono); font-size: 10.5px; color: var(--dim); text-align: center; padding-bottom: var(--sp-1); font-variant-numeric: tabular-nums; }
+.an-day { font-family: var(--mono); font-size: 11.5px; font-weight: 600; color: var(--dim); display: flex; align-items: center; }
+.an-hour.is-on, .an-day.is-on { color: var(--text); }
+.an-cell { height: 32px; border-radius: 3px; position: relative; }
+.an-cell.is-on { box-shadow: 0 0 0 2px var(--panel), 0 0 0 3px var(--text); z-index: 1; }
+@container (max-width: 520px) {
+  .an-cell { height: 22px; border-radius: 2px; }
+  .an-hour.is-odd { visibility: hidden; }
+}
+.an-heat-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3) var(--sp-4); flex-wrap: wrap; }
+.an-legend { display: flex; align-items: center; gap: 10px; font-size: var(--fs-caption); color: var(--dim); }
+.an-legend-ramp { display: flex; gap: 2px; }
+.an-legend-ramp > span { width: 22px; height: 10px; border-radius: 2px; }
+.an-heat-actions { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
+.an-readout { font-size: 12.5px; min-width: 150px; color: var(--dim); }
+.an-readout.is-on { color: var(--text); }
+.an-readout .sws-mono { font-weight: 600; }
+.an-table { border-collapse: collapse; width: 100%; font-size: 12.5px; min-width: 640px; font-variant-numeric: tabular-nums; }
+.an-table th, .an-table td { padding: 6px 4px; text-align: right; }
+.an-table th:first-child { text-align: left; padding-left: 8px; }
+.an-table tbody th { color: var(--dim); font-weight: 600; font-family: var(--mono); }
+.an-table tbody tr + tr { border-top: 1px solid var(--line); }
+
+/* Live chart: drawn at its real width, so tick text stays 10-11px on phones. */
+.an-live { position: relative; min-width: 0; }
+.an-svg { display: block; touch-action: pan-y; }
+.an-grid { stroke: var(--line); stroke-width: 1; }
+.an-axis { stroke: var(--line-strong); stroke-width: 1; }
+.an-tick { fill: var(--dim); font-family: var(--mono); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.an-area { fill: var(--occupied); opacity: 0.08; }
+.an-line { fill: none; stroke: var(--occupied); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.an-dot { fill: var(--occupied); stroke: var(--panel); stroke-width: 2; }
+.an-end { fill: var(--text); font-family: var(--mono); font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.an-cross { stroke: var(--dim); stroke-width: 1; }
+.an-tip {
+  position: absolute; top: 4px; pointer-events: none; display: flex; flex-direction: column; gap: 2px;
+  background: var(--text); color: var(--bg); border-radius: 4px; padding: 5px 9px; font-size: var(--fs-caption); white-space: nowrap;
+}
+.an-tip .sws-mono { font-size: 12px; font-weight: 600; }
+
+@media (max-width: 900px) {
+  .an-body { gap: 30px; padding-top: 22px !important; }
+  .an-panel { padding: 14px; }
+  .an-facts { gap: var(--sp-3) var(--sp-6); }
+  .an-facts dd { font-size: 22px; }
+}
+
 /* ---------- Responsive ---------- */
 .sws-topbar { display: none; }
 .sws-backdrop { display: none; }
@@ -638,8 +710,6 @@ button.lp-stall { background: none; border: 0; padding: 0; margin: 0; font: inhe
 
   .sws-table-scroll > div { min-width: 760px; }
 
-  .sws-heatmap { gap: 2px !important; }
-  .sws-heatmap > div { font-size: 8px !important; }
 
   .sws-login { flex-direction: column !important; height: auto !important; min-height: 100dvh; }
   .sws-login-brand { flex: 0 0 auto !important; padding: 28px 20px !important; gap: 18px; align-items: center; text-align: center; }
