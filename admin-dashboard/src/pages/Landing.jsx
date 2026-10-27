@@ -155,7 +155,7 @@ const FEATURES = [
   { icon: "lots", title: "Every lot at a glance", text: "Each lot drawn as a plan, with free, occupied and offline spaces updating live." },
   { icon: "alert", title: "Alerts that matter", text: "Curbs that go offline or run low on battery are flagged before anyone has to go looking." },
   { icon: "sign", title: "Lot entrance signs", text: "A full-screen free-space count for a display at each entrance. It needs no sign-in." },
-  { icon: "units", title: "LED zones and panel text", text: "Set each curb's zone colour and message from the dashboard. Not yet wired to the curb hardware." },
+  { icon: "units", title: "LED zones and panel text", text: "Set a curb's zone colour and panel text from the dashboard. It's written to Firebase, and the Receiver sends it to the LED matrix." },
   { icon: "analytics", title: "Analytics", text: "Occupancy through the day and week, and how quickly changes reach the screen." },
   { icon: "users", title: "Roles for your team", text: "Viewers watch, operators change zones and text, managers handle users and setup." },
 ];
