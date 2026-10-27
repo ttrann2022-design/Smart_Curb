@@ -26,7 +26,7 @@ const navItems = [
 function Brand({ size = 40 }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-      <img src={logo} alt="" style={{ width: size, height: size, borderRadius: 8, objectFit: "cover", flexShrink: 0 }} />
+      <img src={logo} alt="" width={size} height={size} style={{ width: size, height: size, borderRadius: 8, objectFit: "cover", flexShrink: 0 }} />
       <div style={{ minWidth: 0 }}>
         <div style={{ fontFamily: mono, fontSize: 12.5, fontWeight: 600, letterSpacing: 0.3, whiteSpace: "nowrap" }}>SMART WHEEL STOP</div>
         <div style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: 1.4, color: c.dim }}>ADMIN CONSOLE</div>
@@ -39,7 +39,7 @@ function FullScreen({ children }) {
   return (
     <div style={{ minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", background: c.bg, padding: 24 }}>
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 18, textAlign: "center", maxWidth: 380 }}>
-        <img src={logo} alt="Smart Wheel Stop" style={{ width: 64, height: 64, borderRadius: 12, objectFit: "cover" }} />
+        <img src={logo} alt="Smart Wheel Stop" width={64} height={64} style={{ width: 64, height: 64, borderRadius: 12, objectFit: "cover" }} />
         {children}
       </div>
     </div>
@@ -221,7 +221,7 @@ function Layout() {
             target="_blank"
             rel="noreferrer"
             className="sws-nav-link"
-            style={{ border: `1px dashed ${c.line}`, color: c.accent, fontWeight: 600, fontSize: 13 }}
+            style={{ border: `1px dashed ${c.line}`, color: c.text, fontWeight: 600, fontSize: 13 }}
           >
             <Icon name="sign" size={16} />
             Open lot sign
@@ -230,12 +230,12 @@ function Layout() {
           </a>
 
           <div style={{ padding: "10px 12px", borderRadius: 6, background: c.card, display: "flex", alignItems: "center", gap: 10 }}>
-            <div aria-hidden="true" style={{ width: 30, height: 30, borderRadius: 15, background: c.navBg, color: c.accent, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: mono, fontWeight: 600, fontSize: 13, flexShrink: 0 }}>
+            <div aria-hidden="true" style={{ width: 30, height: 30, borderRadius: 15, background: c.panel2, color: c.text, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: mono, fontWeight: 600, fontSize: 13, flexShrink: 0 }}>
               {(userEmail || "?")[0].toUpperCase()}
             </div>
             <div style={{ minWidth: 0, flex: 1 }}>
               <div title={userEmail} style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{userEmail}</div>
-              <div style={{ fontFamily: mono, fontSize: 10, fontWeight: 600, letterSpacing: 0.8, color: c.accent, marginTop: 2 }}>{role.toUpperCase()}</div>
+              <div style={{ fontFamily: mono, fontSize: 10, fontWeight: 600, letterSpacing: 0.8, color: c.dim, marginTop: 2 }}>{role.toUpperCase()}</div>
             </div>
             <button type="button" onClick={handleSignOut} aria-label="Sign out" title="Sign out" className="sws-btn sws-btn-ghost sws-btn-sm" style={{ padding: "0 7px" }}>
               <Icon name="logout" size={16} />
@@ -261,7 +261,10 @@ function Layout() {
         </div>
         {mode === "sim" && <SimBanner />}
         <main id="main" tabIndex={-1} className="sws-main" style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-          <Outlet key={mode} context={{ role, mode }} />
+          {/* Keyed by path so each route fades in (.sws-route); query changes don't refade. */}
+          <div key={location.pathname} className="sws-route">
+            <Outlet key={mode} context={{ role, mode }} />
+          </div>
         </main>
       </div>
     </div>

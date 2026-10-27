@@ -32,6 +32,42 @@
   --mono: 'IBM Plex Mono', ui-monospace, monospace;
   --sans: 'Archivo', system-ui, sans-serif;
   --radius: 6px;
+
+  /* Curb status. Lime means free and nothing else: never nav, links or decoration. */
+  --free: #C6F24A;
+  --occupied: #F2694C;
+  --attention: #E0A63C;
+  --offline: #34342D;
+  --offline-mark: var(--dim);
+  /* Navigation and links are off-white. */
+  --link: var(--text);
+  --nav-active: var(--text);
+  --nav-active-bg: rgba(242, 241, 234, 0.07);
+
+  /* Type scale. Headings, IDs and numbers use --mono; body text uses --sans. */
+  --fs-hero: clamp(96px, 10.5vw, 156px);
+  --fs-title: 19px;
+  --fs-section: 14px;
+  --fs-body: 13px;
+  --fs-caption: 11px;
+
+  /* Spacing, on a 4px grid. */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+  --sp-7: 48px;
+  --sp-8: 64px;
+
+  /* Motion. Animate transform and opacity only. */
+  --dur-fast: 150ms;
+  --dur-base: 250ms;
+  --dur-slow: 450ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+
   color-scheme: dark;
 }
 
@@ -40,11 +76,11 @@ html, body, #root { margin: 0; padding: 0; height: 100%; }
 body { background: var(--bg); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
 button, input, select, textarea { font-family: inherit; }
 a, button { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
-::selection { background: rgba(198, 242, 74, 0.28); }
+::selection { background: rgba(242, 241, 234, 0.22); }
 
 /* Visible keyboard focus everywhere, never on mouse click. */
 :focus { outline: none; }
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; border-radius: 4px; }
 
 .sws-sr-only {
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
@@ -53,7 +89,7 @@ a, button { touch-action: manipulation; -webkit-tap-highlight-color: transparent
 
 .sws-skip {
   position: absolute; left: 12px; top: -48px; z-index: 100;
-  background: var(--accent); color: var(--on-accent); font-weight: 600; font-size: 13px;
+  background: var(--text); color: var(--bg); font-weight: 600; font-size: 13px;
   padding: 10px 14px; border-radius: var(--radius); text-decoration: none; transition: top 0.15s;
 }
 .sws-skip:focus { top: 12px; }
@@ -66,7 +102,7 @@ a, button { touch-action: manipulation; -webkit-tap-highlight-color: transparent
   min-height: 68px; flex-shrink: 0; background: var(--panel); border-bottom: 1px solid var(--line);
   padding: 12px 30px; display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
 }
-.sws-page-title { font-family: var(--mono); font-size: 19px; font-weight: 600; margin: 0; line-height: 1.3; }
+.sws-page-title { font-family: var(--mono); font-size: var(--fs-title); font-weight: 600; margin: 0; line-height: 1.3; }
 .sws-page-sub { font-size: 12.5px; color: var(--dim); margin-top: 2px; display: flex; align-items: center; }
 .sws-page-body { padding: 22px 30px 40px; display: flex; flex-direction: column; gap: 16px; }
 .sws-narrow { max-width: 860px; }
@@ -76,12 +112,12 @@ a, button { touch-action: manipulation; -webkit-tap-highlight-color: transparent
   padding: 14px 18px; border-bottom: 1px solid var(--line);
   display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
 }
-.sws-card-title { font-family: var(--mono); font-size: 14px; font-weight: 600; margin: 0; }
+.sws-card-title { font-family: var(--mono); font-size: var(--fs-section); font-weight: 600; margin: 0; }
 .sws-card-sub { font-size: 12.5px; color: var(--dim); margin-top: 3px; line-height: 1.5; }
 .sws-card-meta { font-size: 12px; color: var(--dim); }
 .sws-card-body { padding: 16px 18px; }
 
-.sws-label { font-size: 11px; font-weight: 600; letter-spacing: 0.5px; color: var(--dim); text-transform: uppercase; }
+.sws-label { font-size: var(--fs-caption); font-weight: 600; letter-spacing: 0.5px; color: var(--dim); text-transform: uppercase; }
 .sws-note { font-size: 12.5px; color: var(--dim); line-height: 1.55; }
 .sws-mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 
@@ -117,7 +153,7 @@ a, button { touch-action: manipulation; -webkit-tap-highlight-color: transparent
 .sws-btn-ghost:hover:not(:disabled) { color: var(--text); background: var(--card); }
 .sws-btn-sim { background: var(--sim); color: #0B1220; }
 .sws-btn-sim:hover:not(:disabled) { background: #A9C6FF; }
-.sws-btn-link { background: none; border: none; padding: 0; height: auto; color: var(--accent); font-weight: 600; }
+.sws-btn-link { background: none; border: none; padding: 0; height: auto; color: var(--link); font-weight: 600; }
 .sws-btn-link:hover:not(:disabled) { text-decoration: underline; }
 
 /* ---------- Inputs ---------- */
@@ -197,21 +233,24 @@ button.sws-th[data-active] { color: var(--accent); }
 .sws-tbody .sws-trow:hover { background: rgba(255, 255, 255, 0.022); }
 
 /* ---------- Skeleton loading ---------- */
-@keyframes sws-shimmer { from { background-position: -200px 0; } to { background-position: calc(200px + 100%) 0; } }
-.sws-skel {
-  border-radius: 4px; background: linear-gradient(90deg, var(--card) 0, #26261F 40px, var(--card) 80px) no-repeat;
-  background-size: 200px 100%; background-color: var(--card); animation: sws-shimmer 1.4s linear infinite;
-}
+/* A slow opacity pulse (not a background sweep), so it stays on the compositor. */
+@keyframes sws-skel-pulse { 50% { opacity: 0.55; } }
+.sws-skel { border-radius: 4px; background-color: var(--card); animation: sws-skel-pulse 1.4s var(--ease-in-out) infinite; }
 
 /* ---------- Motion ---------- */
 @keyframes sws-fade-up {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: none; }
 }
+@keyframes sws-fade-in { from { opacity: 0; } }
+@keyframes sws-fade-out { to { opacity: 0; } }
 .sws-enter {
-  animation: sws-fade-up 0.45s ease-out both;
+  animation: sws-fade-up var(--dur-slow) var(--ease-out) both;
   animation-delay: var(--d, 0ms);
 }
+
+/* Short fade between routes (Layout keys this wrapper by path). */
+.sws-route { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; animation: sws-fade-in var(--dur-base) var(--ease-out); }
 
 @keyframes sws-pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
@@ -222,7 +261,7 @@ button.sws-th[data-active] { color: var(--accent); }
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--open);
+  background: var(--text);
   margin-right: 7px;
   vertical-align: middle;
   animation: sws-pulse 1.6s ease-in-out infinite;
@@ -252,8 +291,8 @@ button.sws-th[data-active] { color: var(--accent); }
 .sws-hover { transition: transform 0.18s ease, border-color 0.18s ease; }
 .sws-hover:hover { transform: translateY(-1px); border-color: #45453B; }
 
-.sws-link { font-size: 12.5px; font-weight: 600; color: var(--accent); text-decoration: none; }
-.sws-link:hover { text-decoration: underline; }
+.sws-link { font-size: 12.5px; font-weight: 600; color: var(--link); text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
+.sws-link:hover { text-decoration-color: currentColor; }
 
 .sws-tile { transition: background-color 0.5s ease, border-color 0.5s ease, color 0.5s ease, transform 0.18s ease; }
 .sws-tile:hover { transform: translateY(-1px); }
@@ -266,10 +305,10 @@ button.sws-th[data-active] { color: var(--accent); }
 }
 .sws-nav-link svg { flex-shrink: 0; opacity: 0.8; }
 .sws-nav-link:hover { background: rgba(255, 255, 255, 0.04); color: var(--text); }
-.sws-nav-link.active { background: var(--accent-bg); color: var(--accent); font-weight: 600; }
+.sws-nav-link.active { background: var(--nav-active-bg); color: var(--nav-active); font-weight: 600; }
 .sws-nav-link.active svg { opacity: 1; }
 .sws-nav-badge { margin-left: auto; height: 18px; padding: 0 6px; font-size: 9.5px; background: transparent; color: var(--faint); box-shadow: inset 0 0 0 1px var(--line); }
-.sws-nav-link.active .sws-nav-badge { color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent-line); }
+.sws-nav-link.active .sws-nav-badge { color: var(--nav-text); box-shadow: inset 0 0 0 1px var(--line-strong); }
 .sws-nav-badge.on { background: var(--sim-bg) !important; color: var(--sim) !important; box-shadow: inset 0 0 0 1px var(--sim-line) !important; }
 .sws-seg:hover:not([aria-checked="true"]) { color: var(--text) !important; }
 
@@ -281,12 +320,191 @@ button.sws-th[data-active] { color: var(--accent); }
   }
 }
 
-/* Overview lots: one column, two on wide screens so the bars don't stretch. */
-.sws-lot-grid { display: flex; flex-direction: column; gap: 10px; }
 .sws-meter-name { font-size: 13.5px; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
-.sws-lot-row { display: block; border: 1px solid var(--line); border-radius: 5px; padding: 11px 13px; color: inherit; text-decoration: none; }
-@media (min-width: 1200px) {
-  .sws-lot-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+/* ---------- Lot plan (shared: src/components/LotPlan.jsx) ---------- */
+/* A top-down lot: curb blocks in rows facing a drive aisle. Two sizes:
+   .lp (large, default) and .lp.is-compact. Every plan on a page can share one
+   stall size by passing the widest row count as `columns` (--lp-cols). */
+.lp {
+  --lp-stall-max: 30px; --lp-gap: clamp(3px, 0.45vw, 6px); --lp-pad: 18px; --lp-aisle: 26px; --lp-ring-gap: var(--panel);
+  min-width: 0;
+  animation: sws-fade-up var(--dur-slow) var(--ease-out) both;
+  animation-delay: calc(var(--lp-i, 0) * 40ms);
+}
+.lp.is-compact { --lp-stall-max: 16px; --lp-gap: 3px; --lp-pad: 10px; --lp-aisle: 14px; }
+/* Stalls size from the plan's own width, so it must fill its container. */
+.lp:not(.is-roomy) { container-type: inline-size; }
+.lp-in { width: fit-content; max-width: 100%; }
+
+.lp-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-4); margin-bottom: var(--sp-3); }
+.lp-name { font-family: var(--mono); font-size: 15px; font-weight: 600; color: var(--link); text-decoration: none; min-width: 0; overflow-wrap: anywhere; }
+a.lp-name:hover { text-decoration: underline; text-underline-offset: 4px; }
+.lp-count { font-size: 12.5px; color: var(--dim); white-space: nowrap; }
+.lp-free-n { font-family: var(--mono); font-size: 15px; font-weight: 600; color: var(--free); font-variant-numeric: tabular-nums; }
+.lp.is-compact .lp-head { margin-bottom: var(--sp-2); }
+.lp.is-compact .lp-name, .lp.is-compact .lp-free-n { font-size: var(--fs-body); }
+
+.lp-plan {
+  --lp-stall: min(var(--lp-stall-max), calc((100cqw - 2 * var(--lp-pad) - (var(--lp-cols, 1) - 1) * var(--lp-gap)) / var(--lp-cols, 1)));
+  background: var(--panel); border-radius: var(--radius); padding: var(--lp-pad);
+}
+.lp-row { display: grid; grid-template-columns: repeat(var(--cols), var(--lp-stall)); gap: var(--lp-gap); }
+.lp-row-b + .lp-row-a { margin-top: var(--sp-3); }
+/* Drive aisle between facing rows, with a dashed centre line. */
+.lp-aisle { height: var(--lp-aisle); display: flex; align-items: center; }
+.lp-aisle::before { content: ""; flex: 1; border-top: 2px dashed var(--line-strong); }
+
+/* Roomy: a large plan with only a few curbs gets big stalls with captions. */
+.lp.is-roomy .lp-plan { --lp-stall: 64px; padding: 22px var(--sp-5) 18px; }
+.lp.is-roomy .lp-row { gap: var(--sp-4); }
+.lp-cap { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: var(--fs-caption); color: var(--dim); white-space: nowrap; }
+.lp-cap .sws-mono { font-size: 12px; font-weight: 600; color: var(--text); }
+
+.lp-readout { margin-top: 10px; min-height: 18px; display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-3); font-size: 12px; color: var(--dim); }
+.lp-readout .sws-mono { color: var(--text); font-weight: 600; }
+.lp-readout-k { font-size: 10.5px; font-weight: 600; letter-spacing: 0.6px; text-transform: uppercase; color: var(--faint); }
+
+/* Curb block. Each status has its own fill layer; changing status crossfades
+   their opacity, so colour eases without animating anything but opacity. */
+.lp-block {
+  --ring: 2px;
+  display: block; position: relative; width: 100%; aspect-ratio: 2 / 3; border-radius: 3px;
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.lp-block.is-roomy { width: 44px; border-radius: 4px; }
+.lp-fill, .lp-x { position: absolute; opacity: 0; transition: opacity var(--dur-base) var(--ease-in-out); }
+.lp-fill { inset: 0; border-radius: inherit; }
+.lp-f-open { background: var(--free); }
+.lp-f-occupied { background: var(--occupied); }
+.lp-f-offline { background: var(--offline); }
+.lp-block[data-s="open"] .lp-f-open,
+.lp-block[data-s="occupied"] .lp-f-occupied,
+.lp-block[data-s="offline"] .lp-f-offline,
+.lp-block[data-s="offline"] .lp-x { opacity: 1; }
+.lp-x { left: 50%; top: 50%; width: min(60%, 12px); transform: translate(-50%, -50%); fill: none; stroke: var(--offline-mark); stroke-width: 1.6; stroke-linecap: round; }
+.lp-block.is-low { box-shadow: 0 0 0 var(--ring) var(--lp-ring-gap, var(--bg)), 0 0 0 calc(var(--ring) * 2) var(--attention); }
+.lp-block::after { content: ""; position: absolute; inset: -3px; border: 2px solid var(--text); border-radius: 6px; opacity: 0; pointer-events: none; }
+
+/* Stall: the focusable link around a block. Hover or focus lifts the block
+   and shows a tooltip with the curb ID and status. */
+.lp-stall { position: relative; display: flex; flex-direction: column; align-items: center; gap: var(--sp-2); color: inherit; text-decoration: none; border-radius: 3px; scroll-margin: 120px 0 24px; }
+.lp-stall:hover, .lp-stall:focus-visible { z-index: 2; }
+.lp-stall:focus-visible { outline: 2px solid var(--text); outline-offset: 6px; border-radius: 4px; }
+.lp-stall:hover .lp-block, .lp-stall:focus-visible .lp-block { transform: translateY(-3px); }
+
+.lp-tip {
+  position: absolute; bottom: calc(100% + 10px); left: 50%; z-index: 3;
+  display: flex; gap: 6px; align-items: baseline; padding: 4px 8px; border-radius: 4px;
+  background: var(--text); color: var(--bg); font-size: var(--fs-caption); font-weight: 600; white-space: nowrap;
+  pointer-events: none; opacity: 0; transform: translate(-50%, 4px);
+  transition: opacity var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+}
+.lp-tip .sws-mono { font-size: 11.5px; }
+.lp-tip[data-edge="start"] { left: 0; transform: translate(0, 4px); }
+.lp-tip[data-edge="end"] { left: auto; right: 0; transform: translate(0, 4px); }
+.lp-stall:hover .lp-tip, .lp-stall:focus-visible .lp-tip { opacity: 1; transform: translate(-50%, 0); }
+.lp-stall:hover .lp-tip[data-edge], .lp-stall:focus-visible .lp-tip[data-edge] { transform: none; }
+/* Escape dismisses the tooltip until the pointer or focus moves again. */
+.lp-plan.is-quiet .lp-tip { opacity: 0 !important; }
+
+/* State change: one short bump and an expanding ring, then it settles. */
+@keyframes lp-bump { 0% { transform: scale(1); } 35% { transform: scale(1.2); } 100% { transform: scale(1); } }
+@keyframes lp-ring { 0% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(1.6); } }
+.lp-stall.is-changed .lp-block { animation: lp-bump var(--dur-slow) var(--ease-out); }
+.lp-stall.is-changed .lp-block::after { animation: lp-ring calc(var(--dur-slow) * 2) var(--ease-out); }
+
+/* ---------- Overview ---------- */
+.ov-body { gap: 40px; padding-top: 30px; }
+.ov-t-open { color: var(--free); }
+.ov-t-occupied { color: var(--occupied); }
+.ov-t-offline { color: var(--dim); }
+.ov-t-warn { color: var(--attention); }
+.ov-h2 { font-family: var(--mono); font-size: var(--fs-section); font-weight: 600; margin: 0; }
+.ov-k { font-size: 10.5px; font-weight: 600; letter-spacing: 0.6px; text-transform: uppercase; color: var(--faint); }
+
+/* Skeleton and content share one grid cell, so they crossfade in place. */
+.ov-swap { display: grid; }
+.ov-swap > * { grid-area: 1 / 1; min-width: 0; display: flex; flex-direction: column; gap: 40px; }
+.ov-skel.is-leaving { animation: sws-fade-out var(--dur-base) var(--ease-out) forwards; pointer-events: none; }
+.ov-content { animation: sws-fade-in var(--dur-base) var(--ease-out); }
+.ov-skel .ov-ghost { color: transparent; border-radius: 4px; }
+.ov-skel .lp-block { background: var(--card); }
+
+.ov-hero { display: grid; grid-template-columns: minmax(0, 1fr); gap: 28px 56px; align-items: end; }
+.ov-hero.has-hw { grid-template-columns: auto minmax(320px, 440px); justify-content: start; column-gap: 96px; }
+.ov-summary {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: var(--sp-8);
+  grid-template-areas: "num strip" "label strip";
+}
+.ov-hero.has-hw .ov-summary { grid-template-columns: minmax(0, 1fr); grid-template-areas: "num" "label" "strip"; }
+.ov-free { grid-area: num; display: flex; align-items: baseline; gap: var(--sp-4); line-height: 0.8; font-family: var(--mono); }
+.ov-free-big { font-size: var(--fs-hero); font-weight: 600; letter-spacing: -0.05em; color: var(--free); font-variant-numeric: tabular-nums; }
+/* The number is keyed by its value, so each new value rolls up into place. */
+@keyframes ov-num-in { from { opacity: 0; transform: translateY(0.18em); } }
+.ov-num { display: inline-block; animation: ov-num-in var(--dur-slow) var(--ease-out); }
+.ov-free-word { font-size: clamp(34px, 3.4vw, 50px); font-weight: 500; }
+.ov-free-label { grid-area: label; margin: 18px 0 0; font-size: 13.5px; color: var(--dim); }
+.ov-strip {
+  grid-area: strip; align-self: end; justify-self: end; list-style: none; margin: 0; padding: 0;
+  display: flex; flex-wrap: wrap; gap: var(--sp-3) 36px; font-size: var(--fs-body); color: var(--dim);
+}
+.ov-hero.has-hw .ov-strip { justify-self: start; margin-top: 30px; }
+.ov-strip li { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 9px; white-space: nowrap; }
+.ov-strip-n { font-family: var(--mono); font-size: 22px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+.ov-strip .lp-block, .ov-attn-list .lp-block { width: 10px; --ring: 1.5px; flex-shrink: 0; }
+
+.ov-lots { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 460px), 1fr)); gap: 40px var(--sp-7); align-items: start; }
+/* Few curbs (Live today): content-sized lots side by side instead of wide columns. */
+.ov-lots.is-compact { display: flex; flex-wrap: wrap; gap: var(--sp-6) 56px; }
+
+.ov-empty-lots { align-self: start; padding-top: 2px; display: flex; flex-direction: column; gap: 10px; }
+.ov-empty-lots ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 18px; }
+.ov-empty-lots .sws-link { font-family: var(--mono); font-size: 13.5px; }
+
+/* Live hardware card (Live mode only) */
+.ov-hw { background: var(--panel); border-radius: 8px; padding: 22px var(--sp-5) var(--sp-5); display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+.ov-hw-k { display: flex; align-items: center; color: var(--dim); }
+.ov-hw-main { display: flex; align-items: center; gap: 20px; }
+.ov-hw-block { width: 44px; flex-shrink: 0; border-radius: 4px; }
+.ov-hw-id { font-family: var(--mono); font-size: 30px; font-weight: 600; line-height: 1.1; }
+.ov-hw-status { font-size: 16px; font-weight: 600; margin-top: var(--sp-1); }
+.ov-hw-facts { display: flex; flex-wrap: wrap; gap: 14px var(--sp-6); margin: 0; }
+.ov-hw-facts dd { margin: 5px 0 0; font-size: 14px; }
+.ov-hw-meta { margin: 0; font-size: var(--fs-body); color: var(--dim); line-height: 1.55; }
+
+/* Needs attention */
+.ov-attn-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 10px; }
+.ov-attn-all { margin-left: auto; }
+.ov-attn-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 0 var(--sp-7); }
+.ov-attn-list li { display: flex; align-items: center; gap: var(--sp-3); padding: 9px 0; font-size: var(--fs-body); min-width: 0; }
+.ov-attn-id { font-weight: 600; }
+.ov-attn-what { min-width: 0; overflow-wrap: anywhere; }
+.ov-attn-lot { margin-left: auto; max-width: 40%; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Reduced motion: no pulse, stagger, number roll or route fade; colour changes are instant.
+   A curb that changed keeps a still outline for a moment instead of the pulse. */
+@media (prefers-reduced-motion: reduce) {
+  .lp, .ov-num, .ov-content, .ov-skel.is-leaving, .sws-route { animation: none; }
+  .lp-fill, .lp-x, .lp-block, .lp-tip { transition: none; }
+  .lp-stall.is-changed .lp-block { animation: none; }
+  .lp-stall.is-changed .lp-block::after { animation: none; opacity: 1; transform: none; }
+  .lp-stall:hover .lp-block, .lp-stall:focus-visible .lp-block { transform: none; }
+}
+
+@media (max-width: 1100px) {
+  .ov-hero.has-hw { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 900px) {
+  .ov-body { gap: 34px; padding-top: 22px !important; }
+  .ov-swap > * { gap: 34px; }
+  .ov-summary { grid-template-columns: minmax(0, 1fr); grid-template-areas: "num" "label" "strip"; }
+  .ov-strip { justify-self: start; margin-top: 26px; display: grid; grid-template-columns: repeat(3, auto); gap: 10px 28px; }
+  /* Number over label, so all three fit side by side on a phone. */
+  .ov-strip-l { flex-basis: 100%; font-size: 12px; }
+  .lp { --lp-pad: 14px; }
+  .lp.is-compact { --lp-pad: 10px; }
+  .lp.is-roomy .lp-plan { padding: 18px 20px 14px; }
 }
 
 /* ---------- Responsive ---------- */
@@ -360,9 +578,6 @@ button.sws-th[data-active] { color: var(--accent); }
   .sws-page-body { padding: 16px 16px 32px !important; }
   .sws-card-head { padding: 12px 14px; }
   .sws-card-body { padding: 14px; }
-  /* Lot rows drop their own box inside the card; a divider separates them instead. */
-  .sws-lot-row { border: none; border-radius: 0; padding: 2px 0; }
-  .sws-lot-row + .sws-lot-row { border-top: 1px solid var(--line); padding-top: 12px; }
   /* One line on phones: badge, status, and the switch button; the sentence is dropped. */
   .sws-sim-banner { padding: 6px 16px !important; gap: 10px !important; flex-wrap: nowrap !important; }
   .sws-sim-text, .sws-sim-long { display: none; }
