@@ -53,6 +53,13 @@ async function call(method, path, token, body) {
 
 const RECEIVER_FIELDS = { occupied: true, lastUpdated: 1760000000000, lastSnapshot: "snap.jpg" };
 const SAMPLE = { eventAgeMs: 210, rxToWriteMs: 48, lastUpdated: 1760000000000 };
+const SITE = {
+  siteName: "North Campus",
+  contact: { name: "Dana Ops", email: "dana@example.com", phone: "555 0100" },
+  facilityType: "university",
+  modules: { permitTiers: true, semesterCalendar: true, eventMode: false },
+  setupComplete: true,
+};
 
 async function seed() {
   const res = await call("PUT", "", OWNER, {
@@ -66,6 +73,7 @@ async function seed() {
       "C-002": { lot: "lot14", ledColor: "red", panelText: "LOT 14", ledBrightness: 40, ...RECEIVER_FIELDS },
     },
     latency: { "C-001": { s1: SAMPLE } },
+    config: { site: SITE },
   });
   assert.ok(res.ok, `seeding failed: ${res.status}`);
 }
@@ -200,6 +208,81 @@ test("no client can write latency samples, even a manager", async () => {
     denied(await call("PUT", "latency", AS[who], {}));
   }
   assert.deepEqual((await call("GET", "latency/C-001/s1", OWNER)).body, SAMPLE);
+});
+
+// ---------- Site config (Setup wizard) ----------
+
+const patchSite = (who, fields) => call("PATCH", "config/site", AS[who], fields);
+
+test("staff can read the site config", async () => {
+  for (const who of ["viewer", "operator", "manager"]) {
+    const r = await call("GET", "config/site", AS[who]);
+    allowed(r);
+    assert.deepEqual(r.body, SITE);
+  }
+});
+
+test("signed-out users and driver accounts cannot read the site config", async () => {
+  denied(await call("GET", "config/site", AS.signedOut));
+  denied(await call("GET", "config", AS.signedOut));
+  denied(await call("GET", "config/site", AS.driver));
+});
+
+test("a manager can write the whole site config", async () => {
+  allowed(await call("PUT", "config/site", AS.manager, { ...SITE, siteName: "Stadium Lots", facilityType: "stadium", modules: { eventMode: true } }));
+  const site = (await call("GET", "config/site", OWNER)).body;
+  assert.equal(site.siteName, "Stadium Lots");
+  assert.deepEqual(site.modules, { eventMode: true });
+});
+
+test("a manager can save one wizard step at a time", async () => {
+  await call("DELETE", "config/site", OWNER);
+  allowed(await patchSite("manager", { siteName: "North Campus", contact: { name: "Dana Ops", email: "dana@example.com" }, setupComplete: false }));
+  allowed(await patchSite("manager", { facilityType: "hospital", modules: { patientPriority: true, staffShifts: false } }));
+  allowed(await patchSite("manager", { setupComplete: true }));
+});
+
+test("operators and viewers cannot write the site config", async () => {
+  for (const who of ["operator", "viewer"]) {
+    denied(await patchSite(who, { siteName: "Mine now" }));
+    denied(await patchSite(who, { setupComplete: false }));
+    denied(await call("PUT", "config/site", AS[who], SITE));
+    denied(await call("DELETE", "config/site", AS[who]));
+  }
+  assert.deepEqual((await call("GET", "config/site", OWNER)).body, SITE);
+});
+
+test("signed-out users and driver accounts cannot write the site config", async () => {
+  denied(await patchSite("signedOut", { siteName: "x" }));
+  denied(await patchSite("driver", { siteName: "x" }));
+});
+
+test("nothing else under config is writable, even by a manager", async () => {
+  denied(await call("PUT", "config/other", AS.manager, { a: 1 }));
+  denied(await call("PUT", "config", AS.manager, { site: SITE }));
+});
+
+test("site config fields are validated", async () => {
+  denied(await patchSite("manager", { siteName: "" }));
+  denied(await patchSite("manager", { siteName: "x".repeat(81) }));
+  denied(await patchSite("manager", { siteName: 7 }));
+  denied(await patchSite("manager", { facilityType: "casino" }));
+  denied(await patchSite("manager", { modules: { teleporter: true } }));
+  denied(await patchSite("manager", { modules: { eventMode: "yes" } }));
+  denied(await patchSite("manager", { setupComplete: "true" }));
+  denied(await patchSite("manager", { contact: { name: "Dana Ops", email: "not an email" } }));
+  denied(await patchSite("manager", { contact: { name: "Dana Ops" } }));
+  denied(await patchSite("manager", { contact: { ...SITE.contact, fax: "555" } }));
+  denied(await patchSite("manager", { theme: "midnight" }));
+});
+
+test("setupComplete can't turn true before the site has a name and facility type", async () => {
+  await call("DELETE", "config/site", OWNER);
+  denied(await patchSite("manager", { setupComplete: true }));
+  allowed(await patchSite("manager", { siteName: "North Campus", setupComplete: false }));
+  denied(await patchSite("manager", { setupComplete: true }));
+  allowed(await patchSite("manager", { facilityType: "city" }));
+  allowed(await patchSite("manager", { setupComplete: true }));
 });
 
 // ---------- Simulation area ----------
