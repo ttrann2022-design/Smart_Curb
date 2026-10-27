@@ -221,7 +221,7 @@ function Layout() {
             target="_blank"
             rel="noreferrer"
             className="sws-nav-link"
-            style={{ border: `1px dashed ${c.line}`, color: c.accent, fontWeight: 600, fontSize: 13 }}
+            style={{ border: `1px dashed ${c.line}`, color: c.text, fontWeight: 600, fontSize: 13 }}
           >
             <Icon name="sign" size={16} />
             Open lot sign
@@ -230,12 +230,12 @@ function Layout() {
           </a>
 
           <div style={{ padding: "10px 12px", borderRadius: 6, background: c.card, display: "flex", alignItems: "center", gap: 10 }}>
-            <div aria-hidden="true" style={{ width: 30, height: 30, borderRadius: 15, background: c.navBg, color: c.accent, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: mono, fontWeight: 600, fontSize: 13, flexShrink: 0 }}>
+            <div aria-hidden="true" style={{ width: 30, height: 30, borderRadius: 15, background: c.panel2, color: c.text, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: mono, fontWeight: 600, fontSize: 13, flexShrink: 0 }}>
               {(userEmail || "?")[0].toUpperCase()}
             </div>
             <div style={{ minWidth: 0, flex: 1 }}>
               <div title={userEmail} style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{userEmail}</div>
-              <div style={{ fontFamily: mono, fontSize: 10, fontWeight: 600, letterSpacing: 0.8, color: c.accent, marginTop: 2 }}>{role.toUpperCase()}</div>
+              <div style={{ fontFamily: mono, fontSize: 10, fontWeight: 600, letterSpacing: 0.8, color: c.dim, marginTop: 2 }}>{role.toUpperCase()}</div>
             </div>
             <button type="button" onClick={handleSignOut} aria-label="Sign out" title="Sign out" className="sws-btn sws-btn-ghost sws-btn-sm" style={{ padding: "0 7px" }}>
               <Icon name="logout" size={16} />
