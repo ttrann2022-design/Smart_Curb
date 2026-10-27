@@ -5,7 +5,8 @@ import { ref, get, set, update, remove, onValue, serverTimestamp } from "firebas
 import { auth, database, emailKey } from "../firebase";
 import { c, mono } from "../theme";
 import logo from "../assets/smartcurb-logo.jpg";
-import { useDataMode } from "../dataMode";
+import { DEMO_BUILD, useDataMode } from "../dataMode";
+import { MODULES, enabledModules, useSiteConfig } from "../site";
 import { stopSimulation, watchSimulation } from "../demo/simulator";
 import DataModeSwitch from "./DataModeSwitch";
 import SimBanner from "./SimBanner";
@@ -23,13 +24,13 @@ const navItems = [
   { label: "Settings", to: "/settings", icon: "settings" },
 ];
 
-function Brand({ size = 40 }) {
+function Brand({ size = 40, sub = "ADMIN CONSOLE" }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
       <img src={logo} alt="" width={size} height={size} style={{ width: size, height: size, borderRadius: 8, objectFit: "cover", flexShrink: 0 }} />
       <div style={{ minWidth: 0 }}>
         <div style={{ fontFamily: mono, fontSize: 12.5, fontWeight: 600, letterSpacing: 0.3, whiteSpace: "nowrap" }}>SMART WHEEL STOP</div>
-        <div style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: 1.4, color: c.dim }}>ADMIN CONSOLE</div>
+        <div style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: 1.4, color: c.dim }}>{sub}</div>
       </div>
     </div>
   );
@@ -67,6 +68,7 @@ function Layout() {
   const [sim, setSim] = useState({ running: false, elsewhere: null });
   useEffect(() => (mode === "sim" ? watchSimulation(setSim) : undefined), [mode]);
   const simActive = !!(sim.running || sim.elsewhere);
+  const siteConfig = useSiteConfig(mode);
 
   useEffect(() => {
     let stopRole = () => {};
@@ -168,6 +170,30 @@ function Layout() {
     );
   }
 
+  // Setup gets its own bare screen: no sidebar, just the brand and a way out.
+  if (location.pathname === "/setup") {
+    return (
+      <div className="su-shell">
+        <a href="#main" className="sws-skip">Skip to content</a>
+        <header className="su-top">
+          <Brand size={36} sub="ADMIN CONSOLE · SETUP" />
+          <div className="su-top-actions">
+            {!DEMO_BUILD && <div className="su-top-switch"><DataModeSwitch /></div>}
+            <button type="button" onClick={handleSignOut} aria-label="Sign out" title="Sign out" className="sws-btn sws-btn-ghost sws-btn-sm" style={{ padding: "0 7px" }}>
+              <Icon name="logout" size={16} />
+            </button>
+          </div>
+        </header>
+        {mode === "sim" && <SimBanner />}
+        <main id="main" tabIndex={-1} className="su-main">
+          <Outlet key={mode} context={{ role, mode, siteConfig }} />
+        </main>
+      </div>
+    );
+  }
+
+  const modules = enabledModules(siteConfig.site);
+
   // Pages scroll the window. The Assistant keeps a viewport-high layout so only
   // its conversation scrolls and the question box stays in view.
   const fixedHeight = location.pathname === "/assistant";
@@ -208,6 +234,24 @@ function Layout() {
               )}
             </NavLink>
           ))}
+
+          {/* Optional modules turned on in Setup. */}
+          {modules.length > 0 && (
+            <>
+              <div className="sws-label" style={{ fontSize: 10, letterSpacing: 1.1, padding: "14px 14px 6px" }}>Modules</div>
+              {modules.map((id) => (
+                <NavLink
+                  key={id}
+                  to={`/modules/${id}`}
+                  onClick={() => setMenuOpen(false)}
+                  className={({ isActive }) => `sws-nav-link${isActive ? " active" : ""}`}
+                >
+                  <Icon name="module" size={17} />
+                  {MODULES[id].label}
+                </NavLink>
+              ))}
+            </>
+          )}
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 18 }}>
@@ -263,7 +307,7 @@ function Layout() {
         <main id="main" tabIndex={-1} className="sws-main" style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
           {/* Keyed by path so each route fades in (.sws-route); query changes don't refade. */}
           <div key={location.pathname} className="sws-route">
-            <Outlet key={mode} context={{ role, mode }} />
+            <Outlet key={mode} context={{ role, mode, siteConfig }} />
           </div>
         </main>
       </div>

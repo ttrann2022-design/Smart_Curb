@@ -71,7 +71,10 @@ async function seed() {
     units: {
       "C-001": { lot: "lot14", ledColor: "blue", panelText: "LOT 14", ...RECEIVER_FIELDS },
       "C-002": { lot: "lot14", ledColor: "red", panelText: "LOT 14", ledBrightness: 40, ...RECEIVER_FIELDS },
+      // Reported in, but not in a lot yet.
+      "C-050": { online: true, ...RECEIVER_FIELDS },
     },
+    lots: { lot14: { name: "Lot 14" }, lot06: { name: "Lot 6" } },
     latency: { "C-001": { s1: SAMPLE } },
     config: { site: SITE },
   });
@@ -180,6 +183,38 @@ test("staff cannot write the Receiver's fields", async () => {
 
 test("anyone can read units (the lot sign runs signed out)", async () => {
   allowed(await call("GET", "units", null));
+});
+
+// ---------- Assigning curbs to lots (Setup, Connect curbs) ----------
+
+test("a manager can put a reported curb into a lot", async () => {
+  allowed(await patchUnit("manager", { lot: "lot06" }, "C-050"));
+  const unit = (await call("GET", "units/C-050", null)).body;
+  assert.equal(unit.lot, "lot06");
+  assert.equal(unit.occupied, RECEIVER_FIELDS.occupied);
+  assert.equal(unit.lastUpdated, RECEIVER_FIELDS.lastUpdated);
+});
+
+test("a manager can move a curb to another lot", async () => {
+  allowed(await patchUnit("manager", { lot: "lot06" }, "C-001"));
+});
+
+test("operators and viewers cannot change a curb's lot", async () => {
+  denied(await patchUnit("operator", { lot: "lot06" }, "C-050"));
+  denied(await patchUnit("viewer", { lot: "lot06" }, "C-050"));
+  denied(await patchUnit("signedOut", { lot: "lot06" }, "C-050"));
+  denied(await patchUnit("driver", { lot: "lot06" }, "C-050"));
+  assert.equal((await call("GET", "units/C-050/lot", null)).body, null);
+});
+
+test("a curb can only go into a lot that exists", async () => {
+  denied(await patchUnit("manager", { lot: "lot99" }, "C-050"));
+  denied(await patchUnit("manager", { lot: 6 }, "C-050"));
+});
+
+test("assigning a lot can't create a unit that never reported", async () => {
+  denied(await patchUnit("manager", { lot: "lot06" }, "C-999"));
+  assert.equal((await call("GET", "units/C-999", null)).body, null);
 });
 
 // ---------- Latency samples (read-only) ----------

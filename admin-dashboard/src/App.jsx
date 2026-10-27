@@ -12,6 +12,8 @@ import DemoControls from "./pages/DemoControls";
 import Layout from "./components/Layout";
 import NotFound from "./pages/NotFound";
 import Settings from "./pages/Settings";
+import Setup from "./pages/Setup";
+import Module from "./pages/Module";
 
 function App() {
   return (
@@ -30,6 +32,8 @@ function App() {
           <Route path="/simulation" element={<DemoControls />} />
           <Route path="/demo" element={<Navigate to="/simulation" replace />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/setup" element={<Setup />} />
+          <Route path="/modules/:id" element={<Module />} />
         </Route>
         <Route path="*" element={<NotFound />} />
       </Routes>

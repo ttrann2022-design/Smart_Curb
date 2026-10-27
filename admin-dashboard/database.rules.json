@@ -113,6 +113,12 @@
           ".write": "auth != null && root.child('users').child(auth.uid).child('role').val().matches(/^(operator|manager)$/)",
           ".validate": "newData.isString() && newData.val().length <= 16"
         },
+        // Managers put a curb that has already reported into a lot (Setup, Connect curbs).
+        // The lot must exist, and this can't create a unit that never reported.
+        "lot": {
+          ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'manager' && data.parent().exists()",
+          ".validate": "newData.isString() && root.child('lots').child(newData.val()).exists()"
+        },
 
         // ============ RECEIVER SECTION: OPTIONAL, FOR A FUTURE FIREBASE AUTH ACCOUNT ============
         // Today the Receiver uses the legacy database secret, which skips

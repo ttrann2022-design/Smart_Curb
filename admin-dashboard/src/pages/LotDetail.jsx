@@ -5,6 +5,7 @@ import { database } from "../firebase";
 import { dataPath, getDataMode } from "../dataMode";
 import { c, mono, LED_HEX, LED_COLORS } from "../theme";
 import { useAlertSettings, useNow, batteryText, cleanText, formatAgo, formatExact, statusKey, STALL_WORD } from "../units";
+import { facilityById } from "../site";
 import LotPlan, { StallMark } from "../components/LotPlan";
 import { PageHeader, Card, Chips, Button, Field, Input, EmptyState, Notice, StatusText } from "../components/ui";
 
@@ -69,7 +70,9 @@ function LotDetail() {
   // write that lands after switching mode or curb still goes where it was meant to.
   const pendingBrightness = useRef(null);
   const panelRef = useRef(null);
-  const { role, mode } = useOutletContext();
+  const { role, mode, siteConfig } = useOutletContext();
+  // The facility type chosen in Setup supplies a label and panel text per zone colour.
+  const zones = facilityById(siteConfig.site?.facilityType)?.zones;
   const now = useNow();
   const alertSettings = useAlertSettings();
   const canEdit = role === "operator" || role === "manager";
@@ -273,8 +276,8 @@ function LotDetail() {
                               role="radio"
                               aria-checked={ledColor === name}
                               tabIndex={ledColor === name ? 0 : -1}
-                              aria-label={name}
-                              title={name}
+                              aria-label={zones ? `${name}, ${zones[name].label}` : name}
+                              title={zones ? `${name}: ${zones[name].label}` : name}
                               onClick={() => { setLedColor(name); setStatus(null); }}
                               style={{
                                 flex: 1, height: 38, borderRadius: 5, background: LED_HEX[name],
@@ -286,6 +289,28 @@ function LotDetail() {
                           ))}
                         </div>
                       </div>
+
+                      {zones && (
+                        <div className="sws-field">
+                          <span className="sws-field-label" id="zone-presets">Zone presets</span>
+                          <div className="sws-chips" role="group" aria-labelledby="zone-presets">
+                            {LED_COLORS.map((name) => (
+                              <button
+                                key={name}
+                                type="button"
+                                className="sws-chip"
+                                aria-pressed={ledColor === name && panelText.trim() === zones[name].text}
+                                title={`${name} zone, panel text ${zones[name].text}`}
+                                onClick={() => { setLedColor(name); setPanelText(zones[name].text); setStatus(null); }}
+                              >
+                                <span className="sws-dot" style={{ background: LED_HEX[name] }} aria-hidden="true" />
+                                {zones[name].label}
+                              </button>
+                            ))}
+                          </div>
+                          <span className="sws-field-hint">Sets the zone colour and panel text together. Apply to save.</span>
+                        </div>
+                      )}
 
                       <Field label="Brightness" hint={canEdit ? "Saves when you let go of the slider." : null}>
                         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
