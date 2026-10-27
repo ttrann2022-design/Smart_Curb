@@ -7,7 +7,9 @@ import { addNewSimCurbs } from "../demo/simulator";
 import { c, mono, LED_HEX, LED_COLORS } from "../theme";
 import { FACILITIES, MODULES, SITE_PATH, facilityById, writeSetup } from "../site";
 import { useNow, formatAgo, formatExact } from "../units";
+import { normalizeTheme } from "../themes";
 import Icon from "../components/Icon";
+import ThemePicker from "../components/ThemePicker";
 import { Card, Button, Field, Input, Select, Notice, EmptyState, Skeleton, StatusText } from "../components/ui";
 
 const STEPS = [
@@ -241,7 +243,7 @@ function CurbsStep({ mode }) {
   );
 }
 
-function Wizard({ saved, mode }) {
+function Wizard({ saved, mode, previewTheme }) {
   const navigate = useNavigate();
   const reopened = saved?.setupComplete === true;
   const [step, setStep] = useState(0);
@@ -257,6 +259,8 @@ function Wizard({ saved, mode }) {
     const f = facilityById(saved?.facilityType);
     return f ? { ...f.modules, ...saved?.modules } : {};
   });
+  // Previewed live while picking, saved with setupComplete on Finish.
+  const [theme, setTheme] = useState(() => normalizeTheme(saved?.theme));
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
   const heading = useRef(null);
@@ -310,8 +314,16 @@ function Wizard({ saved, mode }) {
     if (await save({ facilityType: facility, modules: chosen })) goTo(2);
   };
 
+  // Leaving Setup without finishing drops the preview; after Finish the saved theme matches it.
+  useEffect(() => () => previewTheme(null), [previewTheme]);
+
+  const pickTheme = (id) => {
+    setTheme(id);
+    previewTheme(id);
+  };
+
   const finish = async () => {
-    if (await save({ setupComplete: true })) navigate(reopened ? "/settings" : "/overview", { replace: true });
+    if (await save({ setupComplete: true, theme })) navigate(reopened ? "/settings" : "/overview", { replace: true });
   };
 
   const pickFacility = (id) => {
@@ -324,7 +336,7 @@ function Wizard({ saved, mode }) {
   const titles = [
     { title: "Tell us about this site", sub: "The basics staff will see. You can change them later from Settings." },
     { title: "What kind of facility are you managing?", sub: "The dashboard configures itself around your answer: the zone presets and the modules in the sidebar both follow it. You can switch this later in Settings." },
-    { title: "Connect curbs", sub: "These curbs have reported in but aren't in a lot yet. Put each one in the lot it's installed in." },
+    { title: "Connect curbs", sub: "These curbs have reported in but aren't in a lot yet. Put each one in the lot it's installed in, then pick a look for the dashboard." },
   ];
 
   const primary = [
@@ -350,7 +362,14 @@ function Wizard({ saved, mode }) {
       <div key={step} ref={body} className="su-body sws-enter">
         {step === 0 && <SiteStep form={form} setForm={setForm} invalid={invalid} />}
         {step === 1 && <FacilityStep facility={facility} modules={modules} pickFacility={pickFacility} toggleModule={(id) => setModules((m) => ({ ...m, [id]: !m[id] }))} />}
-        {step === 2 && <CurbsStep mode={mode} />}
+        {step === 2 && (
+          <>
+            <CurbsStep mode={mode} />
+            <Card plain title="Appearance" subtitle="Pick a colour theme for everyone's dashboard. It's saved when you finish setup, and managers can change it later in Settings. Curb status colours are the same in every theme.">
+              <ThemePicker value={theme} onPick={pickTheme} name="setup-theme" label="Site theme" />
+            </Card>
+          </>
+        )}
       </div>
 
       <div className="su-foot">
@@ -370,7 +389,7 @@ function Wizard({ saved, mode }) {
 }
 
 function Setup() {
-  const { role, mode, siteConfig } = useOutletContext();
+  const { role, mode, siteConfig, previewTheme } = useOutletContext();
   if (role !== "manager") return <Navigate to="/overview" replace />;
   if (!siteConfig.loaded) {
     return (
@@ -380,7 +399,7 @@ function Setup() {
       </div>
     );
   }
-  return <Wizard saved={siteConfig.site} mode={mode} />;
+  return <Wizard saved={siteConfig.site} mode={mode} previewTheme={previewTheme} />;
 }
 
 export default Setup;
