@@ -155,17 +155,17 @@ a, button { touch-action: manipulation; -webkit-tap-highlight-color: transparent
 .sws-btn-sim { background: var(--sim); color: #0B1220; }
 .sws-btn-sim:hover:not(:disabled) { background: #A9C6FF; }
 .sws-btn-link { background: none; border: none; padding: 0; height: auto; color: var(--link); font-weight: 600; }
-.sws-btn-link:hover:not(:disabled) { text-decoration: underline; }
+.sws-btn-link:hover:not(:disabled) { text-decoration: underline; text-underline-offset: 3px; }
 
 /* ---------- Inputs ---------- */
 .sws-input {
   height: 40px; padding: 0 12px; border-radius: 5px; border: 1px solid var(--line);
   background: var(--bg); color: var(--text); font-size: 13.5px; width: 100%;
-  transition: border-color 0.15s, box-shadow 0.15s;
 }
 .sws-input::placeholder { color: var(--faint); }
 .sws-input:hover:not(:disabled) { border-color: var(--line-strong); }
-.sws-input:focus-visible, .sws-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(198, 242, 74, 0.15); }
+/* Focus: an off-white ring just outside the field (not lime: lime means free only). */
+.sws-input:focus-visible, .sws-input:focus { outline: 2px solid var(--text); outline-offset: 2px; border-color: var(--line-strong); }
 .sws-input:disabled { opacity: 0.55; cursor: not-allowed; }
 .sws-input-lg { height: 46px; font-size: 14px; }
 .sws-input[aria-invalid="true"] { border-color: var(--busy); }
