@@ -68,6 +68,7 @@ function LotDetail() {
   // { timer, id, path, value, sim }: the path is fixed when the change is made, so a
   // write that lands after switching mode or curb still goes where it was meant to.
   const pendingBrightness = useRef(null);
+  const panelRef = useRef(null);
   const { role, mode } = useOutletContext();
   const now = useNow();
   const alertSettings = useAlertSettings();
@@ -155,6 +156,16 @@ function LotDetail() {
     setStatus(null);
   };
 
+  // Picking a curb in the plan. Under 900px the curb panel stacks below the plan,
+  // so bring it into view (instantly when reduced motion is on). The next frame
+  // runs after React has rendered the new curb's panel.
+  const selectCurb = (id) => {
+    pickUnit(id);
+    if (!window.matchMedia("(max-width: 900px)").matches) return;
+    const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+    requestAnimationFrame(() => panelRef.current?.scrollIntoView({ behavior, block: "start" }));
+  };
+
   // Zone colour is a radio group: arrow keys move the choice, like native radios.
   const onZoneKey = (e) => {
     const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
@@ -214,7 +225,7 @@ function LotDetail() {
                   alerts={alertSettings}
                   now={now}
                   selected={selectedUnit}
-                  onSelect={pickUnit}
+                  onSelect={selectCurb}
                 />
               </div>
             )}
@@ -223,7 +234,8 @@ function LotDetail() {
               {!unit ? (
                 <EmptyState icon="units" title="No curb selected">Select a curb to see its status and control its LED panel.</EmptyState>
               ) : (
-                <div key={selectedUnit} className="sws-enter" style={{ display: "flex", flexDirection: "column", gap: "var(--sp-4)" }}>
+                // scroll-margin clears the sticky top bar and Simulation banner on phones.
+                <div ref={panelRef} key={selectedUnit} className="sws-enter" style={{ display: "flex", flexDirection: "column", gap: "var(--sp-4)", scrollMarginTop: 120 }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "var(--sp-3)" }}>
                     <h2 style={{ fontFamily: mono, fontSize: 17, fontWeight: 600, margin: 0 }}>Curb <span translate="no">{selectedUnit}</span></h2>
                     <span className="sws-pill">
