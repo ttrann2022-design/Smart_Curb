@@ -230,24 +230,6 @@
           "$other": { ".validate": false }
         }
       },
-      // Simulated quote requests. Staff load, reset and change them freely (Simulation
-      // page, Requests). Signed-out visitors to the public demo site can create one
-      // valid request at a new key, checked exactly like leads/ above.
-      "leads": {
-        ".write": "auth != null && root.child('users').child(auth.uid).exists()",
-        "$leadId": {
-          ".write": "!data.exists() && newData.exists()",
-          ".validate": "(auth != null && root.child('users').child(auth.uid).exists()) || newData.hasChildren(['name', 'email', 'facilityType', 'status', 'createdAt'])",
-          "name": { ".validate": "(auth != null && root.child('users').child(auth.uid).exists()) || (newData.isString() && newData.val().length >= 1 && newData.val().length <= 80)" },
-          "email": { ".validate": "(auth != null && root.child('users').child(auth.uid).exists()) || (newData.isString() && newData.val().length < 120 && newData.val().matches(/^[^@ ]+@[^@ ]+[.][^@ ]+$/))" },
-          "organization": { ".validate": "(auth != null && root.child('users').child(auth.uid).exists()) || (newData.isString() && newData.val().length < 120)" },
-          "facilityType": { ".validate": "(auth != null && root.child('users').child(auth.uid).exists()) || (newData.isString() && newData.val().matches(/^(university|stadium|airport|hospital|shopping|city)$/))" },
-          "message": { ".validate": "(auth != null && root.child('users').child(auth.uid).exists()) || (newData.isString() && newData.val().length < 1000)" },
-          "createdAt": { ".validate": "(auth != null && root.child('users').child(auth.uid).exists()) || (newData.isNumber() && newData.val() === now)" },
-          "status": { ".validate": "(auth != null && root.child('users').child(auth.uid).exists()) || (newData.isString() && newData.val() === 'new')" },
-          "$other": { ".validate": "auth != null && root.child('users').child(auth.uid).exists()" }
-        }
-      },
       // Everything else under demo/ (units, lots, history, latency, simLock): any staff account.
       "$other": {
         ".write": "auth != null && root.child('users').child(auth.uid).exists()"

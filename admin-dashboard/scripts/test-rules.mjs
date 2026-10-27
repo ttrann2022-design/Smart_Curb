@@ -493,38 +493,22 @@ test("only managers write the simulated site config, with the same validation", 
   denied(await call("PUT", "demo", AS.manager, { config: { site: { siteName: "x" } } }));
 });
 
-test("signed-out visitors can create a valid simulated lead in demo/leads", async () => {
-  allowed(await call("PUT", "demo/leads/v1", AS.signedOut, LEAD));
-  allowed(await call("PUT", "demo/leads/v2", AS.driver, LEAD));
-  assert.equal((await call("GET", "demo/leads/v1/status", null)).body, "new");
-  assert.equal(await savedLead("v1"), null, "a simulated lead must not reach the real leads/");
+test("signed-out visitors and driver accounts cannot write demo/leads at all", async () => {
+  for (const who of ["signedOut", "driver"]) {
+    denied(await call("PUT", "demo/leads/v1", AS[who], LEAD));
+    denied(await call("PATCH", "", AS[who], { "demo/leads/v2": LEAD }));
+    denied(await call("PUT", "demo/leads", AS[who], { x: LEAD }));
+  }
+  assert.equal((await call("GET", "demo/leads", OWNER)).body, null);
 });
 
-test("simulated leads from visitors get the same checks as real ones", async () => {
-  denied(await call("PUT", "demo/leads/a", AS.signedOut, { ...LEAD, email: "not an email" }));
-  denied(await call("PUT", "demo/leads/b", AS.signedOut, { ...LEAD, name: "" }));
-  denied(await call("PUT", "demo/leads/c", AS.signedOut, { ...LEAD, message: "m".repeat(1000) }));
-  denied(await call("PUT", "demo/leads/d", AS.signedOut, { ...LEAD, facilityType: "casino" }));
-  denied(await call("PUT", "demo/leads/e", AS.signedOut, { ...LEAD, status: "closed" }));
-  denied(await call("PUT", "demo/leads/f", AS.signedOut, { ...LEAD, createdAt: 1760000000000 }));
-  denied(await call("PUT", "demo/leads/g", AS.signedOut, { ...LEAD, website: "spam.example" }));
-  const noEmail = { ...LEAD };
-  delete noEmail.email;
-  denied(await call("PUT", "demo/leads/h", AS.signedOut, noEmail));
-});
-
-test("visitors can't overwrite, edit or delete simulated leads, or write the whole list", async () => {
-  allowed(await call("PUT", "demo/leads/v1", AS.signedOut, LEAD));
-  denied(await call("PUT", "demo/leads/v1", AS.signedOut, LEAD));
-  denied(await call("PATCH", "demo/leads/v1", AS.signedOut, { status: "closed" }));
-  denied(await call("DELETE", "demo/leads/v1", AS.signedOut));
-  denied(await call("PUT", "demo/leads", AS.signedOut, { x: LEAD }));
-});
-
-test("staff still load fake leads and change their status in Simulation", async () => {
+test("staff can still send fake quote requests and change their status in Simulation", async () => {
+  // Same shapes as the simulator: a whole fake list on reset, or one new request.
   allowed(await call("PATCH", "", AS.operator, { "demo/leads": { lead00: { ...LEAD_SAVED, status: "contacted" } } }));
+  allowed(await call("PATCH", "", AS.operator, { "demo/leads/k1": { ...LEAD_SAVED, createdAt: 1760000500000 } }));
   allowed(await call("PATCH", "demo/leads/lead00", AS.manager, { status: "closed" }));
   assert.equal((await call("GET", "demo/leads/lead00/status", null)).body, "closed");
+  assert.equal(await savedLead("k1"), null, "a simulated lead must not reach the real leads/");
 });
 
 test("simulated site config never reaches the real config/site", async () => {

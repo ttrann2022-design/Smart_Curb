@@ -35,16 +35,14 @@ export function leadErrors({ name, email, organization, facilityType, message },
 }
 
 // The exact shape the rules accept for a new lead. Empty optional fields are left out.
-// Goes to leads/ on the live site and demo/leads in Simulation (including the public demo site).
+// Live site only: Simulation (including the public demo site) never stores what a
+// visitor types. Fake requests for demo/leads come from the simulator instead.
 export function createLead({ name, email, organization, facilityType, message }) {
+  if (getDataMode() === "sim") return Promise.reject(new Error("Simulation doesn't store visitor requests."));
   const lead = { name: name.trim(), email: email.trim(), facilityType, status: "new", createdAt: serverTimestamp() };
   if (organization?.trim()) lead.organization = organization.trim();
   if (message?.trim()) lead.message = message.trim();
-  const path = dataPath(LEADS_PATH);
-  if (getDataMode() === "sim" && path !== SIM_ROOT + LEADS_PATH) {
-    return Promise.reject(new Error(`Refusing to write outside the simulation: ${path}`));
-  }
-  return set(push(ref(database, path)), lead);
+  return set(push(ref(database, LEADS_PATH)), lead);
 }
 
 // Status changes from the Requests page. In Simulation they may only touch demo/leads.

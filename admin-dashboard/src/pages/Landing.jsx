@@ -224,7 +224,8 @@ function QuoteForm() {
   const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState("");
-  const [sentTo, setSentTo] = useState(null);
+  // { email, sim }: sim means nothing was saved or sent.
+  const [sent, setSent] = useState(null);
   const formRef = useRef(null);
   const doneRef = useRef(null);
 
@@ -233,22 +234,29 @@ function QuoteForm() {
     if (errors[key]) setErrors((errs) => { const next = { ...errs }; delete next[key]; return next; });
   };
 
-  useEffect(() => { if (sentTo) doneRef.current?.focus(); }, [sentTo]);
+  useEffect(() => { if (sent) doneRef.current?.focus(); }, [sent]);
 
   const submit = async (e) => {
     e.preventDefault();
     setFailed("");
     // Honeypot: people never see this field, so anything in it came from a bot.
     // Pretend it worked and write nothing.
-    if (form.website) { setSentTo(form.email.trim() || "you"); return; }
+    if (form.website) { setSent({ email: form.email.trim(), sim: false }); return; }
     const errs = leadErrors(form, FACILITIES.map((f) => f.id));
     setErrors(errs);
     const first = FIELD_ORDER.find((k) => errs[k]);
     if (first) { formRef.current?.querySelector(`#q-${first}`)?.focus(); return; }
+    // Simulation (including the public demo site) never stores what a visitor types:
+    // show the sent screen, say nothing was saved, and make no database write.
+    if (mode === "sim") {
+      setSent({ email: form.email.trim(), sim: true });
+      setForm(EMPTY_FORM);
+      return;
+    }
     setBusy(true);
     try {
       await createLead(form);
-      setSentTo(form.email.trim());
+      setSent({ email: form.email.trim(), sim: false });
       setForm(EMPTY_FORM);
     } catch (err) {
       setFailed(err.code === "PERMISSION_DENIED"
@@ -270,15 +278,21 @@ function QuoteForm() {
         </div>
 
         <div className="ld-quote-card">
-          {mode === "sim" && (
-            <Notice tone="sim" title="Simulation">This form saves to the simulation, not to the team&apos;s inbox. Nobody will reply.</Notice>
+          {mode === "sim" && !sent && (
+            <Notice tone="sim" title="Simulation">You can try this form, but nothing you enter is saved or sent.</Notice>
           )}
-          {sentTo ? (
+          {sent ? (
             <div ref={doneRef} tabIndex={-1} className="ld-done" role="status">
               <span className="ld-done-icon" aria-hidden="true"><Icon name="check" size={20} strokeWidth={2.4} /></span>
-              <h3 className="ld-done-h">Request sent</h3>
-              <p className="ld-done-p">Thanks. {mode === "sim" ? "It's in the simulated Requests list." : `We'll reply to ${sentTo}.`}</p>
-              <button type="button" className="sws-btn sws-btn-link" onClick={() => setSentTo(null)}>Send another request</button>
+              <h3 className="ld-done-h">{sent.sim ? "Request sent (simulation)" : "Request sent"}</h3>
+              {sent.sim ? (
+                <Notice tone="sim" title="Nothing was saved or sent">
+                  This is Simulation mode: your details weren&apos;t stored anywhere and no one will receive them.
+                </Notice>
+              ) : (
+                <p className="ld-done-p">Thanks. We&apos;ll reply to {sent.email || "you"}.</p>
+              )}
+              <button type="button" className="sws-btn sws-btn-link" onClick={() => setSent(null)}>Send another request</button>
             </div>
           ) : (
             <form ref={formRef} onSubmit={submit} noValidate className="ld-form">
