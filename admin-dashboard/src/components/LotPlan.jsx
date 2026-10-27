@@ -12,6 +12,8 @@ import { statusKey, hasBattery, isLowBattery, formatAgo, STALL_WORD, ROOMY_MAX, 
 // size     "large" (default) or "compact" (small stalls, no captions or readout).
 // columns  Widest row count among plans shown together, so they share one stall size.
 // index    Position in a list of plans; staggers their entrance by 40ms each.
+// onSelect Turns stalls into toggle buttons that call onSelect(id) instead of linking
+//          to the lot; `selected` is the chosen curb ID (marked with a bar underneath).
 
 function stallLabel(id, u, alerts, now) {
   const parts = [id, STALL_WORD[statusKey(u)].toLowerCase()];
@@ -23,9 +25,10 @@ function stallLabel(id, u, alerts, now) {
 
 // A single curb block, also used on its own as a legend swatch.
 // status: "open" | "occupied" | "offline", or "ring" for an outline only.
-export function StallMark({ status, low, roomy, className = "" }) {
+// swatch: a small inline legend-sized mark.
+export function StallMark({ status, low, roomy, swatch, className = "" }) {
   return (
-    <span className={`lp-block${low ? " is-low" : ""}${roomy ? " is-roomy" : ""} ${className}`} data-s={status} aria-hidden="true">
+    <span className={`lp-block${low ? " is-low" : ""}${roomy ? " is-roomy" : ""}${swatch ? " is-swatch" : ""} ${className}`} data-s={status} aria-hidden="true">
       <span className="lp-fill lp-f-open" />
       <span className="lp-fill lp-f-occupied" />
       <span className="lp-fill lp-f-offline" />
@@ -34,13 +37,15 @@ export function StallMark({ status, low, roomy, className = "" }) {
   );
 }
 
-function Stall({ id, unit, to, label, low, roomy, edge, focusable, onFocus, onKeyDown, setRef }) {
+function Stall({ id, unit, to, onSelect, selected, label, low, roomy, edge, focusable, onFocus, onKeyDown, setRef }) {
   const status = statusKey(unit);
   const changed = useFlash(status, 1200);
+  const Tag = onSelect ? "button" : Link;
+  const action = onSelect ? { type: "button", "aria-pressed": selected, onClick: () => onSelect(id) } : { to };
   return (
-    <Link
+    <Tag
       ref={setRef}
-      to={to}
+      {...action}
       tabIndex={focusable ? 0 : -1}
       aria-label={label}
       className={`lp-stall${changed ? " is-changed" : ""}`}
@@ -59,11 +64,11 @@ function Stall({ id, unit, to, label, low, roomy, edge, focusable, onFocus, onKe
           {STALL_WORD[status]}
         </span>
       )}
-    </Link>
+    </Tag>
   );
 }
 
-function LotPlan({ name, lotId, units, alerts, now, size = "large", columns, index = 0 }) {
+function LotPlan({ name, lotId, units, alerts, now, size = "large", columns, index = 0, selected, onSelect }) {
   const [cursor, setCursor] = useState(0);
   const [quiet, setQuiet] = useState(false);
   const refs = useRef([]);
@@ -105,6 +110,8 @@ function LotPlan({ name, lotId, units, alerts, now, size = "large", columns, ind
               id={id}
               unit={u}
               to={to}
+              onSelect={onSelect}
+              selected={id === selected}
               roomy={roomy}
               // Edge stalls anchor their tooltip inward so it stays on screen.
               edge={perRow > 2 && k === 0 ? "start" : perRow > 2 && k === perRow - 1 ? "end" : undefined}
@@ -127,11 +134,11 @@ function LotPlan({ name, lotId, units, alerts, now, size = "large", columns, ind
     <section
       className={`lp${compact ? " is-compact" : ""}${roomy ? " is-roomy" : ""}`}
       aria-label={name}
-      style={{ "--lp-i": index, ...(columns ? { "--lp-cols": columns } : null) }}
+      style={{ "--lp-i": index, "--lp-cols": columns || perRow }}
     >
       <div className="lp-in">
         <header className="lp-head">
-          {lotId ? (
+          {lotId && !onSelect ? (
             <Link to={to} className="lp-name">{name}<span aria-hidden="true"> →</span></Link>
           ) : (
             <span className="lp-name">{name}</span>

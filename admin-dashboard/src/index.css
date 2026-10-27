@@ -176,7 +176,7 @@ select.sws-input {
 .sws-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .sws-field-label { font-size: 12px; font-weight: 600; color: var(--nav-text); }
 .sws-field-hint { font-size: 12px; color: var(--dim); line-height: 1.45; }
-.sws-range { flex: 1; min-width: 0; height: 24px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.sws-range { flex: 1; min-width: 0; height: 24px; margin: 0; accent-color: var(--text); cursor: pointer; }
 .sws-range:disabled { opacity: 0.55; cursor: not-allowed; }
 .sws-input-wrap { position: relative; }
 .sws-input-wrap > svg { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--faint); pointer-events: none; }
@@ -190,9 +190,9 @@ select.sws-input {
   display: inline-flex; align-items: center; gap: 7px; transition: border-color 0.15s, background-color 0.15s, color 0.15s;
 }
 .sws-chip:hover { border-color: var(--line-strong); }
-.sws-chip[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-bg); color: var(--accent); }
+.sws-chip[aria-pressed="true"] { border-color: var(--text); background: var(--nav-active-bg); color: var(--text); }
 .sws-chip-count { font-family: var(--mono); font-size: 11px; color: var(--dim); font-weight: 500; }
-.sws-chip[aria-pressed="true"] .sws-chip-count { color: var(--accent); opacity: 0.8; }
+.sws-chip[aria-pressed="true"] .sws-chip-count { color: var(--nav-text); }
 
 /* ---------- Status pill ---------- */
 .sws-pill { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; white-space: nowrap; }
@@ -294,8 +294,6 @@ button.sws-th[data-active] { color: var(--accent); }
 .sws-link { font-size: 12.5px; font-weight: 600; color: var(--link); text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
 .sws-link:hover { text-decoration-color: currentColor; }
 
-.sws-tile { transition: background-color 0.5s ease, border-color 0.5s ease, color 0.5s ease, transform 0.18s ease; }
-.sws-tile:hover { transform: translateY(-1px); }
 
 /* ---------- Sidebar ---------- */
 .sws-nav-link {
@@ -320,7 +318,6 @@ button.sws-th[data-active] { color: var(--accent); }
   }
 }
 
-.sws-meter-name { font-size: 13.5px; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
 
 /* ---------- Lot plan (shared: src/components/LotPlan.jsx) ---------- */
 /* A top-down lot: curb blocks in rows facing a drive aisle. Two sizes:
@@ -389,6 +386,10 @@ a.lp-name:hover { text-decoration: underline; text-underline-offset: 4px; }
 /* Stall: the focusable link around a block. Hover or focus lifts the block
    and shows a tooltip with the curb ID and status. */
 .lp-stall { position: relative; display: flex; flex-direction: column; align-items: center; gap: var(--sp-2); color: inherit; text-decoration: none; border-radius: 3px; scroll-margin: 120px 0 24px; }
+button.lp-stall { background: none; border: 0; padding: 0; margin: 0; font: inherit; cursor: pointer; }
+/* Selected curb (LotPlan with onSelect): an off-white bar under the stall. */
+.lp-stall::before { content: ""; position: absolute; left: 15%; right: 15%; bottom: -8px; height: 3px; border-radius: 2px; background: var(--text); opacity: 0; transition: opacity var(--dur-fast) var(--ease-out); }
+.lp-stall[aria-pressed="true"]::before { opacity: 1; }
 .lp-stall:hover, .lp-stall:focus-visible { z-index: 2; }
 .lp-stall:focus-visible { outline: 2px solid var(--text); outline-offset: 6px; border-radius: 4px; }
 .lp-stall:hover .lp-block, .lp-stall:focus-visible .lp-block { transform: translateY(-3px); }
@@ -452,7 +453,7 @@ a.lp-name:hover { text-decoration: underline; text-underline-offset: 4px; }
 .ov-hero.has-hw .ov-strip { justify-self: start; margin-top: 30px; }
 .ov-strip li { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 9px; white-space: nowrap; }
 .ov-strip-n { font-family: var(--mono); font-size: 22px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
-.ov-strip .lp-block, .ov-attn-list .lp-block { width: 10px; --ring: 1.5px; flex-shrink: 0; }
+.ov-strip .lp-block, .ov-attn-list .lp-block, .lp-block.is-swatch { width: 10px; --ring: 1.5px; flex-shrink: 0; }
 
 .ov-lots { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 460px), 1fr)); gap: 40px var(--sp-7); align-items: start; }
 /* Few curbs (Live today): content-sized lots side by side instead of wide columns. */
