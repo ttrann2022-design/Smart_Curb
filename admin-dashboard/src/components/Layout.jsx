@@ -7,6 +7,7 @@ import { c, mono } from "../theme";
 import logo from "../assets/smartcurb-logo.jpg";
 import { DEMO_BUILD, useDataMode } from "../dataMode";
 import { MODULES, enabledModules, useSiteConfig } from "../site";
+import { applyTheme, clearTheme, normalizeTheme } from "../themes";
 import { useLeads } from "../leads";
 import { stopSimulation, watchSimulation } from "../demo/simulator";
 import DataModeSwitch from "./DataModeSwitch";
@@ -71,6 +72,14 @@ function Layout() {
   useEffect(() => (mode === "sim" ? watchSimulation(setSim) : undefined), [mode]);
   const simActive = !!(sim.running || sim.elsewhere);
   const siteConfig = useSiteConfig(mode);
+
+  // Site theme: a manager's unsaved pick (previewTheme) wins, otherwise the value
+  // saved for this data mode. Until that loads, the theme index.html set from
+  // the cache stays on. Leaving the dashboard returns to the default look.
+  const [themeOverride, previewTheme] = useState(null);
+  const theme = themeOverride ?? (siteConfig.loaded ? normalizeTheme(siteConfig.site?.theme) : null);
+  useEffect(() => { if (theme) applyTheme(theme); }, [theme]);
+  useEffect(() => clearTheme, []);
   // Quote requests: managers only (the database refuses everyone else).
   const leadsState = useLeads(mode, role === "manager");
   const newLeads = leadsState.leads.filter((l) => l.status === "new").length;
@@ -208,7 +217,7 @@ function Layout() {
         </header>
         {mode === "sim" && <SimBanner />}
         <main id="main" tabIndex={-1} className="su-main">
-          <Outlet key={mode} context={{ role, mode, siteConfig, leadsState }} />
+          <Outlet key={mode} context={{ role, mode, siteConfig, leadsState, theme, previewTheme }} />
         </main>
       </div>
     );
@@ -230,7 +239,7 @@ function Layout() {
         id="sws-sidebar"
         aria-label="Main"
         className={`sws-sidebar${menuOpen ? " open" : ""}`}
-        style={{ width: 240, flexShrink: 0, background: c.side, borderRight: `1px solid #16160F`, padding: "18px 12px 14px", display: "flex", flexDirection: "column" }}
+        style={{ width: 240, flexShrink: 0, background: c.side, borderRight: `1px solid ${c.sideLine}`, padding: "18px 12px 14px", display: "flex", flexDirection: "column" }}
       >
         <div style={{ padding: "0 4px 22px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
           <Brand />
@@ -335,7 +344,7 @@ function Layout() {
         <main id="main" tabIndex={-1} className="sws-main" style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
           {/* Keyed by path so each route fades in (.sws-route); query changes don't refade. */}
           <div key={location.pathname} className="sws-route">
-            <Outlet key={mode} context={{ role, mode, siteConfig, leadsState }} />
+            <Outlet key={mode} context={{ role, mode, siteConfig, leadsState, theme, previewTheme }} />
           </div>
         </main>
       </div>

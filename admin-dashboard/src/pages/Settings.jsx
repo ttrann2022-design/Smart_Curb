@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useNavigate, useOutletContext } from "react-router-dom";
 import { EmailAuthProvider, reauthenticateWithCredential, updatePassword, signOut } from "firebase/auth";
 import { ref, update } from "firebase/database";
@@ -7,7 +7,9 @@ import { c, mono } from "../theme";
 import { DEFAULT_ALERTS, useAlertSettings } from "../units";
 import { stopSimulation } from "../demo/simulator";
 import { DEMO_BUILD } from "../dataMode";
-import { MODULES, enabledModules, facilityById } from "../site";
+import { MODULES, SITE_PATH, enabledModules, facilityById, writeSetup } from "../site";
+import { THEMES, normalizeTheme } from "../themes";
+import ThemePicker from "../components/ThemePicker";
 import DataModeSwitch from "../components/DataModeSwitch";
 import { PageHeader, Card, Button, Field, Input, StatusText, Notice } from "../components/ui";
 
@@ -116,7 +118,7 @@ function AlertsForm({ saved, canEdit }) {
             Leave this off until the Receiver sends a regular heartbeat. Right now <span className="sws-mono">lastUpdated</span> only changes when a car arrives or leaves,
             so a curb in a quiet spot would be flagged even though it's working.
           </div>
-          <label style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", opacity: staleEnabled ? 1 : 0.5 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", opacity: staleEnabled ? 1 : "var(--disabled-opacity)" }}>
             <span style={{ fontSize: 13 }}>Flag after</span>
             <Input type="number" min="1" max="10080" step="1" inputMode="numeric" value={staleMinutes} disabled={!staleEnabled || !canEdit} onChange={(e) => setStaleMinutes(e.target.value)} style={{ width: 96, fontFamily: mono }} />
             <span style={{ fontSize: 13 }}>minutes without a report</span>
@@ -175,8 +177,45 @@ function SiteSummary({ siteConfig, canEdit }) {
   );
 }
 
+// Site theme for everyone's dashboard. A pick applies at once (optimistic) and
+// saves to config/site/theme; if the save fails it goes back and says so.
+function Appearance({ canEdit, mode, theme, previewTheme }) {
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState(null);
+  // Only the latest pick may clear the preview, if picks overlap.
+  const latest = useRef(0);
+  const current = normalizeTheme(theme);
+
+  const pick = async (id) => {
+    if (!canEdit || id === current) return;
+    const previous = current;
+    const n = ++latest.current;
+    setMsg(null);
+    setSaving(true);
+    previewTheme(id);
+    try {
+      await writeSetup(SITE_PATH, { theme: id });
+      if (n === latest.current) setMsg({ ok: true, text: mode === "sim" ? "Saved for the simulation." : "Saved. Everyone's dashboard uses it now." });
+    } catch (err) {
+      if (n === latest.current) {
+        const why = err.code === "PERMISSION_DENIED" ? "Only managers can change the theme." : "Couldn't save the theme.";
+        setMsg({ ok: false, text: `${why} It's back to ${THEMES.find((t) => t.id === previous).label}.` });
+      }
+    }
+    // Saved: the database value now matches, so the preview can go. Failed: this reverts.
+    if (n === latest.current) { previewTheme(null); setSaving(false); }
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-4)" }} aria-busy={saving || undefined}>
+      <ThemePicker value={current} onPick={pick} disabled={!canEdit} label="Site theme" />
+      {canEdit ? <StatusText msg={msg} /> : <Notice tone="info" icon="lock">Only managers can change the theme.</Notice>}
+    </div>
+  );
+}
+
 function Settings() {
-  const { role, mode, siteConfig } = useOutletContext();
+  const { role, mode, siteConfig, theme, previewTheme } = useOutletContext();
   const alerts = useAlertSettings();
   const navigate = useNavigate();
   const user = auth.currentUser;
@@ -209,6 +248,15 @@ function Settings() {
               <PasswordForm />
             </div>
           </div>
+        </Card>
+
+        <Card
+          plain
+          title="Appearance"
+          delay={30}
+          subtitle={`The colour theme for everyone's dashboard. Curb status colours stay the same in every theme.${mode === "sim" && !DEMO_BUILD ? " Simulation has its own theme, separate from live." : ""}`}
+        >
+          <Appearance canEdit={role === "manager"} mode={mode} theme={theme} previewTheme={previewTheme} />
         </Card>
 
         {DEMO_BUILD ? (

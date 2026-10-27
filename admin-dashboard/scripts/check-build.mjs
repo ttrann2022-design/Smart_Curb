@@ -1,9 +1,11 @@
-// Refuses to let a deploy go ahead unless the folder holds the right kind of build.
+// Refuses to let a deploy go ahead unless the folder holds the right kind of build
+// and every site theme passes the WCAG contrast check (scripts/check-contrast.mjs).
 //   node scripts/check-build.mjs dist real
 //   node scripts/check-build.mjs dist-demo demo
 // Runs automatically as a Firebase predeploy hook (see firebase.json and firebase.demo.json).
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { checkContrast, report } from "./check-contrast.mjs";
 
 const [dir, expected] = process.argv.slice(2);
 
@@ -29,6 +31,10 @@ if (expected === "real" && isDemo) {
 }
 if (expected === "demo" && !isDemo) {
   fail(`${dir}/ holds a REAL build, not a demo build. Run npm run build:demo first.`);
+}
+
+if (!report(checkContrast())) {
+  fail("a site theme fails the contrast check (see above). Fix src/themes.css, then rebuild.");
 }
 
 console.log(`  Build check passed: ${dir}/ is a ${expected} build from ${info.builtAt}.`);

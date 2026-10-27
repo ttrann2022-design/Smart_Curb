@@ -15,7 +15,7 @@ function SimBanner() {
       <span style={{ fontWeight: 700, letterSpacing: 1, fontSize: 11, padding: "3px 8px", borderRadius: 4, border: `1px solid ${c.simLine}`, flexShrink: 0 }}>
         SIMULATION
       </span>
-      <span className="sws-sim-text" style={{ color: "#C9D8F5", flex: "1 1 280px" }}>
+      <span className="sws-sim-text" style={{ color: c.simText, flex: "1 1 280px" }}>
         {DEMO_BUILD
           ? "Demo site. Every curb here is simulated."
           : "You're viewing simulated curbs. Real curbs, including C-095, aren't shown or changed."}
