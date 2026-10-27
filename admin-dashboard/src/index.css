@@ -264,8 +264,9 @@ button.sws-th[data-active] { color: var(--accent); }
 .sws-nav-link:hover { background: rgba(255, 255, 255, 0.04); color: var(--text); }
 .sws-nav-link.active { background: var(--accent-bg); color: var(--accent); font-weight: 600; }
 .sws-nav-link.active svg { opacity: 1; }
-.sws-nav-link.sim { color: var(--sim); }
-.sws-nav-link.sim.active { background: var(--sim-bg); }
+.sws-nav-badge { margin-left: auto; height: 18px; padding: 0 6px; font-size: 9.5px; background: transparent; color: var(--faint); box-shadow: inset 0 0 0 1px var(--line); }
+.sws-nav-link.active .sws-nav-badge { color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent-line); }
+.sws-nav-badge.on { background: var(--sim-bg) !important; color: var(--sim) !important; box-shadow: inset 0 0 0 1px var(--sim-line) !important; }
 .sws-seg:hover:not([aria-checked="true"]) { color: var(--text) !important; }
 
 @media (prefers-reduced-motion: reduce) {

@@ -6,7 +6,7 @@ import { auth, database, emailKey } from "../firebase";
 import { c, mono } from "../theme";
 import logo from "../assets/smartcurb-logo.jpg";
 import { useDataMode } from "../dataMode";
-import { stopSimulation } from "../demo/simulator";
+import { stopSimulation, watchSimulation } from "../demo/simulator";
 import DataModeSwitch from "./DataModeSwitch";
 import SimBanner from "./SimBanner";
 import Icon from "./Icon";
@@ -63,6 +63,10 @@ function Layout() {
   useEffect(() => {
     if (mode === "live") stopSimulation();
   }, [mode]);
+
+  const [sim, setSim] = useState({ running: false, elsewhere: null });
+  useEffect(() => (mode === "sim" ? watchSimulation(setSim) : undefined), [mode]);
+  const simActive = !!(sim.running || sim.elsewhere);
 
   useEffect(() => {
     let stopRole = () => {};
@@ -193,10 +197,15 @@ function Layout() {
               key={item.to}
               to={item.to}
               onClick={() => setMenuOpen(false)}
-              className={({ isActive }) => `sws-nav-link${item.simOnly ? " sim" : ""}${isActive ? " active" : ""}`}
+              className={({ isActive }) => `sws-nav-link${isActive ? " active" : ""}`}
             >
               <Icon name={item.icon} size={17} />
               {item.label}
+              {item.simOnly && (
+                <span className={`sws-badge sws-nav-badge${simActive ? " on" : ""}`} title={simActive ? "Simulation is running" : "Simulation is stopped"}>
+                  {simActive ? "ON" : "OFF"}
+                </span>
+              )}
             </NavLink>
           ))}
         </div>
