@@ -12,14 +12,14 @@ import Icon from "../components/Icon";
 import LotPlan, { StallMark } from "../components/LotPlan";
 
 // Public page for signed-out visitors at "/". Signed-in staff go straight to the Overview.
-// Honest by design: Smart Curb is a student prototype, so there are no customers,
+// Honest by design: Smart Wheel Stop is a student prototype, so there are no customers,
 // statistics or prices here.
 
 function Brand() {
   return (
     <Link to="/" className="ld-brand" aria-label="Smart Wheel Stop home">
       <img src={logo} alt="" width={34} height={34} />
-      <span>SMART WHEEL STOP</span>
+      <span>Smart Wheel Stop</span>
     </Link>
   );
 }
@@ -193,7 +193,7 @@ function BuiltFor() {
           {BUILT_FOR.map((name) => <li key={name}>{name}</li>)}
         </ul>
         <p className="ld-built-note">
-          Designed with these in mind: each facility type gets its own zone presets in setup. Smart Curb isn't installed at any of them yet.
+          Designed with these in mind: each facility type gets its own zone presets in setup. Smart Wheel Stop isn't installed at any of them yet.
         </p>
       </div>
     </section>
@@ -273,7 +273,7 @@ function QuoteForm() {
           <span className="ld-sec-k">Request a quote</span>
           <h2 id="ld-quote-h" className="ld-sec-h">Tell us about your parking</h2>
           <p className="ld-sec-sub">
-            Smart Curb is a student prototype, so there's no price list. Tell us what you're working with and the team will reply by email.
+            Smart Wheel Stop is a student prototype, so there's no price list. Tell us what you're working with and the team will reply by email.
           </p>
         </div>
 
@@ -347,6 +347,13 @@ function Landing() {
     if (user) navigate("/overview", { replace: true });
   }), [navigate]);
 
+  // The shared index.html title says "Admin"; the public page is just the product.
+  useEffect(() => {
+    const previous = document.title;
+    document.title = "Smart Wheel Stop";
+    return () => { document.title = previous; };
+  }, []);
+
   return (
     <div className="ld">
       <a href="#main" className="sws-skip">Skip to content</a>
@@ -364,7 +371,7 @@ function Landing() {
       <main id="main" tabIndex={-1}>
         <section className="ld-hero" aria-labelledby="ld-hero-h">
           <div className="ld-wrap">
-            <p className="ld-eyebrow sws-enter">Student prototype · Smart curbs and a parking dashboard</p>
+            <p className="ld-eyebrow sws-enter">Student prototype · Wheel stop sensors and a parking dashboard</p>
             <h1 id="ld-hero-h" className="ld-hero-h sws-enter" style={{ "--d": "60ms" }}>Every parking space, on one screen</h1>
             <p className="ld-hero-sub sws-enter" style={{ "--d": "120ms" }}>
               A sensor in each wheel stop reports whether its space is taken, and staff and drivers see every lot update live.
