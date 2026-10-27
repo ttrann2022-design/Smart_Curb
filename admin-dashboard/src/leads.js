@@ -27,7 +27,9 @@ export function createLead({ name, email, organization, facilityType, message })
 }
 
 // Status changes from the Requests page. In Simulation they may only touch demo/leads.
+// The id must be a single key, so it can't point anywhere else.
 export function setLeadStatus(id, status) {
+  if (!/^[^./#$[\]]+$/.test(id)) return Promise.reject(new Error(`Not a request id: ${id}`));
   const full = dataPath(`${LEADS_PATH}/${id}`);
   if (getDataMode() === "sim" && !full.startsWith(SIM_ROOT + LEADS_PATH + "/")) {
     return Promise.reject(new Error(`Refusing to write outside the simulation: ${full}`));
