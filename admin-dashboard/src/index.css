@@ -670,6 +670,41 @@ button.lp-stall { background: none; border: 0; padding: 0; margin: 0; font: inhe
   .ur-invite { grid-template-columns: minmax(0, 1fr); row-gap: var(--sp-1); }
 }
 
+/* ---------- Assistant ---------- */
+/* The page keeps its fixed-height shell: the log scrolls, the question box stays at
+   the bottom. Content sits in one centred column; the log stays full width so its
+   scrollbar is at the edge. */
+.as-body { flex: 1; min-height: 0; padding-top: 18px !important; padding-bottom: 22px !important; gap: var(--sp-3); }
+.as-col { width: 100%; max-width: 860px; margin: 0 auto; }
+.as-log { flex: 1; min-height: 0; overflow-y: auto; }
+.as-log > .as-col { display: flex; flex-direction: column; gap: var(--sp-3); padding: 0 var(--sp-1) var(--sp-2); }
+.as-msg { display: flex; gap: 10px; align-items: flex-start; animation: as-in var(--dur-base) var(--ease-out) both; }
+.as-msg.is-user { justify-content: flex-end; }
+@keyframes as-in { from { opacity: 0; transform: translateY(4px); } }
+.as-avatar {
+  width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0; margin-top: 2px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--panel-2); color: var(--text); box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+.as-bubble { max-width: min(600px, 85%); padding: 11px 15px; font-size: var(--fs-body); line-height: 1.6; white-space: pre-line; overflow-wrap: anywhere; background: var(--panel); color: var(--text); border-radius: 3px 12px 12px 12px; }
+/* Your messages: a lighter neutral surface, never lime. */
+.as-msg.is-user .as-bubble { background: var(--line); border-radius: 12px 12px 3px 12px; }
+.as-bubble .sws-mono { font-weight: 600; }
+.as-typing { display: flex; gap: var(--sp-1); padding: 12px 14px; border-radius: 3px 12px 12px 12px; background: var(--panel); }
+.as-suggest { gap: var(--sp-2); }
+.as-suggest .sws-chip { border-radius: 16px; }
+.as-form { display: flex; gap: 10px; }
+.as-form .sws-input { flex: 1; background: var(--panel); }
+@media (max-width: 900px) {
+  /* One sideways-scrolling row of suggestions, so they don't eat the screen. */
+  .as-suggest { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px; overscroll-behavior-x: contain; }
+  .as-suggest .sws-chip { flex-shrink: 0; }
+  .as-bubble { max-width: 88%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .as-msg { animation: none; }
+}
+
 /* ---------- Responsive ---------- */
 .sws-topbar { display: none; }
 .sws-backdrop { display: none; }
