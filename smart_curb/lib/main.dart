@@ -10,6 +10,9 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderAbstractViewport;
+import 'package:flutter/scheduler.dart'
+    show SchedulerBinding, SchedulerPhase, Ticker;
 import 'package:flutter/services.dart';
 import 'package:flutter_compass/flutter_compass.dart';
 import 'package:geolocator/geolocator.dart' as geo;
@@ -25,7 +28,8 @@ void main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
-  await CampusPathfinder.load(); // campus walking network for A*
+  // Each place's walking network for A*.
+  await Future.wait([for (final p in Place.all) p.pathfinder.load()]);
   runApp(const MyApp());
 }
 
@@ -628,20 +632,41 @@ class _UserSpaceState extends State<UserSpace> {
 // TAB 1: HOME (Places & Campus Management)
 // ==========================================
 
-Widget buildCampusLogo(String shortName) {
-  return Container(
-    width: 52,
-    height: 52,
-    decoration: BoxDecoration(
-      color: kCardAlt,
-      borderRadius: BorderRadius.circular(kRadius),
-      border: Border.all(color: kDivider),
-    ),
-    alignment: Alignment.center,
+/// A place's 52 px logo tile: its logo image when it has one (the whole
+/// logo, on its own background colour), otherwise [shortName] as text.
+Widget buildCampusLogo(String shortName, {Place? place}) {
+  const size = 52.0;
+  final text = Center(
     child: Text(
       shortName,
       style: mono(fontSize: 15, color: kAccent, letterSpacing: 0.8),
     ),
+  );
+  final logo = place?.logoAsset;
+  return Container(
+    width: size,
+    height: size,
+    clipBehavior: Clip.antiAlias,
+    decoration: BoxDecoration(
+      color: logo == null ? kCardAlt : place!.logoBackground,
+      borderRadius: BorderRadius.circular(kRadius),
+      border: Border.all(color: kDivider),
+    ),
+    child: logo == null
+        ? text
+        : Padding(
+            padding: const EdgeInsets.all(3),
+            child: Image.asset(
+              logo,
+              fit: BoxFit.contain,
+              // The FAU file is 3840 px wide: decode it tile-sized.
+              cacheWidth: 200,
+              filterQuality: FilterQuality.medium,
+              // Missing or broken file: the text tile, on the usual colour.
+              errorBuilder: (_, _, _) =>
+                  ColoredBox(color: kCardAlt, child: text),
+            ),
+          ),
   );
 }
 
@@ -653,13 +678,15 @@ class _HomeTab extends StatefulWidget {
 }
 
 class _HomeTabState extends State<_HomeTab> {
-  static const List<Map<String, String>> _availableCampuses = [
-    {
-      'id': 'fau_boca',
-      'shortName': 'FAU',
-      'fullName': 'Florida Atlantic University',
-      'address': '777 Glades Rd, Boca Raton, FL 33431',
-    },
+  /// Every place users can add (see [Place.all]).
+  static final List<Map<String, String>> _availableCampuses = [
+    for (final p in Place.all)
+      {
+        'id': p.id,
+        'shortName': p.shortName,
+        'fullName': p.fullName,
+        'address': p.address,
+      },
   ];
 
   // Stream is created once instead of on every build (avoids re-subscribing).
@@ -717,45 +744,56 @@ class _HomeTabState extends State<_HomeTab> {
       stream: _stream,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-
-        final rawData = snapshot.data?.snapshot.value;
-        if (rawData is! Map) {
-          _addedIds = const {};
-          return AnimatedAddCard(
-            title: 'No Locations Found',
-            subtitle: 'Tap to add a new location',
-            onTap: _showAddSpaceDialog,
+          return const FadeSwitcher(
+            child: Center(
+              key: ValueKey('loading'),
+              child: CircularProgressIndicator(),
+            ),
           );
         }
 
+        final rawData = snapshot.data?.snapshot.value;
         final locations = <String, Map<String, dynamic>>{
-          for (final entry in rawData.entries)
-            if (entry.value is Map)
-              entry.key.toString():
-                  Map<String, dynamic>.from(entry.value as Map),
+          if (rawData is Map)
+            for (final entry in rawData.entries)
+              if (entry.value is Map)
+                entry.key.toString():
+                    Map<String, dynamic>.from(entry.value as Map),
         };
         _addedIds = locations.keys.toSet();
         final visible = locations.entries
             .where((e) => matchesLocationQuery(e.value, _query))
             .toList();
 
-        return _ListWithBottomAction(
+        // Always the same list, even with no places left, so the last card
+        // swipes away like the others before the empty card takes over.
+        return FadeSwitcher(
+          child: _ListWithBottomAction(
+          key: const ValueKey('list'),
+          // Deleted places swipe away to the left.
+          swipeOut: true,
+          isEmpty: locations.isEmpty,
+          empty: AnimatedAddCard(
+            title: 'No Locations Found',
+            subtitle: 'Tap to add a new location',
+            onTap: _showAddSpaceDialog,
+          ),
           actionTitle: 'Add more locations',
           actionIcon: Icons.add_location_alt_outlined,
           onAction: _showAddSpaceDialog,
           children: [
             AppTextField(
+              key: const ValueKey('search'),
               controller: _searchCtrl,
               hintText: 'Search your locations',
               icon: Icons.search,
               onChanged: (v) => setState(() => _query = v),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(key: ValueKey('search-gap'), height: 16),
             for (final e in visible) _buildLocationCard(uid, e.key, e.value),
-            if (visible.isEmpty)
+            if (visible.isEmpty && locations.isNotEmpty)
               Padding(
+                key: const ValueKey('no-match'),
                 padding: const EdgeInsets.symmetric(vertical: 24),
                 child: Text(
                   'No saved locations match "${_query.trim()}".',
@@ -764,16 +802,17 @@ class _HomeTabState extends State<_HomeTab> {
                 ),
               ),
           ],
+          ),
         );
       },
     );
   }
 
   Widget _buildLocationCard(String uid, String locKey, Map<String, dynamic> data) {
-    final shortName = data['shortName']?.toString() ?? 'FAU';
-    final fullName = data['fullName']?.toString() ?? 'Florida Atlantic University';
-    final address =
-        data['address']?.toString() ?? '777 Glades Rd, Boca Raton, FL 33431';
+    final place = Place.byId(locKey);
+    final shortName = data['shortName']?.toString() ?? place?.shortName ?? '?';
+    final fullName = data['fullName']?.toString() ?? place?.fullName ?? locKey;
+    final address = data['address']?.toString() ?? place?.address ?? '';
 
     return Padding(
       key: ValueKey('loc-$locKey'),
@@ -781,10 +820,16 @@ class _HomeTabState extends State<_HomeTab> {
       child: PressScale(
         child: InkWell(
         borderRadius: BorderRadius.circular(kRadius),
-        onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => const FauMapScreen()),
-        ),
+        onTap: () {
+          if (place == null) {
+            showErrorSnackBar(context, 'This location is no longer available.');
+            return;
+          }
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => PlaceMapScreen(place: place)),
+          );
+        },
         child: Container(
           padding: const EdgeInsets.all(16.0),
           decoration: BoxDecoration(
@@ -794,7 +839,7 @@ class _HomeTabState extends State<_HomeTab> {
           ),
           child: Row(
             children: [
-              buildCampusLogo(shortName),
+              buildCampusLogo(shortName, place: place),
               const SizedBox(width: 16),
               Expanded(
                 child: Column(
@@ -857,6 +902,22 @@ class _SelectLocationDialogState extends State<_SelectLocationDialog> {
   final _searchCtrl = TextEditingController();
   String _query = '';
 
+  /// The campus being added: its button turns into a check and its card
+  /// lights up for a moment before the dialog closes.
+  String? _addingId;
+  static const Duration _addConfirm = Duration(milliseconds: 420);
+
+  void _add(Map<String, String> campus) {
+    if (_addingId != null) return;
+    setState(() => _addingId = campus['id']);
+    final wait = reduceMotion(context) ? Duration.zero : _addConfirm;
+    Future.delayed(wait, () {
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      widget.onAdd(campus);
+    });
+  }
+
   @override
   void dispose() {
     _searchCtrl.dispose();
@@ -903,21 +964,22 @@ class _SelectLocationDialogState extends State<_SelectLocationDialog> {
               onChanged: (v) => setState(() => _query = v),
             ),
             const SizedBox(height: 16),
+            // Rows rise in when the dialog opens, fold away or grow in as you
+            // search, and recede under the edges as they scroll.
             Expanded(
-              child: emptyText != null
-                  ? Padding(
-                      padding: const EdgeInsets.only(top: 24),
-                      child: Text(
-                        emptyText,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(color: kTextMuted, fontSize: 13),
-                      ),
-                    )
-                  : ListView.builder(
-                      itemCount: results.length,
-                      itemBuilder: (context, index) =>
-                          _buildCampusRow(results[index]),
-                    ),
+              child: AnimatedRowList(
+                springy: true,
+                isEmpty: emptyText != null,
+                empty: Padding(
+                  padding: const EdgeInsets.only(top: 24),
+                  child: Text(
+                    emptyText ?? '',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: kTextMuted, fontSize: 13),
+                  ),
+                ),
+                children: [for (final c in results) _buildCampusRow(c)],
+              ),
             ),
           ],
         ),
@@ -926,17 +988,24 @@ class _SelectLocationDialogState extends State<_SelectLocationDialog> {
   }
 
   Widget _buildCampusRow(Map<String, String> campus) {
-    return Container(
+    final adding = _addingId == campus['id'];
+    return AnimatedContainer(
+      key: ValueKey('campus-${campus['id']}'),
+      duration: kMotion,
+      curve: kEaseOut,
       margin: const EdgeInsets.only(bottom: 12.0),
       padding: const EdgeInsets.all(16.0),
       decoration: BoxDecoration(
-        color: kBg,
+        color: adding ? kNavBg : kBg,
         borderRadius: BorderRadius.circular(kRadius),
-        border: Border.all(color: kDivider),
+        border: Border.all(color: adding ? kAccent : kDivider),
       ),
       child: Row(
         children: [
-          buildCampusLogo(campus['shortName']!),
+          buildCampusLogo(
+            campus['shortName']!,
+            place: Place.byId(campus['id']!),
+          ),
           const SizedBox(width: 14),
           Expanded(
             child: Column(
@@ -959,15 +1028,30 @@ class _SelectLocationDialogState extends State<_SelectLocationDialog> {
             ),
           ),
           const SizedBox(width: 10),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              widget.onAdd(campus);
-            },
-            style: ElevatedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          PressScale(
+            child: ElevatedButton(
+              onPressed: () => _add(campus),
+              style: ElevatedButton.styleFrom(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              ),
+              // "Add" pops into a check when tapped.
+              child: AnimatedSwitcher(
+                duration: kMotion,
+                transitionBuilder: (child, anim) => FadeTransition(
+                  opacity: anim,
+                  child: ScaleTransition(
+                    scale: Tween(begin: 0.4, end: 1.0).animate(
+                      CurvedAnimation(parent: anim, curve: Curves.easeOutBack),
+                    ),
+                    child: child,
+                  ),
+                ),
+                child: adding
+                    ? const Icon(Icons.check, key: ValueKey('added'), size: 18)
+                    : const Text('Add', key: ValueKey('add')),
+              ),
             ),
-            child: const Text('Add'),
           ),
         ],
       ),
@@ -1030,25 +1114,62 @@ class Geo {
     return (math.atan2(y, x) / _deg + 360.0) % 360.0;
   }
 
+  /// The point [meters] from [p] in compass direction [bearing].
+  static LatLng offset(LatLng p, double bearing, double meters) {
+    final b = bearing * _deg;
+    final dLat = meters * math.cos(b) / _earthR;
+    final dLng =
+        meters * math.sin(b) / (_earthR * math.cos(p.latitude * _deg));
+    return LatLng(p.latitude + dLat / _deg, p.longitude + dLng / _deg);
+  }
+
   /// Signed shortest rotation (-180..180] from one angle to another.
   static double shortestAngle(double from, double to) {
     var d = (to - from) % 360.0; // Dart % is always >= 0 here
     if (d > 180.0) d -= 360.0;
     return d;
   }
+
+  /// The point [along] meters from the start of [pts] (at least 2 points),
+  /// and the segment it lies on. [suffix] holds each point's distance to the
+  /// end of the path, so this is a binary search, cheap enough to run every
+  /// animation frame.
+  static ({int seg, LatLng point}) pointAlong(
+    List<LatLng> pts,
+    List<double> suffix,
+    double along,
+  ) {
+    final total = suffix.first;
+    final rest = (total - along).clamp(0.0, total); // meters left to the end
+    // The last point that still has at least `rest` to go.
+    var lo = 0;
+    var hi = pts.length - 2;
+    while (lo < hi) {
+      final mid = (lo + hi + 1) >> 1;
+      if (suffix[mid] >= rest) {
+        lo = mid;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    final len = suffix[lo] - suffix[lo + 1];
+    final t = len > 0 ? ((suffix[lo] - rest) / len).clamp(0.0, 1.0) : 0.0;
+    return (seg: lo, point: lerp(pts[lo], pts[lo + 1], t));
+  }
 }
 
 // ==========================================
-// FAU CAMPUS MODELS & A* PATHFINDING
+// PLACE MODELS & A* PATHFINDING
 // ==========================================
 
-class FauBuilding {
+/// A destination on a place's map (a campus building, a store in a mall).
+class PlaceBuilding {
   final String id;
   final String code;
   final String name;
   final LatLng position;
 
-  const FauBuilding({
+  const PlaceBuilding({
     required this.id,
     required this.code,
     required this.name,
@@ -1056,16 +1177,188 @@ class FauBuilding {
   });
 }
 
+/// The buildings matching a search [query], best matches first: codes
+/// starting with it, then names starting with it, then the rest (each group
+/// in list order). When it names a building exactly, by code ("ed-47", or
+/// "ed47" without the dash) or by name ("College of Education", with or
+/// without its "(ED-47)"), only that building.
+List<PlaceBuilding> rankBuildingMatches(
+  List<PlaceBuilding> buildings,
+  String query,
+) {
+  String bare(String s) => s.toLowerCase().replaceAll(RegExp(r'[\s\-]'), '');
+  String words(String s) =>
+      s.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+  // "College of Education (ED-47)" -> "college of education"
+  String baseName(String name) =>
+      words(name.replaceFirst(RegExp(r'\s*\([^)]*\)\s*$'), ''));
+  final q = words(query);
+  final qb = bare(q);
+  if (q.isEmpty) return List.of(buildings);
+
+  final exact = [
+    for (final b in buildings)
+      if ((qb.isNotEmpty && bare(b.code) == qb) ||
+          words(b.name) == q ||
+          baseName(b.name) == q)
+        b,
+  ];
+  if (exact.isNotEmpty) return exact;
+
+  int? rank(PlaceBuilding b) {
+    final code = bare(b.code);
+    final name = b.name.toLowerCase();
+    if (qb.isNotEmpty && code == qb) return 0;
+    if (qb.isNotEmpty && code.startsWith(qb)) return 1;
+    if (name.startsWith(q)) return 2;
+    if (name.contains(q) || (qb.isNotEmpty && code.contains(qb))) return 3;
+    return null; // no match
+  }
+
+  final ranked = [
+    for (var i = 0; i < buildings.length; i++)
+      if (rank(buildings[i]) case final r?) (r, i, buildings[i]),
+  ]..sort((a, b) => a.$1 != b.$1 ? a.$1 - b.$1 : a.$2 - b.$2);
+  return [for (final r in ranked) r.$3];
+}
+
 class PathResult {
   final String lotId;
+
+  /// The open curb to park at, or null to park anywhere in the lot.
+  final String? unitId;
   final List<LatLng> pathPoints;
   final double totalDistanceMeters;
 
   const PathResult({
     required this.lotId,
+    this.unitId,
     required this.pathPoints,
     required this.totalDistanceMeters,
   });
+
+  /// Where to park: the curb's space, or the lot itself (the walk's start).
+  LatLng get parkAt => pathPoints.first;
+}
+
+/// A straight row of parking spaces with one curb unit in each, drawn on the
+/// map as 3D blocks coloured by the unit's live status.
+class CurbSpotRow {
+  final String lotId;
+
+  /// Centre of the first space in the row.
+  final LatLng first;
+
+  /// Compass direction the row runs, from the first space to the next.
+  final double rowBearing;
+
+  /// Curb unit ids, first space first.
+  final List<String> unitIds;
+
+  /// Cars enter each space from this side of the row (seen facing
+  /// [rowBearing]); the curb is at the other end of the space.
+  final bool enterFromRight;
+
+  /// How far back along the row from the first space's centre the lane
+  /// behind the row meets the road.
+  final double laneLeadIn;
+
+  /// From the spaces' open end to the centre of the lane behind them (so
+  /// two facing rows' open ends are twice this apart). Widen it to make two
+  /// facing rows fill the room between their lot's aisles.
+  final double laneOffset;
+
+  const CurbSpotRow({
+    required this.lotId,
+    required this.first,
+    required this.rowBearing,
+    required this.unitIds,
+    required this.enterFromRight,
+    required this.laneLeadIn,
+    this.laneOffset = defaultLaneOffset,
+  });
+
+  /// The row across the lane from [row], facing it: open ends toward each
+  /// other, so its curbs are at the far end of its spaces. Its spaces sit
+  /// directly opposite [row]'s ([unitIds] starts opposite [row]'s first),
+  /// and both rows are driven into from the one lane between them.
+  CurbSpotRow.facing(
+    CurbSpotRow row, {
+    required this.unitIds,
+    String? lotId,
+  })  : lotId = lotId ?? row.lotId,
+        first = Geo.offset(
+          row.first,
+          row.entryBearing,
+          spaceDepth + 2 * row.laneOffset,
+        ),
+        rowBearing = row.rowBearing,
+        enterFromRight = !row.enterFromRight,
+        laneLeadIn = row.laneLeadIn,
+        laneOffset = row.laneOffset;
+
+  /// A 3 m lane: two facing rows fit between aisles 18 m apart with ~1 m to
+  /// spare at each curb end.
+  static const double defaultLaneOffset = 1.5; // m
+
+  /// Compass direction from a space's centre toward its open end.
+  double get entryBearing => rowBearing + (enterFromRight ? 90 : -90);
+
+  /// Compass direction from a space's centre toward its curb (the front).
+  double get curbBearing => (entryBearing + 180) % 360;
+
+  /// The drive in to space [index]: from where the lane behind the row
+  /// meets the road, along the lane to behind the space, then into it
+  /// through its open end, stopping at its centre (curb ahead of the car).
+  List<LatLng> approach(int index) {
+    LatLng lane(double along) => Geo.offset(
+          Geo.offset(first, rowBearing, along),
+          entryBearing,
+          spaceDepth / 2 + laneOffset,
+        );
+    return [
+      lane(-laneLeadIn),
+      lane(index * spaceWidth),
+      Geo.offset(first, rowBearing, index * spaceWidth),
+    ];
+  }
+
+  /// A standard US parking space (9 ft wide along the row, 18 ft deep),
+  /// drawn 20% larger so the blocks read well on the map.
+  static const double spaceWidth = 2.7 * 1.2; // m
+  static const double spaceDepth = 5.5 * 1.2; // m
+
+  /// Space left between neighbouring blocks so each one reads separately.
+  static const double gap = 0.3 * 1.2; // m
+
+  /// Each space's unit id, centre, outline (a closed ring of corners) and
+  /// which way its curb is ([curbBearing]).
+  List<({String unitId, LatLng center, List<LatLng> ring, double curbBearing})>
+      spaces() {
+    const halfW = (spaceWidth - gap) / 2;
+    const halfD = spaceDepth / 2;
+    final across = rowBearing + 90;
+    LatLng corner(LatLng c, double w, double d) =>
+        Geo.offset(Geo.offset(c, rowBearing, w), across, d);
+    return [
+      for (var i = 0; i < unitIds.length; i++)
+        () {
+          final c = Geo.offset(first, rowBearing, i * spaceWidth);
+          final ring = [
+            corner(c, halfW, halfD),
+            corner(c, halfW, -halfD),
+            corner(c, -halfW, -halfD),
+            corner(c, -halfW, halfD),
+          ];
+          return (
+            unitId: unitIds[i],
+            center: c,
+            ring: [...ring, ring.first],
+            curbBearing: curbBearing,
+          );
+        }(),
+    ];
+  }
 }
 
 class _GraphSnap {
@@ -1128,27 +1421,25 @@ class _MinHeap {
   }
 }
 
+/// A* walking routes over one place's walkway network.
 class CampusPathfinder {
-  /// Where each parking lot is (lots are not graph nodes; like buildings,
-  /// they are snapped onto the nearest walkway when routing).
-  static const Map<String, LatLng> lotPositions = {
-    'lot12': LatLng(26.373262, -80.106806),
-    'lot14': LatLng(26.373005, -80.099683),
-    'lot07': LatLng(26.373999, -80.105842),
-    'lot06': LatLng(26.374013, -80.104280),
-  };
+  /// [asset] holds the place's walking network (see [load]). [nodes] and
+  /// [edges] are a small hand-made graph used until it loads, or if it
+  /// can't be read.
+  CampusPathfinder(this.asset, {this.nodes = const {}, this.edges = const []});
+
+  final String asset;
 
   /// True once the full OpenStreetMap walkway network has been loaded.
-  static bool usingOsmGraph = false;
+  bool usingOsmGraph = false;
 
-  /// Loads the campus walking network (every sidewalk, footpath, crossing,
-  /// campus road and parking aisle from OpenStreetMap) from
-  /// assets/campus_walkways.json. Format: `nodes` = flat [lat, lon, ...],
-  /// `edges` = flat [nodeIndex, nodeIndex, ...]. If it can't be read, the
-  /// small built-in graph below stays in use.
-  static Future<void> load() async {
+  /// Loads the walking network (every sidewalk, footpath, crossing, road
+  /// and parking aisle from OpenStreetMap) from [asset]. Format: `nodes` =
+  /// flat [lat, lon, ...], `edges` = flat [nodeIndex, nodeIndex, ...]. If it
+  /// can't be read, the hand-made graph stays in use.
+  Future<void> load() async {
     try {
-      final raw = await rootBundle.loadString('assets/campus_walkways.json');
+      final raw = await rootBundle.loadString(asset);
       final json = jsonDecode(raw) as Map<String, dynamic>;
       final n = (json['nodes'] as List).cast<num>();
       final e = (json['edges'] as List).cast<num>();
@@ -1172,44 +1463,17 @@ class CampusPathfinder {
     }
   }
 
-  /// Walkway nodes. Starts as the small hand-made graph around the first
-  /// lots and buildings; [load] replaces it with the full campus network.
-  static Map<String, LatLng> nodes = {
-    'lot12': const LatLng(26.373262, -80.106806),
-    'lot14': const LatLng(26.373005, -80.099683),
-    'lot07': const LatLng(26.373999, -80.105842),
-    'lot06': const LatLng(26.374013, -80.104280),
-    'ed47': const LatLng(26.373358, -80.105828),
-    'bc71': const LatLng(26.373263, -80.100446),
-    'cm22': const LatLng(26.372528, -80.104044),
-    'ed47_west': const LatLng(26.373300, -80.106300),
-    'breezeway_west': const LatLng(26.373300, -80.103500),
-    'breezeway_center': const LatLng(26.373280, -80.101700),
-    'breezeway_east': const LatLng(26.373270, -80.101000),
-    'bc71_east': const LatLng(26.373150, -80.099950),
-  };
+  /// Walkway nodes: the hand-made graph until [load] replaces it with the
+  /// full network.
+  Map<String, LatLng> nodes;
 
   /// Walkways, listed once each. They are always two-way, so a one-sided
   /// neighbor list can no longer break the graph.
-  static List<List<String>> edges = [
-    ['lot12', 'ed47_west'],
-    ['lot07', 'ed47_west'],
-    ['ed47', 'ed47_west'],
-    ['lot07', 'lot06'],
-    ['lot06', 'breezeway_west'],
-    ['ed47', 'breezeway_west'],
-    ['cm22', 'breezeway_west'],
-    ['cm22', 'breezeway_center'],
-    ['breezeway_west', 'breezeway_center'],
-    ['breezeway_center', 'breezeway_east'],
-    ['breezeway_east', 'bc71'],
-    ['bc71', 'bc71_east'],
-    ['bc71_east', 'lot14'],
-  ];
+  List<List<String>> edges;
 
-  static Map<String, Map<String, double>> _adj = _buildAdjacency();
+  late Map<String, Map<String, double>> _adj = _buildAdjacency();
 
-  static Map<String, Map<String, double>> _buildAdjacency() {
+  Map<String, Map<String, double>> _buildAdjacency() {
     final adj = <String, Map<String, double>>{};
     for (final e in edges) {
       final a = nodes[e[0]];
@@ -1224,24 +1488,34 @@ class CampusPathfinder {
     return adj;
   }
 
-  /// Lots and buildings never move, so each lot→building walk is computed once.
-  static final Map<String, PathResult> _cache = {};
+  /// Lots, curbs and buildings never move, so each walk is computed once.
+  final Map<String, PathResult> _cache = {};
 
-  static PathResult walkingRoute(String lotId, LatLng lotPos, LatLng buildingPos) {
-    final key = '$lotId|${buildingPos.latitude},${buildingPos.longitude}';
+  /// The walk from [from] (lot [lotId], or curb [unitId] in it) to a building.
+  PathResult walkingRoute(
+    String lotId,
+    LatLng from,
+    LatLng buildingPos, {
+    String? unitId,
+  }) {
+    final key =
+        '$lotId|${unitId ?? ''}|${buildingPos.latitude},${buildingPos.longitude}';
     return _cache.putIfAbsent(key, () {
-      final path = findPath(lotPos, buildingPos);
+      final path = findPath(from, buildingPos);
       return PathResult(
         lotId: lotId,
+        unitId: unitId,
         pathPoints: path,
         totalDistanceMeters: Geo.pathLength(path),
       );
     });
   }
 
-  /// Closest non-full lot by real walking distance. Lots with no sensors
-  /// (capacity 0) are treated as unknown and skipped.
-  static PathResult? findBestAvailableRoute({
+  /// Closest non-full lot by real walking distance. Lots whose sensors
+  /// report nothing (capacity 0) are treated as unknown and skipped; lots
+  /// with no sensors at all (`sensors: false`, see [Place.liveParking])
+  /// can't be counted, so they always qualify.
+  PathResult? findBestAvailableRoute({
     required LatLng buildingPos,
     required Map<String, Map<String, dynamic>> lots,
   }) {
@@ -1249,7 +1523,8 @@ class CampusPathfinder {
     for (final entry in lots.entries) {
       final occupied = (entry.value['occupied'] as num?)?.toInt() ?? 0;
       final capacity = (entry.value['capacity'] as num?)?.toInt() ?? 0;
-      if (capacity <= 0 || occupied >= capacity) continue;
+      final sensors = entry.value['sensors'] != false;
+      if (sensors && (capacity <= 0 || occupied >= capacity)) continue;
 
       final lotPos = entry.value['position'] as LatLng?;
       if (lotPos == null) continue;
@@ -1264,7 +1539,7 @@ class CampusPathfinder {
 
   /// Lots and buildings never move, so where each one joins the network is
   /// worked out once (there are thousands of walkway segments to check).
-  static final Map<String, List<_GraphSnap>> _snapCache = {};
+  final Map<String, List<_GraphSnap>> _snapCache = {};
 
   /// How much farther than its nearest walkway the destination may still
   /// join the network. Building positions are their centres, and the nearest
@@ -1279,7 +1554,7 @@ class CampusPathfinder {
 
   /// Projects p onto every walkway segment (not just nodes) within [reach]
   /// of the nearest one, so points between nodes route correctly.
-  static List<_GraphSnap> _snapToGraph(LatLng p, {double reach = 0}) {
+  List<_GraphSnap> _snapToGraph(LatLng p, {double reach = 0}) {
     // Walking reroutes start from live GPS points (each one new), so keep the
     // cache from growing forever.
     if (_snapCache.length > 500) _snapCache.clear();
@@ -1302,7 +1577,7 @@ class CampusPathfinder {
     });
   }
 
-  static List<LatLng> findPath(LatLng start, LatLng goal) {
+  List<LatLng> findPath(LatLng start, LatLng goal) {
     final ss = _snapToGraph(start);
     final gs = _snapToGraph(goal, reach: _goalReach);
     const sId = '__start';
@@ -1394,45 +1669,825 @@ class CampusPathfinder {
 class RealRoadRouter {
   static final http.Client _client = http.Client(); // reuse connections
 
+  /// Driving route from [start] to [destination]; a straight line if
+  /// routing fails. [startHeading] is the car's direction of travel while
+  /// it's moving. Without it OSRM starts the route on whichever road is
+  /// nearest the GPS fix, which on a divided road can be the side going the
+  /// other way (a route that opens with a U-turn).
   static Future<List<LatLng>> getRoadRoute({
     required LatLng start,
     required LatLng destination,
+    double? startHeading,
   }) async {
-    final url = Uri.parse(
-      'https://router.project-osrm.org/route/v1/driving/'
-      '${start.longitude},${start.latitude};'
-      '${destination.longitude},${destination.latitude}'
-      '?overview=full&geometries=geojson',
-    );
-
     try {
-      final response =
-          await _client.get(url).timeout(const Duration(seconds: 10));
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        final routes = data['routes'] as List<dynamic>?;
-        if (routes != null && routes.isNotEmpty) {
-          final coords = routes[0]['geometry']['coordinates'] as List<dynamic>;
-          final pts = coords
-              .map((pt) => LatLng(
-                    (pt[1] as num).toDouble(),
-                    (pt[0] as num).toDouble(),
-                  ))
-              .toList();
-          if (pts.length >= 2) return pts;
-        }
-      } else {
-        debugPrint('OSRM returned status ${response.statusCode}');
+      if (startHeading != null) {
+        final route = await _fetch(start, destination, startHeading);
+        if (route != null) return route;
+        // No road matched that direction: ask again without it.
       }
+      final route = await _fetch(start, destination, null);
+      if (route != null) return route;
     } catch (e) {
       debugPrint('OSRM routing error: $e');
     }
     return [start, destination];
   }
+
+  /// One OSRM request. Null when the server answered without a usable
+  /// route; throws on network errors and timeouts.
+  static Future<List<LatLng>?> _fetch(
+    LatLng start,
+    LatLng destination,
+    double? heading,
+  ) async {
+    // Only roads within 45° of the heading at the start; any at the end.
+    final bearings =
+        heading == null ? '' : '&bearings=${heading.round() % 360},45;';
+    final url = Uri.parse(
+      'https://router.project-osrm.org/route/v1/driving/'
+      '${start.longitude},${start.latitude};'
+      '${destination.longitude},${destination.latitude}'
+      '?overview=full&geometries=geojson$bearings',
+    );
+
+    final response =
+        await _client.get(url).timeout(const Duration(seconds: 10));
+    if (response.statusCode != 200) {
+      debugPrint('OSRM returned status ${response.statusCode}');
+      return null;
+    }
+    final data = jsonDecode(response.body);
+    final routes = data['routes'] as List<dynamic>?;
+    if (routes == null || routes.isEmpty) return null;
+    final coords = routes[0]['geometry']['coordinates'] as List<dynamic>;
+    final pts = coords
+        .map((pt) => LatLng(
+              (pt[1] as num).toDouble(),
+              (pt[0] as num).toDouble(),
+            ))
+        .toList();
+    return pts.length >= 2 ? pts : null;
+  }
 }
 
 // ==========================================
-// FAU CAMPUS MAP SCREEN (MapLibre GL, 3D)
+// PLACES (each one a map users can add)
+// ==========================================
+
+/// A place users can add to their home page and open as a map: its area,
+/// destinations, parking lots and walking network. The map screen reads
+/// everything place-specific from here, so a new place needs no other code.
+class Place {
+  /// Key under `drivers/<uid>/locations` when a user adds it.
+  final String id;
+
+  /// Logo text, full name and address on the home page.
+  final String shortName;
+  final String fullName;
+  final String address;
+
+  /// The place's logo (shown instead of [shortName] when it loads), and
+  /// the colour around it when it isn't square: its own background colour,
+  /// so it reads as one tile.
+  final String? logoAsset;
+  final Color logoBackground;
+
+  /// Short name in sentences ("Travel to FAU").
+  final String nickname;
+
+  /// Map screen app bar title and subtitle, and the guidance card's title
+  /// before a destination is picked.
+  final String mapTitle;
+  final String areaName;
+  final String guidanceTitle;
+
+  /// Guidance card text inside and outside the place's box.
+  final String insideLabel;
+  final String outsideLabel;
+
+  /// The map opens here, and flies back here on reset.
+  final LatLng center;
+
+  /// Where a driving route starts without a GPS fix, and where dev mode's
+  /// "Travel to" button puts you.
+  final LatLng entrance;
+
+  /// The map can't be panned outside this box, and inside it counts as
+  /// being at the place.
+  final LatLng sw;
+  final LatLng ne;
+  final double minZoom;
+
+  /// Destinations: tap one on the map or search for it.
+  final List<PlaceBuilding> buildings;
+
+  /// Where each parking lot is (lots are not graph nodes; like buildings,
+  /// they are snapped onto the nearest walkway when routing).
+  final Map<String, LatLng> lotPositions;
+
+  /// True: lot occupancy comes live from the curbs in `units/` (names from
+  /// `lots/`). False: no curbs here yet, so the lots in [lotPositions] are
+  /// plain map points named by [lotNames], and the closest one to the
+  /// destination by walking distance is recommended.
+  final bool liveParking;
+  final Map<String, String> lotNames;
+
+  /// Rows of parking spaces with a curb unit in each (see [CurbSpotRow]).
+  final List<CurbSpotRow> spotRows;
+
+  final CampusPathfinder pathfinder;
+
+  Place({
+    required this.id,
+    required this.shortName,
+    required this.fullName,
+    required this.address,
+    this.logoAsset,
+    this.logoBackground = kCardAlt,
+    required this.nickname,
+    required this.mapTitle,
+    required this.areaName,
+    required this.guidanceTitle,
+    required this.insideLabel,
+    required this.outsideLabel,
+    required this.center,
+    required this.entrance,
+    required this.sw,
+    required this.ne,
+    required this.minZoom,
+    required this.buildings,
+    required this.lotPositions,
+    required this.liveParking,
+    this.lotNames = const {},
+    this.spotRows = const [],
+    required this.pathfinder,
+  });
+
+  bool contains(LatLng p) =>
+      p.latitude >= sw.latitude &&
+      p.latitude <= ne.latitude &&
+      p.longitude >= sw.longitude &&
+      p.longitude <= ne.longitude;
+
+  /// Every curb space, each shown on the map as a 3D block.
+  late final spotShapes = [for (final r in spotRows) ...r.spaces()];
+
+  /// Each curb's drive-in path (see [CurbSpotRow.approach]), by unit id.
+  late final Map<String, List<LatLng>> spotApproach = {
+    for (final r in spotRows)
+      for (var i = 0; i < r.unitIds.length; i++) r.unitIds[i]: r.approach(i),
+  };
+
+  /// Every place users can add, in the order the add dialog lists them.
+  static final List<Place> all = [fauBoca, browardMall];
+
+  static Place? byId(String id) {
+    for (final p in all) {
+      if (p.id == id) return p;
+    }
+    return null;
+  }
+}
+
+final Place fauBoca = Place(
+  id: 'fau_boca',
+  shortName: 'FAU',
+  fullName: 'Florida Atlantic University',
+  address: '777 Glades Rd, Boca Raton, FL 33431',
+  logoAsset: 'assets/FAU_logo.jpg',
+  logoBackground: const Color(0xFF005483), // the logo's own blue
+  nickname: 'FAU',
+  mapTitle: 'FAU Campus Map',
+  areaName: 'Boca Raton Main Campus',
+  guidanceTitle: 'FAU Boca Raton Main Campus',
+  insideLabel: 'On Campus',
+  outsideLabel: 'Outside Campus Area',
+  center: const LatLng(26.3745, -80.1030),
+  entrance: const LatLng(26.3685, -80.1020),
+  // Campus box. The north edge sits just past NW Spanish River Blvd, so the
+  // map starts counting at its traffic lights coming in from I-95 (I-95 ramp
+  // lights ~26.3873, the Airport Rd and FAU Blvd 4-way lights ~26.3861-66).
+  sw: const LatLng(26.3630, -80.1170),
+  ne: const LatLng(26.3880, -80.0890),
+  minZoom: 14.5,
+  buildings: _fauBuildings,
+  // Every FAU lot and garage with an official name, from OpenStreetMap
+  // (© OpenStreetMap contributors, ODbL), pulled Oct 2026. Ids match the
+  // `lot` field of the curbs in `units/` (zero-padded, so they sort). Lots
+  // with no curbs show as plain map points and are always recommendable.
+  lotPositions: const {
+    'lot01': LatLng(26.370548, -80.099284),
+    'lot02': LatLng(26.372916, -80.099578),
+    'lot03': LatLng(26.371307, -80.101397),
+    'lot04': LatLng(26.374155, -80.099734),
+    'lot05': LatLng(26.379985, -80.101641),
+    'lot06': LatLng(26.374074, -80.104246),
+    'lot07': LatLng(26.374039, -80.105947),
+    'lot08': LatLng(26.373260, -80.106791),
+    'lot10': LatLng(26.372522, -80.108251),
+    'lot12': LatLng(26.373825, -80.110753),
+    'lot13': LatLng(26.372919, -80.111539),
+    'lot14': LatLng(26.372338, -80.110426),
+    'lot15': LatLng(26.370655, -80.108325),
+    'lot16': LatLng(26.368944, -80.106239),
+    'lot17': LatLng(26.367668, -80.106790),
+    'lot18': LatLng(26.368141, -80.105545),
+    'lot19': LatLng(26.371296, -80.104582),
+    'lot20': LatLng(26.371033, -80.104776),
+    'lot21': LatLng(26.367677, -80.104817),
+    'lot22': LatLng(26.367680, -80.102950),
+    'lot23': LatLng(26.367113, -80.102026),
+    'lot24': LatLng(26.366514, -80.100685),
+    'lot25': LatLng(26.369226, -80.098988),
+    'lot26n': LatLng(26.375429, -80.096293),
+    'lot27': LatLng(26.370610, -80.098295),
+    'lot28': LatLng(26.368689, -80.098128),
+    'lot29': LatLng(26.377618, -80.096624),
+    'lot30': LatLng(26.376335, -80.096356),
+    'lot31': LatLng(26.376868, -80.096083),
+    'lot32': LatLng(26.376943, -80.096885),
+    'lot33': LatLng(26.376499, -80.097328),
+    'lot34': LatLng(26.374992, -80.096988),
+    'lot35': LatLng(26.375031, -80.097781),
+    'lot36': LatLng(26.375505, -80.099596),
+    'lot45': LatLng(26.377852, -80.097683),
+    'lot46': LatLng(26.378737, -80.097365),
+    'lot47': LatLng(26.378205, -80.094938),
+    'lot51': LatLng(26.371994, -80.104955),
+    'lot60': LatLng(26.368668, -80.096215),
+    'lot92': LatLng(26.366769, -80.104050),
+    'lot96n': LatLng(26.373468, -80.098182),
+    'lot102': LatLng(26.367360, -80.099337),
+    'garage1': LatLng(26.372192, -80.106030),
+    'garage2': LatLng(26.368955, -80.099541),
+    'garage3': LatLng(26.375169, -80.104009),
+    'aqua': LatLng(26.379360, -80.099444),
+    'copper': LatLng(26.377530, -80.099187),
+  },
+  liveParking: true,
+  // Shown when `lots/` has no name for the lot.
+  lotNames: const {
+    'lot01': 'Lot 1',
+    'lot02': 'Lot 2',
+    'lot03': 'Lot 3',
+    'lot04': 'Lot 4',
+    'lot05': 'Lot 5',
+    'lot06': 'Lot 6',
+    'lot07': 'Lot 7',
+    'lot08': 'Lot 8',
+    'lot10': 'Lot 10',
+    'lot12': 'Lot 12',
+    'lot13': 'Lot 13',
+    'lot14': 'Lot 14',
+    'lot15': 'Lot 15',
+    'lot16': 'Lot 16',
+    'lot17': 'Lot 17',
+    'lot18': 'Lot 18',
+    'lot19': 'Lot 19',
+    'lot20': 'Lot 20',
+    'lot21': 'Lot 21',
+    'lot22': 'Lot 22',
+    'lot23': 'Lot 23',
+    'lot24': 'Lot 24',
+    'lot25': 'Lot 25',
+    'lot26n': 'Lot 26N',
+    'lot27': 'Lot 27',
+    'lot28': 'Lot 28',
+    'lot29': 'Lot 29',
+    'lot30': 'Lot 30',
+    'lot31': 'Lot 31',
+    'lot32': 'Lot 32',
+    'lot33': 'Lot 33',
+    'lot34': 'Lot 34',
+    'lot35': 'Lot 35',
+    'lot36': 'Lot 36',
+    'lot45': 'Lot 45',
+    'lot46': 'Lot 46',
+    'lot47': 'Lot 47',
+    'lot51': 'Lot 51',
+    'lot60': 'Lot 60',
+    'lot92': 'Lot 92',
+    'lot96n': 'Lot 96N',
+    'lot102': 'Lot 102',
+    'garage1': 'Garage 1',
+    'garage2': 'Garage 2',
+    'garage3': 'Garage 3',
+    'aqua': 'Aqua Lot',
+    'copper': 'Copper Lot',
+  },
+  // To place a row, tap the centre of its first space in dev mode and copy
+  // the coordinate. Guidance always drives into a space from its open end
+  // (the end away from its curb), along the lane behind its row.
+  spotRows: [
+    _fauLot14North,
+    // Across the lane, open ends facing _fauLot14North (curbs at the north
+    // end, at the next aisle up); the first id sits opposite C-095. Both
+    // rows share the lane between.
+    CurbSpotRow.facing(_fauLot14North, unitIds: ['C-042']),
+  ],
+  // The small hand-made graph around the first lots and buildings, used
+  // until the full campus network loads.
+  pathfinder: CampusPathfinder(
+    'assets/campus_walkways.json',
+    nodes: {
+      'lot08': const LatLng(26.373262, -80.106806),
+      'lot02': const LatLng(26.373005, -80.099683),
+      'lot07': const LatLng(26.373999, -80.105842),
+      'lot06': const LatLng(26.374013, -80.104280),
+      'ed47': const LatLng(26.373358, -80.105828),
+      'bc71': const LatLng(26.373263, -80.100446),
+      'cm22': const LatLng(26.372528, -80.104044),
+      'ed47_west': const LatLng(26.373300, -80.106300),
+      'breezeway_west': const LatLng(26.373300, -80.103500),
+      'breezeway_center': const LatLng(26.373280, -80.101700),
+      'breezeway_east': const LatLng(26.373270, -80.101000),
+      'bc71_east': const LatLng(26.373150, -80.099950),
+    },
+    edges: [
+      ['lot08', 'ed47_west'],
+      ['lot07', 'ed47_west'],
+      ['ed47', 'ed47_west'],
+      ['lot07', 'lot06'],
+      ['lot06', 'breezeway_west'],
+      ['ed47', 'breezeway_west'],
+      ['cm22', 'breezeway_west'],
+      ['cm22', 'breezeway_center'],
+      ['breezeway_west', 'breezeway_center'],
+      ['breezeway_center', 'breezeway_east'],
+      ['breezeway_east', 'bc71'],
+      ['bc71', 'bc71_east'],
+      ['bc71_east', 'lot02'],
+    ],
+  ),
+);
+
+const CurbSpotRow _fauLot14North = CurbSpotRow(
+  lotId: 'lot14',
+  // Lot 14. Nose-in spaces on the north side of an east-west aisle (OSM line
+  // at 26.372301), starting at its crossing with the lot's north-south road
+  // (-80.109880): each space's aisle end is 1 m off the aisle line, and the
+  // first space's side is 0.45 m off the road line.
+  first: LatLng(26.372340, -80.109899),
+  // Along the aisle, westward (OSM: 270.1°).
+  rowBearing: 270.1,
+  unitIds: ['C-095', 'C-077', 'C-001'],
+  // Curbs at the aisle (south) end; cars pull in from the north.
+  enterFromRight: true,
+  // The lane behind the row meets the north-south road here.
+  laneLeadIn: 1.9,
+  // A 3.9 m lane: with the facing row's curbs 1 m off the next aisle north
+  // (26.372473, 19.1 m away), the two rows fill the room between the aisles.
+  laneOffset: 1.97,
+);
+
+/// No curbs installed yet: the four lots are plain map points, and the
+/// closest one to the destination (by walking distance) is recommended.
+final Place browardMall = Place(
+  id: 'broward_mall',
+  shortName: 'BWD',
+  fullName: 'Broward Mall',
+  address: '8000 W Broward Blvd, Plantation, FL 33388',
+  logoAsset: 'assets/broward_logo.jpg',
+  logoBackground: Colors.white,
+  nickname: 'Broward Mall',
+  mapTitle: 'Broward Mall Map',
+  areaName: 'Westfield Broward Mall, Plantation',
+  guidanceTitle: 'Westfield Broward Mall',
+  insideLabel: 'At the Mall',
+  outsideLabel: 'Outside Mall Area',
+  center: const LatLng(26.117789, -80.254729), // the mall building's centre
+  // Perimeter Rd, just in from its traffic light on W Broward Blvd.
+  entrance: const LatLng(26.120312, -80.257132),
+  // The mall's block (W Broward Blvd, N University Dr, Federated Rd and
+  // Perimeter Rd) and the roads around it; the same area as its walkways.
+  sw: const LatLng(26.1100, -80.2630),
+  ne: const LatLng(26.1250, -80.2470),
+  minZoom: 15.0,
+  buildings: _browardMallBuildings,
+  // The biggest surface lot on each side of the mall (OpenStreetMap),
+  // numbered clockwise from the north.
+  lotPositions: const {
+    'lot1': LatLng(26.119498, -80.256565), // north-west, by Dillard's
+    'lot2': LatLng(26.118063, -80.253161), // east, by Macy's
+    'lot3': LatLng(26.115663, -80.253942), // south, by Regal
+    'lot4': LatLng(26.116812, -80.256363), // west, by JCPenney
+  },
+  liveParking: false,
+  lotNames: const {
+    'lot1': 'Parking Lot 1',
+    'lot2': 'Parking Lot 2',
+    'lot3': 'Parking Lot 3',
+    'lot4': 'Parking Lot 4',
+  },
+  pathfinder: CampusPathfinder('assets/broward_walkways.json'),
+);
+
+/// Westfield Broward Mall: the mall itself, its anchor stores, the cinema
+/// and a few other main destinations, from OpenStreetMap
+/// (© OpenStreetMap contributors, ODbL), pulled Oct 2026. Code = the short
+/// label on the map.
+const List<PlaceBuilding> _browardMallBuildings = [
+  PlaceBuilding(
+    id: 'bm_mall',
+    code: 'Broward Mall',
+    name: 'Westfield Broward Mall (Main Building)',
+    position: LatLng(26.117789, -80.254729),
+  ),
+  PlaceBuilding(
+    id: 'bm_brio',
+    code: 'Brio',
+    name: 'Brio (Restaurant)',
+    position: LatLng(26.115404, -80.252057),
+  ),
+  PlaceBuilding(
+    id: 'bm_dillards',
+    code: "Dillard's",
+    name: "Dillard's (Department Store)",
+    position: LatLng(26.118281, -80.256400),
+  ),
+  PlaceBuilding(
+    id: 'bm_jcpenney',
+    code: 'JCPenney',
+    name: 'JCPenney (Department Store)',
+    position: LatLng(26.116289, -80.255379),
+  ),
+  PlaceBuilding(
+    id: 'bm_lenscrafters',
+    code: 'LensCrafters',
+    name: 'LensCrafters (Eyewear)',
+    position: LatLng(26.118938, -80.254558),
+  ),
+  PlaceBuilding(
+    id: 'bm_macys',
+    code: "Macy's",
+    name: "Macy's (Department Store)",
+    position: LatLng(26.117144, -80.253427),
+  ),
+  PlaceBuilding(
+    id: 'bm_regal',
+    code: 'Regal',
+    name: 'Regal Broward Stadium 12 (Cinema)',
+    position: LatLng(26.116257, -80.254112),
+  ),
+];
+
+/// FAU Boca Raton: every building that has an official building code, from
+/// OpenStreetMap (© OpenStreetMap contributors, ODbL), pulled Oct 2026.
+/// Position = centre of the building's outline, so the dots line up with
+/// the buildings drawn on the map. Parking garages (PK-) are left out.
+const List<PlaceBuilding> _fauBuildings = [
+  PlaceBuilding(
+    id: 'ad10',
+    code: 'AD-10',
+    name: 'Kenneth R. Williams Administration (AD-10)',
+    position: LatLng(26.371848, -80.101591),
+  ),
+  PlaceBuilding(
+    id: 'ag39',
+    code: 'AG-39',
+    name: 'Ritter Art Gallery (AG-39)',
+    position: LatLng(26.371550, -80.103648),
+  ),
+  PlaceBuilding(
+    id: 'ah52',
+    code: 'AH-52',
+    name: 'Dorothy F. Schmidt Center for Arts and Humanities (AH-52)',
+    position: LatLng(26.369743, -80.101365),
+  ),
+  PlaceBuilding(
+    id: 'al9',
+    code: 'AL-9',
+    name: 'Dorothy F. Schmidt Arts and Letters (AL-9)',
+    position: LatLng(26.369474, -80.102208),
+  ),
+  PlaceBuilding(
+    id: 'au31a',
+    code: 'AU-31A',
+    name: 'Carole & Barry Kaye Performing Arts Auditorium (AU-31A)',
+    position: LatLng(26.370302, -80.105596),
+  ),
+  PlaceBuilding(
+    id: 'az79',
+    code: 'AZ-79',
+    name: 'Memory & Wellness Center, Louis & Anne Green (AZ-79)',
+    position: LatLng(26.379654, -80.097165),
+  ),
+  PlaceBuilding(
+    id: 'bb48',
+    code: 'BB-48',
+    name: 'Baseball Stadium (BB-48)',
+    position: LatLng(26.370815, -80.109459),
+  ),
+  PlaceBuilding(
+    id: 'bc71',
+    code: 'BC-71',
+    name: 'Charles E. Schmidt Biomedical Science Center (BC-71)',
+    position: LatLng(26.373296, -80.100442),
+  ),
+  PlaceBuilding(
+    id: 'bk76',
+    code: 'BK-76',
+    name: 'Bookstore (BK-76)',
+    position: LatLng(26.370663, -80.103727),
+  ),
+  PlaceBuilding(
+    id: 'bs12',
+    code: 'BS-12',
+    name: 'Behavioral Sciences (BS-12)',
+    position: LatLng(26.372992, -80.102838),
+  ),
+  PlaceBuilding(
+    id: 'bu86',
+    code: 'BU-86',
+    name: 'College of Business (BU-86)',
+    position: LatLng(26.373213, -80.104676),
+  ),
+  PlaceBuilding(
+    id: 'ce31d',
+    code: 'CE-31D',
+    name: 'Continuing Education Hall (CE-31D)',
+    position: LatLng(26.370530, -80.106951),
+  ),
+  PlaceBuilding(
+    id: 'cm22',
+    code: 'CM-22',
+    name: 'Computer Center (CM-22)',
+    position: LatLng(26.372498, -80.104066),
+  ),
+  PlaceBuilding(
+    id: 'co69',
+    code: 'CO-69',
+    name: 'Campus Operations & Police (CO-69)',
+    position: LatLng(26.378060, -80.097316),
+  ),
+  PlaceBuilding(
+    id: 'cr31e',
+    code: 'CR-31E',
+    name: 'Student Activities Center (CR-31E)',
+    position: LatLng(26.369951, -80.106673),
+  ),
+  PlaceBuilding(
+    id: 'cu97',
+    code: 'CU-97',
+    name: 'Culture & Society Building (CU-97)',
+    position: LatLng(26.368409, -80.101906),
+  ),
+  PlaceBuilding(
+    id: 'dm6',
+    code: 'DM-6',
+    name: 'Nations North Residence Hall - Algonquin (DM-6)',
+    position: LatLng(26.369466, -80.104897),
+  ),
+  PlaceBuilding(
+    id: 'dp49',
+    code: 'DP-49',
+    name: 'Gladys Davis Pavilion (DP-49)',
+    position: LatLng(26.372508, -80.107069),
+  ),
+  PlaceBuilding(
+    id: 'ds87',
+    code: 'DS-87',
+    name: 'Desantis Pavilion (DS-87)',
+    position: LatLng(26.373398, -80.104460),
+  ),
+  PlaceBuilding(
+    id: 'ed47',
+    code: 'ED-47',
+    name: 'College of Education (ED-47)',
+    position: LatLng(26.373268, -80.105829),
+  ),
+  PlaceBuilding(
+    id: 'ee96',
+    code: 'EE-96',
+    name: 'Engineering & Computer Science (EE-96)',
+    position: LatLng(26.372883, -80.098079),
+  ),
+  PlaceBuilding(
+    id: 'eg36',
+    code: 'EG-36',
+    name: 'College of Engineering West (EG-36)',
+    position: LatLng(26.370577, -80.104460),
+  ),
+  PlaceBuilding(
+    id: 'fa94',
+    code: 'FA-94',
+    name: 'Marleen & Harold Forkas Alumni Center (FA-94)',
+    position: LatLng(26.374215, -80.103465),
+  ),
+  PlaceBuilding(
+    id: 'fl24',
+    code: 'FL-24',
+    name: 'Fleming Hall (FL-24)',
+    position: LatLng(26.373073, -80.103857),
+  ),
+  PlaceBuilding(
+    id: 'fw23',
+    code: 'FW-23',
+    name: 'Fleming West (FW-23)',
+    position: LatLng(26.373242, -80.104207),
+  ),
+  PlaceBuilding(
+    id: 'gn73',
+    code: 'GN-73',
+    name: 'General Classroom North (GN-73)',
+    position: LatLng(26.373214, -80.102372),
+  ),
+  PlaceBuilding(
+    id: 'gp92',
+    code: 'GP-92',
+    name: 'Glades Park Towers (GP-92)',
+    position: LatLng(26.367746, -80.104263),
+  ),
+  PlaceBuilding(
+    id: 'gs2',
+    code: 'GS-2',
+    name: 'General Classroom South (GS-2)',
+    position: LatLng(26.371073, -80.102823),
+  ),
+  PlaceBuilding(
+    id: 'gy38',
+    code: 'GY-38',
+    name: 'The Burrow Arena (GY-38)',
+    position: LatLng(26.372357, -80.109352),
+  ),
+  PlaceBuilding(
+    id: 'hp89',
+    code: 'HP-89',
+    name: 'Heritage Park Towers (HP-89)',
+    position: LatLng(26.369451, -80.103761),
+  ),
+  PlaceBuilding(
+    id: 'ir70',
+    code: 'IR-70',
+    name: 'Indian River Towers (IR-70)',
+    position: LatLng(26.368233, -80.103209),
+  ),
+  PlaceBuilding(
+    id: 'is4',
+    code: 'IS-4',
+    name: 'Instructional Services (IS-4)',
+    position: LatLng(26.371261, -80.103649),
+  ),
+  PlaceBuilding(
+    id: 'kh25',
+    code: 'KH-25',
+    name: 'Barry Kaye Hall (KH-25)',
+    position: LatLng(26.373115, -80.103473),
+  ),
+  PlaceBuilding(
+    id: 'll31c',
+    code: 'LL-31C',
+    name: 'Friedberg Lifelong Learning Center (LL-31C)',
+    position: LatLng(26.370811, -80.106865),
+  ),
+  PlaceBuilding(
+    id: 'lo31b',
+    code: 'LO-31B',
+    name: 'Live Oak Pavilion (LO-31B)',
+    position: LatLng(26.370781, -80.105759),
+  ),
+  PlaceBuilding(
+    id: 'ly3',
+    code: 'LY-3',
+    name: 'S E Wimberly Library (LY-3)',
+    position: LatLng(26.371845, -80.104117),
+  ),
+  PlaceBuilding(
+    id: 'ly3a',
+    code: 'LY-3A',
+    name: 'Hillel Jewish Life Center (LY-3A)',
+    position: LatLng(26.371831, -80.103370),
+  ),
+  PlaceBuilding(
+    id: 'nu84',
+    code: 'NU-84',
+    name: 'Christine E Lynn College of Nursing (NU-84)',
+    position: LatLng(26.370830, -80.100582),
+  ),
+  PlaceBuilding(
+    id: 'od93',
+    code: 'OD-93',
+    name: 'Office Depot Center for Executive Education (OD-93)',
+    position: LatLng(26.373414, -80.104990),
+  ),
+  PlaceBuilding(
+    id: 'pa51',
+    code: 'PA-51',
+    name: 'Dorothy F. Schmidt Performing Arts (PA-51)',
+    position: LatLng(26.368891, -80.101744),
+  ),
+  PlaceBuilding(
+    id: 'pg35',
+    code: 'PG-35',
+    name: 'Plant Growth Complex (PG-35)',
+    position: LatLng(26.373576, -80.103010),
+  ),
+  PlaceBuilding(
+    id: 'pr75',
+    code: 'PR-75',
+    name: 'Eleanor R. Baldwin House (PR-75)',
+    position: LatLng(26.370914, -80.095192),
+  ),
+  PlaceBuilding(
+    id: 'ps55',
+    code: 'PS-55',
+    name: 'Physical Science (PS-55)',
+    position: LatLng(26.372671, -80.101989),
+  ),
+  PlaceBuilding(
+    id: 'pw62',
+    code: 'PW-62',
+    name: 'B.P.W. Scholarship House (PW-62)',
+    position: LatLng(26.367102, -80.096201),
+  ),
+  PlaceBuilding(
+    id: 'rc91',
+    code: 'RC-91',
+    name: 'Recreation & Fitness Center (RC-91)',
+    position: LatLng(26.374130, -80.102294),
+  ),
+  PlaceBuilding(
+    id: 'rd01',
+    code: 'RD-01',
+    name: 'Innovation Centre 1 (RD-01)',
+    position: LatLng(26.385306, -80.097104),
+  ),
+  PlaceBuilding(
+    id: 'rd02',
+    code: 'RD-02',
+    name: 'Innovation Centre 2 (RD-02)',
+    position: LatLng(26.383796, -80.097171),
+  ),
+  PlaceBuilding(
+    id: 'sb68',
+    code: 'SB-68',
+    name: 'Softball Stadium (SB-68)',
+    position: LatLng(26.373551, -80.110084),
+  ),
+  PlaceBuilding(
+    id: 'sc1',
+    code: 'SC-1',
+    name: 'Sanson Life Science (SC-1)',
+    position: LatLng(26.372423, -80.102987),
+  ),
+  PlaceBuilding(
+    id: 'se43',
+    code: 'SE-43',
+    name: 'Science & Engineering (SE-43)',
+    position: LatLng(26.373294, -80.101803),
+  ),
+  PlaceBuilding(
+    id: 'sh46',
+    code: 'SH-46',
+    name: 'Student Housing Services (SH-46)',
+    position: LatLng(26.368800, -80.104836),
+  ),
+  PlaceBuilding(
+    id: 'so44',
+    code: 'SO-44',
+    name: 'Social Sciences (SO-44)',
+    position: LatLng(26.370683, -80.101659),
+  ),
+  PlaceBuilding(
+    id: 'ss8',
+    code: 'SS-8',
+    name: 'Student Services (SS-8)',
+    position: LatLng(26.370406, -80.103054),
+  ),
+  PlaceBuilding(
+    id: 'ss8w',
+    code: 'SS-8W',
+    name: 'Student Health Services (SS-8W)',
+    position: LatLng(26.370394, -80.103400),
+  ),
+  PlaceBuilding(
+    id: 'su80',
+    code: 'SU-80',
+    name: 'Student Support Services (SU-80)',
+    position: LatLng(26.369258, -80.105631),
+  ),
+  PlaceBuilding(
+    id: 'un31',
+    code: 'UN-31',
+    name: 'Student Union (UN-31)',
+    position: LatLng(26.370257, -80.106234),
+  ),
+  PlaceBuilding(
+    id: 'ut5',
+    code: 'UT-5',
+    name: 'Utilities (UT-5)',
+    position: LatLng(26.372408, -80.104928),
+  ),
+  PlaceBuilding(
+    id: 'va53',
+    code: 'VA-53',
+    name: 'Dorothy F. Schmidt Visual Arts (VA-53)',
+    position: LatLng(26.369090, -80.100889),
+  ),
+];
+
+// ==========================================
+// PLACE MAP SCREEN (MapLibre GL, 3D)
 // ==========================================
 
 enum _Progress { none, onRoute, offRoute, arrived }
@@ -1460,10 +2515,23 @@ Map<String, dynamic> _pointFeature(LatLng p, Map<String, dynamic> props) => {
 String _hex(Color c) =>
     '#${(c.toARGB32() & 0xFFFFFF).toRadixString(16).padLeft(6, '0')}';
 
-/// Draws the navigation arrow once and caches the PNG bytes.
-final Future<Uint8List> _puckIconBytes = _drawPuckIcon();
+/// The location marker, drawn once and cached as PNG bytes: with the
+/// navigation arrow (driving) or as a plain dot (the rest of the time).
+final Future<Uint8List> _puckArrowBytes = _drawPuckIcon(arrow: true);
+final Future<Uint8List> _puckDotBytes = _drawPuckIcon(arrow: false);
 
-Future<Uint8List> _drawPuckIcon() async {
+/// The faded "which way the device faces" cone, in a few widths: narrow
+/// when the compass is accurate, wider when it's less sure.
+const Map<String, double> _coneSpreads = {
+  'sc-cone-narrow': 50,
+  'sc-cone-mid': 70,
+  'sc-cone-wide': 95,
+};
+final Map<String, Future<Uint8List>> _coneBytes = {
+  for (final e in _coneSpreads.entries) e.key: _drawConeIcon(e.value),
+};
+
+Future<Uint8List> _drawPuckIcon({required bool arrow}) async {
   const s = 96.0;
   final recorder = ui.PictureRecorder();
   final canvas = Canvas(recorder);
@@ -1478,18 +2546,108 @@ Future<Uint8List> _drawPuckIcon() async {
       ..strokeWidth = 6
       ..color = kAccent,
   );
-  final arrow = Path()
-    ..moveTo(s / 2, s / 2 - 19)
-    ..lineTo(s / 2 + 13, s / 2 + 15)
-    ..lineTo(s / 2, s / 2 + 7)
-    ..lineTo(s / 2 - 13, s / 2 + 15)
-    ..close();
-  canvas.drawPath(arrow, Paint()..color = kAccent);
+  if (arrow) {
+    final path = Path()
+      ..moveTo(s / 2, s / 2 - 19)
+      ..lineTo(s / 2 + 13, s / 2 + 15)
+      ..lineTo(s / 2, s / 2 + 7)
+      ..lineTo(s / 2 - 13, s / 2 + 15)
+      ..close();
+    canvas.drawPath(path, Paint()..color = kAccent);
+  }
 
+  return _toPng(recorder, s);
+}
+
+/// A wedge [spreadDeg] wide pointing up (north before rotation), its tip at
+/// the image centre so it fans out from the location dot, fading out with
+/// distance.
+Future<Uint8List> _drawConeIcon(double spreadDeg) async {
+  const s = 256.0;
+  const radius = 124.0;
+  final recorder = ui.PictureRecorder();
+  final canvas = Canvas(recorder);
+  const center = Offset(s / 2, s / 2);
+  final half = spreadDeg / 2 * math.pi / 180;
+
+  final wedge = Path()
+    ..moveTo(center.dx, center.dy)
+    ..arcTo(
+      Rect.fromCircle(center: center, radius: radius),
+      -math.pi / 2 - half, // up is -90° on the canvas
+      2 * half,
+      false,
+    )
+    ..close();
+  canvas.drawPath(
+    wedge,
+    Paint()
+      ..shader = ui.Gradient.radial(
+        center,
+        radius,
+        [kAccent.withValues(alpha: 0.6), kAccent.withValues(alpha: 0)],
+      ),
+  );
+
+  return _toPng(recorder, s);
+}
+
+Future<Uint8List> _toPng(ui.PictureRecorder recorder, double s) async {
   final image = await recorder.endRecording().toImage(s.toInt(), s.toInt());
   final data = await image.toByteData(format: ui.ImageByteFormat.png);
   image.dispose();
   return data!.buffer.asUint8List();
+}
+
+/// Smooths live GPS by how accurate each fix is (a simple Kalman filter).
+/// Indoors or between buildings a phone's fixes wander 10-40 m; standing
+/// still, such a fix barely moves the estimate. Moving, the estimate is
+/// first carried forward by the speed and direction the phone reports, so
+/// the arrow keeps up with you instead of trailing behind.
+class GpsSmoother {
+  /// Below this speed (m/s) the reported direction is noise.
+  static const double _minMovingSpeed = 0.8;
+
+  LatLng? _pos;
+  double _variance = 0; // m², how unsure the estimate is
+  DateTime? _at;
+
+  /// Adds a fix with its reported [accuracy] (m), [speed] (m/s, 0 when
+  /// unknown) and [heading] (direction of travel, degrees) and returns the
+  /// smoothed position.
+  LatLng add(
+    LatLng fix, {
+    required double accuracy,
+    required double speed,
+    required double heading,
+    required DateTime at,
+  }) {
+    // Some devices report 0 for an unknown accuracy.
+    final acc = accuracy > 0 ? math.max(accuracy, 3.0) : 10.0;
+    var prev = _pos;
+    final prevAt = _at;
+    _at = at;
+    if (prev == null || prevAt == null) {
+      _pos = fix;
+      _variance = acc * acc;
+      return fix;
+    }
+    final dt = math.max(0, at.difference(prevAt).inMilliseconds) / 1000.0;
+    // Where you'd be now if you kept going the way the phone says you're
+    // moving; standing still, where you were.
+    if (speed >= _minMovingSpeed && heading >= 0) {
+      prev = Geo.offset(prev, heading, speed * dt);
+    }
+    // How far off that guess may be: about a metre a second standing or
+    // walking, more at speed (turns, braking).
+    final drift = (1.0 + 0.5 * speed) * dt;
+    _variance += drift * drift;
+    final k = _variance / (_variance + acc * acc);
+    final next = Geo.lerp(prev, fix, k);
+    _pos = next;
+    _variance *= 1 - k;
+    return next;
+  }
 }
 
 /// Coalesces GeoJSON updates per source: while one update is in flight,
@@ -1524,14 +2682,18 @@ class _SourceSync {
   }
 }
 
-class FauMapScreen extends StatefulWidget {
-  const FauMapScreen({super.key});
+class PlaceMapScreen extends StatefulWidget {
+  /// Everything place-specific on the map (area, destinations, lots).
+  final Place place;
+
+  const PlaceMapScreen({super.key, required this.place});
 
   @override
-  State<FauMapScreen> createState() => _FauMapScreenState();
+  State<PlaceMapScreen> createState() => _PlaceMapScreenState();
 }
 
-class _FauMapScreenState extends State<FauMapScreen> {
+class _PlaceMapScreenState extends State<PlaceMapScreen>
+    with SingleTickerProviderStateMixin {
   // ---- map style ----
   /// Bright, detailed OpenStreetMap style (free, no API key).
   static const String _styleUrl = 'https://tiles.openfreemap.org/styles/liberty';
@@ -1562,26 +2724,38 @@ class _FauMapScreenState extends State<FauMapScreen> {
   static const double _arrivalMeters = 10.0;
   static const double _maxGpsAccuracyForReroute = 30.0;
   static const Duration _rerouteCooldown = Duration(seconds: 6);
+
+  /// GPS course is only trusted above this speed (slower, it wanders).
+  static const double _minCourseSpeed = 3.0; // m/s, about 7 mph
+
+  /// The arrow is drawn on the route only while you're heading along it:
+  /// within this of the road's direction where you are (or just before or
+  /// after, so following the route around a corner counts). Turning off it
+  /// (~90°) or the other side of a divided road (~180°) doesn't.
+  static const double _snapMaxHeadingDiff = 60.0;
+
+  /// Like Google Maps, the arrow is put on the road only while driving the
+  /// route: after moving faster than [_minCourseSpeed], and still through
+  /// stops (red lights) for this long. Standing, walking or parked, it's
+  /// always at your real GPS position.
+  static const Duration _drivingSnapHold = Duration(seconds: 60);
   static const Duration _simTick = Duration(milliseconds: 50);
   static const double _simMetersPerTick = 0.447; // 20 mph at 50 ms ticks
 
-  // ---- campus geometry ----
-  static const LatLng _campusEntrance = LatLng(26.3685, -80.1020);
-  // Campus box: the map can't be panned outside it, and inside it counts as
-  // "on campus". The north edge sits just past NW Spanish River Blvd, so the
-  // map starts counting at its traffic lights coming in from I-95 (I-95 ramp
-  // lights ~26.3873, the Airport Rd and FAU Blvd 4-way lights ~26.3861-66).
-  static const LatLng _sw = LatLng(26.3630, -80.1170);
-  static const LatLng _ne = LatLng(26.3880, -80.0890);
-  static const LatLng _fauCenter = LatLng(26.3745, -80.1030);
-  static final CameraTargetBounds _cameraBounds =
-      CameraTargetBounds(LatLngBounds(southwest: _sw, northeast: _ne));
+  // ---- place geometry ----
+  // The place's box: the map can't be panned outside it, and inside it
+  // counts as "on campus" (at the place).
+  Place get _place => widget.place;
+  late final CameraTargetBounds _cameraBounds = CameraTargetBounds(
+    LatLngBounds(southwest: _place.sw, northeast: _place.ne),
+  );
+  late final MinMaxZoomPreference _campusZoom =
+      MinMaxZoomPreference(_place.minZoom, 20.0);
+  // Dev mode: no campus box and no minimum zoom, to follow live GPS anywhere.
+  static const MinMaxZoomPreference _freeRoamZoom =
+      MinMaxZoomPreference(null, 20.0);
 
-  static bool _inCampus(LatLng p) =>
-      p.latitude >= _sw.latitude &&
-      p.latitude <= _ne.latitude &&
-      p.longitude >= _sw.longitude &&
-      p.longitude <= _ne.longitude;
+  bool _inCampus(LatLng p) => _place.contains(p);
 
   // ---- map source / layer ids ----
   static const String _srcRoute = 'sc-route';
@@ -1589,368 +2763,22 @@ class _FauMapScreenState extends State<FauMapScreen> {
   static const String _srcLots = 'sc-lots';
   static const String _srcBuildings = 'sc-buildings';
   static const String _srcPuck = 'sc-puck';
+  static const String _srcSpots = 'sc-spots';
   static const String _layerBuildings3d = 'sc-buildings-3d';
-  static const String _puckImage = 'sc-puck-arrow';
+  static const String _puckArrowImage = 'sc-puck-arrow';
+  static const String _puckDotImage = 'sc-puck-dot';
   static const List<String> _fonts = ['Noto Sans Regular'];
 
-  static final Map<String, LatLng> _lotPositions = {
-    ...CampusPathfinder.lotPositions,
-  };
+  // Curb spaces (the place's [Place.spotRows]) are 3D blocks that are green
+  // (open), red (occupied) or gray (offline).
 
-  /// Every FAU Boca Raton building that has an official building code, from
-  /// OpenStreetMap (© OpenStreetMap contributors, ODbL), pulled Oct 2026.
-  /// Position = centre of the building's outline, so the dots line up with
-  /// the buildings drawn on the map. Parking garages (PK-) are left out.
-  static const List<FauBuilding> _campusBuildings = [
-    FauBuilding(
-      id: 'ad10',
-      code: 'AD-10',
-      name: 'Kenneth R. Williams Administration (AD-10)',
-      position: LatLng(26.371848, -80.101591),
-    ),
-    FauBuilding(
-      id: 'ag39',
-      code: 'AG-39',
-      name: 'Ritter Art Gallery (AG-39)',
-      position: LatLng(26.371550, -80.103648),
-    ),
-    FauBuilding(
-      id: 'ah52',
-      code: 'AH-52',
-      name: 'Dorothy F. Schmidt Center for Arts and Humanities (AH-52)',
-      position: LatLng(26.369743, -80.101365),
-    ),
-    FauBuilding(
-      id: 'al9',
-      code: 'AL-9',
-      name: 'Dorothy F. Schmidt Arts and Letters (AL-9)',
-      position: LatLng(26.369474, -80.102208),
-    ),
-    FauBuilding(
-      id: 'au31a',
-      code: 'AU-31A',
-      name: 'Carole & Barry Kaye Performing Arts Auditorium (AU-31A)',
-      position: LatLng(26.370302, -80.105596),
-    ),
-    FauBuilding(
-      id: 'az79',
-      code: 'AZ-79',
-      name: 'Memory & Wellness Center, Louis & Anne Green (AZ-79)',
-      position: LatLng(26.379654, -80.097165),
-    ),
-    FauBuilding(
-      id: 'bb48',
-      code: 'BB-48',
-      name: 'Baseball Stadium (BB-48)',
-      position: LatLng(26.370815, -80.109459),
-    ),
-    FauBuilding(
-      id: 'bc71',
-      code: 'BC-71',
-      name: 'Charles E. Schmidt Biomedical Science Center (BC-71)',
-      position: LatLng(26.373296, -80.100442),
-    ),
-    FauBuilding(
-      id: 'bk76',
-      code: 'BK-76',
-      name: 'Bookstore (BK-76)',
-      position: LatLng(26.370663, -80.103727),
-    ),
-    FauBuilding(
-      id: 'bs12',
-      code: 'BS-12',
-      name: 'Behavioral Sciences (BS-12)',
-      position: LatLng(26.372992, -80.102838),
-    ),
-    FauBuilding(
-      id: 'bu86',
-      code: 'BU-86',
-      name: 'College of Business (BU-86)',
-      position: LatLng(26.373213, -80.104676),
-    ),
-    FauBuilding(
-      id: 'ce31d',
-      code: 'CE-31D',
-      name: 'Continuing Education Hall (CE-31D)',
-      position: LatLng(26.370530, -80.106951),
-    ),
-    FauBuilding(
-      id: 'cm22',
-      code: 'CM-22',
-      name: 'Computer Center (CM-22)',
-      position: LatLng(26.372498, -80.104066),
-    ),
-    FauBuilding(
-      id: 'co69',
-      code: 'CO-69',
-      name: 'Campus Operations & Police (CO-69)',
-      position: LatLng(26.378060, -80.097316),
-    ),
-    FauBuilding(
-      id: 'cr31e',
-      code: 'CR-31E',
-      name: 'Student Activities Center (CR-31E)',
-      position: LatLng(26.369951, -80.106673),
-    ),
-    FauBuilding(
-      id: 'cu97',
-      code: 'CU-97',
-      name: 'Culture & Society Building (CU-97)',
-      position: LatLng(26.368409, -80.101906),
-    ),
-    FauBuilding(
-      id: 'dm6',
-      code: 'DM-6',
-      name: 'Nations North Residence Hall - Algonquin (DM-6)',
-      position: LatLng(26.369466, -80.104897),
-    ),
-    FauBuilding(
-      id: 'dp49',
-      code: 'DP-49',
-      name: 'Gladys Davis Pavilion (DP-49)',
-      position: LatLng(26.372508, -80.107069),
-    ),
-    FauBuilding(
-      id: 'ds87',
-      code: 'DS-87',
-      name: 'Desantis Pavilion (DS-87)',
-      position: LatLng(26.373398, -80.104460),
-    ),
-    FauBuilding(
-      id: 'ed47',
-      code: 'ED-47',
-      name: 'College of Education (ED-47)',
-      position: LatLng(26.373268, -80.105829),
-    ),
-    FauBuilding(
-      id: 'ee96',
-      code: 'EE-96',
-      name: 'Engineering & Computer Science (EE-96)',
-      position: LatLng(26.372883, -80.098079),
-    ),
-    FauBuilding(
-      id: 'eg36',
-      code: 'EG-36',
-      name: 'College of Engineering West (EG-36)',
-      position: LatLng(26.370577, -80.104460),
-    ),
-    FauBuilding(
-      id: 'fa94',
-      code: 'FA-94',
-      name: 'Marleen & Harold Forkas Alumni Center (FA-94)',
-      position: LatLng(26.374215, -80.103465),
-    ),
-    FauBuilding(
-      id: 'fl24',
-      code: 'FL-24',
-      name: 'Fleming Hall (FL-24)',
-      position: LatLng(26.373073, -80.103857),
-    ),
-    FauBuilding(
-      id: 'fw23',
-      code: 'FW-23',
-      name: 'Fleming West (FW-23)',
-      position: LatLng(26.373242, -80.104207),
-    ),
-    FauBuilding(
-      id: 'gn73',
-      code: 'GN-73',
-      name: 'General Classroom North (GN-73)',
-      position: LatLng(26.373214, -80.102372),
-    ),
-    FauBuilding(
-      id: 'gp92',
-      code: 'GP-92',
-      name: 'Glades Park Towers (GP-92)',
-      position: LatLng(26.367746, -80.104263),
-    ),
-    FauBuilding(
-      id: 'gs2',
-      code: 'GS-2',
-      name: 'General Classroom South (GS-2)',
-      position: LatLng(26.371073, -80.102823),
-    ),
-    FauBuilding(
-      id: 'gy38',
-      code: 'GY-38',
-      name: 'The Burrow Arena (GY-38)',
-      position: LatLng(26.372357, -80.109352),
-    ),
-    FauBuilding(
-      id: 'hp89',
-      code: 'HP-89',
-      name: 'Heritage Park Towers (HP-89)',
-      position: LatLng(26.369451, -80.103761),
-    ),
-    FauBuilding(
-      id: 'ir70',
-      code: 'IR-70',
-      name: 'Indian River Towers (IR-70)',
-      position: LatLng(26.368233, -80.103209),
-    ),
-    FauBuilding(
-      id: 'is4',
-      code: 'IS-4',
-      name: 'Instructional Services (IS-4)',
-      position: LatLng(26.371261, -80.103649),
-    ),
-    FauBuilding(
-      id: 'kh25',
-      code: 'KH-25',
-      name: 'Barry Kaye Hall (KH-25)',
-      position: LatLng(26.373115, -80.103473),
-    ),
-    FauBuilding(
-      id: 'll31c',
-      code: 'LL-31C',
-      name: 'Friedberg Lifelong Learning Center (LL-31C)',
-      position: LatLng(26.370811, -80.106865),
-    ),
-    FauBuilding(
-      id: 'lo31b',
-      code: 'LO-31B',
-      name: 'Live Oak Pavilion (LO-31B)',
-      position: LatLng(26.370781, -80.105759),
-    ),
-    FauBuilding(
-      id: 'ly3',
-      code: 'LY-3',
-      name: 'S E Wimberly Library (LY-3)',
-      position: LatLng(26.371845, -80.104117),
-    ),
-    FauBuilding(
-      id: 'ly3a',
-      code: 'LY-3A',
-      name: 'Hillel Jewish Life Center (LY-3A)',
-      position: LatLng(26.371831, -80.103370),
-    ),
-    FauBuilding(
-      id: 'nu84',
-      code: 'NU-84',
-      name: 'Christine E Lynn College of Nursing (NU-84)',
-      position: LatLng(26.370830, -80.100582),
-    ),
-    FauBuilding(
-      id: 'od93',
-      code: 'OD-93',
-      name: 'Office Depot Center for Executive Education (OD-93)',
-      position: LatLng(26.373414, -80.104990),
-    ),
-    FauBuilding(
-      id: 'pa51',
-      code: 'PA-51',
-      name: 'Dorothy F. Schmidt Performing Arts (PA-51)',
-      position: LatLng(26.368891, -80.101744),
-    ),
-    FauBuilding(
-      id: 'pg35',
-      code: 'PG-35',
-      name: 'Plant Growth Complex (PG-35)',
-      position: LatLng(26.373576, -80.103010),
-    ),
-    FauBuilding(
-      id: 'pr75',
-      code: 'PR-75',
-      name: 'Eleanor R. Baldwin House (PR-75)',
-      position: LatLng(26.370914, -80.095192),
-    ),
-    FauBuilding(
-      id: 'ps55',
-      code: 'PS-55',
-      name: 'Physical Science (PS-55)',
-      position: LatLng(26.372671, -80.101989),
-    ),
-    FauBuilding(
-      id: 'pw62',
-      code: 'PW-62',
-      name: 'B.P.W. Scholarship House (PW-62)',
-      position: LatLng(26.367102, -80.096201),
-    ),
-    FauBuilding(
-      id: 'rc91',
-      code: 'RC-91',
-      name: 'Recreation & Fitness Center (RC-91)',
-      position: LatLng(26.374130, -80.102294),
-    ),
-    FauBuilding(
-      id: 'rd01',
-      code: 'RD-01',
-      name: 'Innovation Centre 1 (RD-01)',
-      position: LatLng(26.385306, -80.097104),
-    ),
-    FauBuilding(
-      id: 'rd02',
-      code: 'RD-02',
-      name: 'Innovation Centre 2 (RD-02)',
-      position: LatLng(26.383796, -80.097171),
-    ),
-    FauBuilding(
-      id: 'sb68',
-      code: 'SB-68',
-      name: 'Softball Stadium (SB-68)',
-      position: LatLng(26.373551, -80.110084),
-    ),
-    FauBuilding(
-      id: 'sc1',
-      code: 'SC-1',
-      name: 'Sanson Life Science (SC-1)',
-      position: LatLng(26.372423, -80.102987),
-    ),
-    FauBuilding(
-      id: 'se43',
-      code: 'SE-43',
-      name: 'Science & Engineering (SE-43)',
-      position: LatLng(26.373294, -80.101803),
-    ),
-    FauBuilding(
-      id: 'sh46',
-      code: 'SH-46',
-      name: 'Student Housing Services (SH-46)',
-      position: LatLng(26.368800, -80.104836),
-    ),
-    FauBuilding(
-      id: 'so44',
-      code: 'SO-44',
-      name: 'Social Sciences (SO-44)',
-      position: LatLng(26.370683, -80.101659),
-    ),
-    FauBuilding(
-      id: 'ss8',
-      code: 'SS-8',
-      name: 'Student Services (SS-8)',
-      position: LatLng(26.370406, -80.103054),
-    ),
-    FauBuilding(
-      id: 'ss8w',
-      code: 'SS-8W',
-      name: 'Student Health Services (SS-8W)',
-      position: LatLng(26.370394, -80.103400),
-    ),
-    FauBuilding(
-      id: 'su80',
-      code: 'SU-80',
-      name: 'Student Support Services (SU-80)',
-      position: LatLng(26.369258, -80.105631),
-    ),
-    FauBuilding(
-      id: 'un31',
-      code: 'UN-31',
-      name: 'Student Union (UN-31)',
-      position: LatLng(26.370257, -80.106234),
-    ),
-    FauBuilding(
-      id: 'ut5',
-      code: 'UT-5',
-      name: 'Utilities (UT-5)',
-      position: LatLng(26.372408, -80.104928),
-    ),
-    FauBuilding(
-      id: 'va53',
-      code: 'VA-53',
-      name: 'Dorothy F. Schmidt Visual Arts (VA-53)',
-      position: LatLng(26.369090, -80.100889),
-    ),
-  ];
+  /// Height of the space blocks: low slabs, so they read as part of the lot.
+  static const double _spotHeight = 0.6; // m
+  static const double _spotTargetHeight = 1.5; // m
+
+  /// The unit id sits this far from the space's centre toward its curb
+  /// (spaces are 6.6 m deep), so the name marks the front of the space.
+  static const double _spotLabelToCurb = 1.8; // m
 
   // ---- map ----
   MapLibreMapController? _map;
@@ -1959,7 +2787,6 @@ class _FauMapScreenState extends State<FauMapScreen> {
   bool _is3D = true;
   late final _SourceSync _sync = _SourceSync(_sendSource);
   Offset? _pointerDownAt;
-  double _camBearing = 0;
 
   /// Size of the map area (below the app bar), set by the LayoutBuilder.
   double _mapHeight = 0;
@@ -1967,88 +2794,95 @@ class _FauMapScreenState extends State<FauMapScreen> {
 
   // ---- subscriptions ----
   StreamSubscription<geo.Position>? _positionSub;
-  StreamSubscription<DatabaseEvent>? _parkingSub;
+  StreamSubscription<DatabaseEvent>? _unitsSub;
+  StreamSubscription<DatabaseEvent>? _lotsSub;
   StreamSubscription<CompassEvent>? _compassSub;
+
+  /// Whether the device compass gives real readings (null = not known yet).
+  /// Without a compass sensor the plugin sends nothing, or on Android a
+  /// constant 0° (north), which would pin the arrow pointing north.
+  bool? _compassWorks;
+  Timer? _compassCheckTimer;
+
+  /// Which way the device points (compass, degrees) and how sure it is
+  /// (± degrees, null = unknown): the facing cone on the location dot.
+  double _compassHeading = 0;
+  double? _compassAccuracy;
   Timer? _simTimer;
 
   // ---- smooth arrow + camera (live GPS and Simulate Run) ----
   // Positions arrive about once a second (GPS) or every 0.5 s (simulation).
-  // The arrow glides from where it is to each new position over about the
-  // time between positions. In focus mode the camera makes ONE linear ease per
-  // position with the same timing, so arrow and camera stay locked together
-  // while the map only gets about one camera command a second. (Moving the
-  // camera every frame cancelled the user's drag and wheel-zoom gestures.)
-  static const Duration _glideFrame = Duration(milliseconds: 33); // ~30 fps
+  // The arrow glides from where it is to each new position. One loop, run
+  // once per screen frame, moves the arrow and (in focus mode) puts the
+  // camera exactly on it, facing one smoothed direction shared by both. So
+  // the arrow stays pinned on screen, turns are fluid, and the two can never
+  // drift apart or stutter against each other.
   static const double _glideSnapMeters = 100; // bigger jumps don't animate
-  Timer? _glideTimer;
+
+  /// A glide lasts a bit longer than the gap between fixes, so the arrow is
+  /// still moving when the next fix lands instead of stopping and starting.
+  static const double _glideStretch = 1.2;
+
+  /// How fast the shown direction follows a new one: about 63% of the way
+  /// every this many seconds. Smooth turns; compass jitter and the route's
+  /// corners are evened out.
+  static const double _turnSmoothing = 0.3;
+
+  /// The same for zoom and tilt (switching 2D/3D in focus mode).
+  static const double _zoomSmoothing = 0.25;
+  static const Duration _focusEntryTime = Duration(milliseconds: 800);
+
+  /// The route line is redrawn (attached to the arrow) this often.
+  static const Duration _routePushEvery = Duration(milliseconds: 100);
+  static const Duration _revealFrame = Duration(milliseconds: 33);
+
+  late final Ticker _frameTicker = createTicker(_onFrame);
+  Duration? _lastFrameAt;
+  bool _gliding = false;
   LatLng? _shownPos; // where the arrow is drawn; null = draw at _userPos
   LatLng? _glideFrom;
   LatLng? _glideTo;
   DateTime _glideStart = DateTime.fromMillisecondsSinceEpoch(0);
   Duration _glideDuration = Duration.zero;
   DateTime _lastFixAt = DateTime.fromMillisecondsSinceEpoch(0);
-  int _glideFrameCount = 0;
+  DateTime _lastRoutePushAt = DateTime.fromMillisecondsSinceEpoch(0);
+  // On the route the arrow glides along it (around corners, not across
+  // them): distances from the start of _glideRoute.
+  List<LatLng>? _glideRoute;
+  double? _glideFromAlong;
+  double? _glideToAlong;
+  double? _shownAlong; // where _shownPos is on _glideRoute (null = unknown)
+
+  /// The direction the arrow is drawn (and the focus camera faces), easing
+  /// toward [_puckBearing]; and the cone's, easing toward the compass.
+  double _shownBearing = 0;
+  double _shownFacing = 0;
+
+  // ---- focus-mode camera ----
+  // Placed every frame (no native camera animation to fight with). Turning
+  // focus mode on, it blends from where it was onto the moving arrow.
+  bool _followReady = false;
+  CameraPosition? _focusEntryFrom;
+  DateTime _focusEntryAt = DateTime.fromMillisecondsSinceEpoch(0);
+  double _followZoom = _navZoom3D;
+  double _followTilt = _navTilt;
+  CameraPosition? _lastSentCam;
+  bool _camBusy = false;
+  CameraPosition? _camPending;
 
   // ---- detecting the user moving the map in focus mode ----
-  // The app always knows where its own camera should be: the target of an
-  // instant move, or a point along a linear ease. If the map reports
-  // anything else, the user dragged, zoomed, rotated or tilted it, so focus
-  // mode turns off and the camera stays exactly where it is.
-  /// Deliberate animations (focus-mode intro, 2D/3D switch) pause the check.
+  // Every camera the app sends is remembered for a moment. A camera report
+  // that matches none of them means the user dragged, zoomed, rotated or
+  // tilted the map, so focus mode turns off and the camera stays put.
+  static const int _sentCamMemory = 30; // about half a second of frames
+  final List<CameraPosition> _sentCams = [];
+
+  /// Deliberate animations (intro, padding shift) pause the check.
   DateTime _camAnimUntil = DateTime.fromMillisecondsSinceEpoch(0);
-  LatLng? _cmdTarget; // where the latest camera command ends up
-  double _cmdBearing = 0;
-  // The command before that: a camera report can arrive just after the next
-  // command was sent, so matching it also counts as "ours".
-  LatLng? _prevCmdTarget;
-  double _prevCmdBearing = 0;
-  // Start of the current linear ease (null = instant move, no ease).
-  LatLng? _easeFrom;
-  double _easeFromBearing = 0;
-  DateTime _easeStart = DateTime.fromMillisecondsSinceEpoch(0);
-  Duration _easeDuration = Duration.zero;
 
   /// The "arrow low on screen" padding stays on after focus mode ends, so the
   /// view doesn't jump; it is removed right before the next app animation.
   bool _navPaddingOn = false;
-
-  void _setCameraCommand(
-    LatLng target,
-    double bearing, {
-    LatLng? easeFrom,
-    double easeFromBearing = 0,
-    Duration easeDuration = Duration.zero,
-  }) {
-    _prevCmdTarget = _cmdTarget;
-    _prevCmdBearing = _cmdBearing;
-    _cmdTarget = target;
-    _cmdBearing = bearing;
-    _easeFrom = easeFrom;
-    _easeFromBearing = easeFromBearing;
-    _easeStart = DateTime.now();
-    _easeDuration = easeDuration;
-  }
-
-  /// 0..1 progress of the current ease (1 when there is none).
-  double get _easeT {
-    if (_easeFrom == null || _easeDuration == Duration.zero) return 1;
-    final elapsed = DateTime.now().difference(_easeStart).inMilliseconds;
-    return (elapsed / _easeDuration.inMilliseconds).clamp(0.0, 1.0);
-  }
-
-  /// Where the app's camera should be right now.
-  LatLng? _expectedCamTarget() {
-    final cmd = _cmdTarget;
-    final from = _easeFrom;
-    if (cmd == null || from == null) return cmd;
-    return Geo.lerp(from, cmd, _easeT);
-  }
-
-  double _expectedCamBearing() {
-    if (_easeFrom == null) return _cmdBearing;
-    final d = Geo.shortestAngle(_easeFromBearing, _cmdBearing);
-    return (_easeFromBearing + d * _easeT) % 360;
-  }
 
   int _simTickCount = 0;
 
@@ -2063,13 +2897,26 @@ class _FauMapScreenState extends State<FauMapScreen> {
   // ---- location ----
   LatLng? _userPos;
   double _heading = 0;
-  DateTime _lastGpsHeadingAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// Last GPS course while clearly moving (see [_minCourseSpeed]), and when.
+  /// Slower (walking, standing), the compass sets the direction instead.
+  double _gpsCourse = 0;
+  DateTime _gpsCourseAt = DateTime.fromMillisecondsSinceEpoch(0);
   bool _isLocating = false;
   String _gpsStatus = 'Searching for GPS...';
+
+  /// How accurate the last live fix was (m), shown in dev mode.
+  double? _gpsAccuracy;
+  final GpsSmoother _gpsSmoother = GpsSmoother();
 
   // ---- modes ----
   bool _navTracking = false;
   bool _devMode = false;
+
+  /// The campus limits on the map (pan box, minimum zoom) are lifted. On
+  /// with dev mode; when dev mode ends they come back once the view is back
+  /// on campus (see [_restoreCampusLimits]).
+  bool _freeRoam = false;
 
   /// Dev: when on, a map tap moves the location arrow there.
   bool _clickToMove = false;
@@ -2096,15 +2943,25 @@ class _FauMapScreenState extends State<FauMapScreen> {
   bool _isSimulating = false;
 
   // ---- routing ----
-  FauBuilding? _selectedBuilding;
+  PlaceBuilding? _selectedBuilding;
   PathResult? _walkResult;
   String? _routeLotId;
+
+  /// The curb the current driving route ends at (null: the lot itself).
+  String? _routeUnitId;
   List<LatLng> _fullRoute = const [];
   List<double> _routeSuffix = const [];
   List<LatLng> _displayRoute = const [];
   int _routeSeg = 0;
   double _routeRemaining = 0;
-  double _distToRoute = 0;
+
+  /// While you're following the route: the point on it nearest to you,
+  /// where the route line joins the road. Null when you're off the route.
+  LatLng? _routeSnap;
+
+  /// The live arrow is drawn on the road at [_routeSnap] (only while
+  /// driving the route, see [_drivingSnapHold]).
+  bool _arrowOnRoute = false;
   bool _arrived = false;
   int _routeRequestId = 0;
   bool _isRouting = false;
@@ -2123,6 +2980,9 @@ class _FauMapScreenState extends State<FauMapScreen> {
 
   bool get _isOnCampus => _userPos != null && _inCampus(_userPos!);
 
+  /// Focus mode follows you on campus, or anywhere in dev mode.
+  bool get _canFocus => _isOnCampus || _devMode;
+
   // ==========================================
   // LIFECYCLE
   // ==========================================
@@ -2138,13 +2998,15 @@ class _FauMapScreenState extends State<FauMapScreen> {
 
   @override
   void dispose() {
+    _frameTicker.dispose();
     _simTimer?.cancel();
-    _glideTimer?.cancel();
     _walkRevealTimer?.cancel();
     _walkSimTimer?.cancel();
     _positionSub?.cancel();
     _compassSub?.cancel();
-    _parkingSub?.cancel();
+    _compassCheckTimer?.cancel();
+    _unitsSub?.cancel();
+    _lotsSub?.cancel();
     _devTap.dispose();
     _searchFocus.dispose();
     _searchCtrl.dispose();
@@ -2186,7 +3048,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
       _introPlayed = true;
       _animateTo(
         CameraPosition(
-          target: _fauCenter,
+          target: _place.center,
           zoom: _overviewZoom,
           bearing: 20,
           tilt: _is3D ? _overviewTilt : 0,
@@ -2295,9 +3157,63 @@ class _FauMapScreenState extends State<FauMapScreen> {
       _srcLots,
       _srcBuildings,
       _srcPuck,
+      _srcSpots,
     ]) {
       await safe('source $id', () => m.addGeoJsonSource(id, empty));
     }
+
+    // ---- curb parking spaces: 3D blocks in their live status colour ----
+    await safe(
+      'curb spaces',
+      () => m.addFillExtrusionLayer(
+        _srcSpots,
+        'sc-spots-3d',
+        const FillExtrusionLayerProperties(
+          fillExtrusionColor: ['get', 'color'],
+          // The curb you're being guided to stands taller than the rest.
+          fillExtrusionHeight: [
+            'case', ['==', ['get', 'target'], true],
+            _spotTargetHeight, _spotHeight,
+          ],
+          fillExtrusionBase: 0,
+          fillExtrusionOpacity: 0.95,
+        ),
+        filter: ['==', ['get', 'kind'], 'space'],
+        minzoom: 16,
+        belowLayerId: firstLabel,
+        enableInteraction: false,
+      ),
+    );
+    // Unit id at the curb end of each space, once zoomed in enough to fit.
+    // It lies flat on the map with its top toward the curb (the front of
+    // the space), like a marking painted for a driver pulling in, so which
+    // end is the curb reads at a glance however the map is turned.
+    await safe(
+      'curb space labels',
+      () => m.addSymbolLayer(
+        _srcSpots,
+        'sc-spots-label',
+        SymbolLayerProperties(
+          textField: ['get', 'id'],
+          textFont: _fonts,
+          textSize: ['case', ['==', ['get', 'target'], true], 12, 10],
+          textColor: [
+            'case', ['==', ['get', 'target'], true],
+            _hex(kAccent), '#FFFFFF',
+          ],
+          textHaloColor: '#000000',
+          textHaloWidth: 1.4,
+          textRotate: ['get', 'rotate'],
+          textRotationAlignment: 'map',
+          textPitchAlignment: 'map',
+          textAllowOverlap: true,
+          textIgnorePlacement: true,
+        ),
+        filter: ['==', ['get', 'kind'], 'label'],
+        minzoom: 18.5,
+        enableInteraction: false,
+      ),
+    );
 
     // ---- route line: under the 3D buildings so they occlude it correctly ----
     final routeBelow = buildings3d ? _layerBuildings3d : firstLabel;
@@ -2459,6 +3375,8 @@ class _FauMapScreenState extends State<FauMapScreen> {
         enableInteraction: false,
       ),
     );
+    // With ~50 FAU lots, labels that would overlap are hidden (like the
+    // building labels); the recommended lot's label always shows.
     await safe(
       'lot labels',
       () => m.addSymbolLayer(
@@ -2467,7 +3385,28 @@ class _FauMapScreenState extends State<FauMapScreen> {
         const SymbolLayerProperties(
           textField: ['get', 'label'],
           textFont: _fonts,
-          textSize: ['case', isBestLot, 13, 11],
+          textSize: 11,
+          textColor: ['get', 'color'],
+          textHaloColor: '#000000',
+          textHaloWidth: 1.8,
+          textJustify: 'center',
+          textAnchor: 'top',
+          textOffset: [0, 0.9],
+          textAllowOverlap: false,
+        ),
+        filter: ['!=', ['get', 'best'], true],
+        enableInteraction: false,
+      ),
+    );
+    await safe(
+      'best lot label',
+      () => m.addSymbolLayer(
+        _srcLots,
+        'sc-lots-label-best',
+        const SymbolLayerProperties(
+          textField: ['get', 'label'],
+          textFont: _fonts,
+          textSize: 13,
           textColor: ['get', 'color'],
           textHaloColor: '#000000',
           textHaloWidth: 1.8,
@@ -2477,11 +3416,40 @@ class _FauMapScreenState extends State<FauMapScreen> {
           textAllowOverlap: true,
           textIgnorePlacement: true,
         ),
+        filter: isBestLot,
         enableInteraction: false,
       ),
     );
 
-    // ---- user puck: flat glow + arrow that lies on the tilted map ----
+    // ---- user puck: facing cone, flat glow, then the dot or arrow ----
+    // All lie flat on the tilted map. The cone (compass only) is drawn
+    // first so it fans out from under the dot.
+    await safe('puck images', () async {
+      await m.addImage(_puckArrowImage, await _puckArrowBytes);
+      await m.addImage(_puckDotImage, await _puckDotBytes);
+      for (final e in _coneBytes.entries) {
+        await m.addImage(e.key, await e.value);
+      }
+      return null;
+    });
+    await safe(
+      'puck cone',
+      () => m.addSymbolLayer(
+        _srcPuck,
+        'sc-puck-cone',
+        const SymbolLayerProperties(
+          iconImage: ['get', 'cone'],
+          iconSize: 0.5,
+          iconRotate: ['get', 'facing'],
+          iconRotationAlignment: 'map',
+          iconPitchAlignment: 'map',
+          iconAllowOverlap: true,
+          iconIgnorePlacement: true,
+        ),
+        filter: ['has', 'cone'],
+        enableInteraction: false,
+      ),
+    );
     await safe(
       'puck glow',
       () => m.addCircleLayer(
@@ -2496,17 +3464,13 @@ class _FauMapScreenState extends State<FauMapScreen> {
         enableInteraction: false,
       ),
     );
-    await safe('puck icon', () async {
-      await m.addImage(_puckImage, await _puckIconBytes);
-      return null;
-    });
     await safe(
-      'puck arrow',
+      'puck marker',
       () => m.addSymbolLayer(
         _srcPuck,
         'sc-puck-arrow',
         const SymbolLayerProperties(
-          iconImage: _puckImage,
+          iconImage: ['get', 'icon'],
           iconSize: 0.5,
           iconRotate: ['get', 'bearing'],
           iconRotationAlignment: 'map',
@@ -2533,6 +3497,54 @@ class _FauMapScreenState extends State<FauMapScreen> {
   void _pushOverlays() {
     _pushLots();
     _pushBuildings();
+    _pushSpots();
+  }
+
+  /// Gray when offline (whatever else it reports) or not in the database,
+  /// red when occupied, green when open.
+  static Color _spotColor(Map<String, dynamic>? unit) {
+    if (unit == null || unit['online'] != true) return kTextMuted;
+    return unit['occupied'] == true ? kRed : kOpen;
+  }
+
+  void _pushSpots() {
+    // Every unit's live state by id, whichever lot it reports.
+    final units = <String, Map<String, dynamic>>{
+      for (final lot in _liveLots.values)
+        for (final u in lot['units'] as List<Map<String, dynamic>>)
+          u['id'] as String: u,
+    };
+    final target = _walkResult?.unitId;
+    _sync.push(
+      _srcSpots,
+      _fc([
+        for (final s in _place.spotShapes) ...[
+          {
+            'type': 'Feature',
+            'properties': {
+              'kind': 'space',
+              'color': _hex(_spotColor(units[s.unitId])),
+              'target': s.unitId == target,
+            },
+            'geometry': {
+              'type': 'Polygon',
+              'coordinates': [
+                [for (final p in s.ring) _coord(p)],
+              ],
+            },
+          },
+          _pointFeature(
+            Geo.offset(s.center, s.curbBearing, _spotLabelToCurb),
+            {
+              'kind': 'label',
+              'id': s.unitId,
+              'target': s.unitId == target,
+              'rotate': s.curbBearing,
+            },
+          ),
+        ],
+      ]),
+    );
   }
 
   void _pushLots() {
@@ -2541,8 +3553,9 @@ class _FauMapScreenState extends State<FauMapScreen> {
 
     _liveLots.forEach((id, lot) {
       final isBest = id == bestId;
+      final status = lot['status'] as String; // empty without sensors
       labels.add(_pointFeature(lot['position'] as LatLng, {
-        'label': '${lot['name']}\n${lot['status']}',
+        'label': status.isEmpty ? '${lot['name']}' : '${lot['name']}\n$status',
         // Live status colour from _parseLots (green / amber / red).
         'color': _hex(lot['color'] as Color),
         'best': isBest,
@@ -2557,7 +3570,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
     _sync.push(
       _srcBuildings,
       _fc([
-        for (final b in _campusBuildings)
+        for (final b in _place.buildings)
           _pointFeature(b.position, {
             'code': b.code,
             'selected': b.id == selectedId,
@@ -2639,7 +3652,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
       return;
     }
 
-    final key = '${walk.lotId}|${building.id}';
+    final key = '${walk.lotId}|${walk.unitId}|${building.id}';
     if (_walkShownFor == key) return; // already drawn (or drawing)
     _walkShownFor = key;
     // Start of the walk: lot -> building.
@@ -2658,7 +3671,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
     }
     final total = Geo.pathLength(pts);
     final start = DateTime.now();
-    _walkRevealTimer = Timer.periodic(_glideFrame, (timer) {
+    _walkRevealTimer = Timer.periodic(_revealFrame, (timer) {
       if (!mounted) {
         timer.cancel();
         return;
@@ -2677,15 +3690,45 @@ class _FauMapScreenState extends State<FauMapScreen> {
   }
 
   void _pushPuck() {
+    _wake(); // the arrow and cone ease into their (maybe new) directions
     final p = _shownPos ?? _userPos;
+    if (p == null) {
+      _sync.push(_srcPuck, _fc(const <Map<String, dynamic>>[]));
+      return;
+    }
+    // Driving a route: the navigation arrow, like Google/Apple Maps. The
+    // rest of the time: a dot, plus a cone showing which way the device
+    // faces when it has a compass.
+    final arrow = _drivingRoute;
     _sync.push(
       _srcPuck,
-      _fc(p == null
-          ? const <Map<String, dynamic>>[]
-          : [
-              _pointFeature(p, {'bearing': _puckBearing()}),
-            ]),
+      _fc([
+        _pointFeature(p, {
+          'icon': arrow ? _puckArrowImage : _puckDotImage,
+          'bearing': _shownBearing,
+          if (!arrow && _compassWorks == true) ...{
+            'cone': _coneImage(),
+            'facing': _shownFacing,
+          },
+        }),
+      ]),
     );
+  }
+
+  /// Driving along a route right now (or simulating it).
+  bool get _drivingRoute =>
+      _isSimulating ||
+      (_fullRoute.length >= 2 &&
+          !_arrived &&
+          DateTime.now().difference(_gpsCourseAt) < _drivingSnapHold);
+
+  /// Cone width from the compass accuracy: narrow when it's sure.
+  String _coneImage() {
+    final acc = _compassAccuracy;
+    if (acc == null) return 'sc-cone-mid';
+    if (acc <= 20) return 'sc-cone-narrow';
+    if (acc <= 35) return 'sc-cone-mid';
+    return 'sc-cone-wide';
   }
 
   // ==========================================
@@ -2698,10 +3741,8 @@ class _FauMapScreenState extends State<FauMapScreen> {
     // Outside focus mode, drop the leftover "arrow low" padding first; the
     // animation that follows hides the shift.
     if (!_navTracking) _clearNavPadding();
-    // Don't mistake our own animation for the user moving the map, and keep
-    // focus-mode camera updates from cutting it off.
+    // Don't mistake our own animation for the user moving the map.
     _camAnimUntil = DateTime.now().add(d + const Duration(milliseconds: 150));
-    _setCameraCommand(p.target, p.bearing);
     _guard(() => m.animateCamera(CameraUpdate.newCameraPosition(p), duration: d));
   }
 
@@ -2731,45 +3772,34 @@ class _FauMapScreenState extends State<FauMapScreen> {
   void _onCameraMove(CameraPosition cam) {
     // Keep the lot bubble on top of its dot while the map moves.
     if (_openLotId != null) _updateLotAnchor();
-    if (!_navTracking) return;
+    if (!_navTracking || _sentCams.isEmpty) return;
     if (DateTime.now().isBefore(_camAnimUntil)) {
       _camOffCount = 0;
       return;
     }
-    final expected = _expectedCamTarget();
-    if (expected == null) return;
-
-    bool near(LatLng? target, double bearing) =>
-        target != null &&
-        Geo.meters(cam.target, target) <= 2.0 &&
-        Geo.shortestAngle(cam.bearing, bearing).abs() <= 4;
-
-    // The app never changes zoom or tilt in focus mode outside the paused
-    // animations, so any change at all there is the user (catches the very
-    // first frame of a mouse-wheel zoom).
-    final zoomOrTilt = (cam.zoom - _navZoom).abs() > 0.01 ||
-        (cam.tilt - (_is3D ? _navTilt : 0)).abs() > 0.5;
-    final positionOk = near(expected, _expectedCamBearing()) ||
-        near(_cmdTarget, _cmdBearing) ||
-        near(_prevCmdTarget, _prevCmdBearing);
-    if (!zoomOrTilt && positionOk) {
+    // The app changes zoom and tilt only in its own (remembered) steps, so
+    // a zoom or tilt that none of them had is the user, straight away
+    // (catches the very first frame of a mouse-wheel zoom).
+    final zoomTiltOurs = _sentCams.any((c) =>
+        (c.zoom - cam.zoom).abs() <= 0.02 && (c.tilt - cam.tilt).abs() <= 0.5);
+    if (!zoomTiltOurs) {
+      _setNavTracking(false, userGesture: true);
+      return;
+    }
+    final ours = _sentCams.any((c) =>
+        Geo.meters(c.target, cam.target) <= 2.0 &&
+        Geo.shortestAngle(c.bearing, cam.bearing).abs() <= 3);
+    if (ours) {
       _camOffCount = 0;
       return;
     }
-    // A real drag or zoom sends a stream of camera reports, so needing two
-    // in a row still reacts instantly but ignores a single stray report
-    // (e.g. one that arrives late on a phone).
+    // A real drag sends a stream of camera reports, so needing two in a row
+    // still reacts instantly but ignores a single stray report.
     if (++_camOffCount >= 2) {
       _camOffCount = 0;
       _setNavTracking(false, userGesture: true);
     }
   }
-
-  /// Direction the nav camera should face: exactly where the car's arrow
-  /// points (the road segment it is on, or the GPS/compass heading off-route),
-  /// so the arrow always points straight up and the camera turns only as
-  /// much as the car does.
-  double _navCameraBearing() => _puckBearing();
 
   /// Shifts the map's focal point down so the arrow sits at [_navPuckY].
   /// Applied instantly (not animated): an animated padding change is
@@ -2798,64 +3828,43 @@ class _FauMapScreenState extends State<FauMapScreen> {
   /// Turns focus mode on or off.
   ///
   /// Turning it off never moves the camera: it stays at the same place, zoom
-  /// and angle and simply stops following the arrow. [userGesture] means the
-  /// user is dragging/zooming right now, so the app must not touch the camera
-  /// at all (any camera call would cancel their gesture). Otherwise an ease
-  /// that is still running is stopped where it is.
+  /// and angle and simply stops following the arrow (so it never fights a
+  /// gesture that turned it off). Turning it on, the camera blends from
+  /// where it is onto the arrow, which may be moving, over [_focusEntryTime].
   Future<void> _setNavTracking(bool on, {bool userGesture = false}) async {
-    final pos = _shownPos ?? _userPos;
     final m = _map;
     if (_navTracking == on) return;
     setState(() => _navTracking = on);
-    if (m == null) return;
-
     if (!on) {
-      final cam = m.cameraPosition;
-      if (!userGesture && _easeT < 1 && cam != null) {
-        // Freeze the camera exactly where it is now.
-        _guard(() => m.moveCamera(CameraUpdate.newCameraPosition(cam)));
-      }
-      _easeFrom = null;
+      _followReady = false;
+      _focusEntryFrom = null;
+      _camPending = null;
       return;
     }
+    if (m == null) return;
 
-    if (pos == null) return;
-    final bearing = _navCameraBearing();
-    _camBearing = bearing;
     // The padding shift below also reports a camera move; ignore it.
-    _camAnimUntil = DateTime.now().add(const Duration(seconds: 1));
-    _cmdTarget = null;
-    _prevCmdTarget = null;
-    _easeFrom = null;
+    _camAnimUntil = DateTime.now().add(const Duration(milliseconds: 400));
+    _sentCams.clear();
+    _lastSentCam = null;
     await _applyNavPadding(m);
     if (!mounted || !_navTracking) return;
-    _animateTo(
-      CameraPosition(
-        target: pos,
-        zoom: _navZoom,
-        bearing: bearing,
-        tilt: _is3D ? _navTilt : 0,
-      ),
-      const Duration(milliseconds: 800),
-    );
+    _followZoom = _navZoom;
+    _followTilt = _is3D ? _navTilt : 0;
+    _focusEntryFrom = m.cameraPosition;
+    _focusEntryAt = DateTime.now();
+    _followReady = true;
+    _wake();
   }
 
   void _toggle3D() {
     final m = _map;
     setState(() => _is3D = !_is3D);
     if (m == null) return;
-    final pos = _userPos;
-    if (_navTracking && pos != null) {
-      // Navigating: switch zoom and tilt together, keep facing the route.
-      _animateTo(
-        CameraPosition(
-          target: pos,
-          zoom: _navZoom,
-          bearing: _camBearing,
-          tilt: _is3D ? _navTilt : 0,
-        ),
-        const Duration(milliseconds: 700),
-      );
+    if (_navTracking) {
+      // Focus mode: the camera eases to the new zoom and tilt every frame
+      // while it keeps following the arrow.
+      _wake();
       return;
     }
     final tilt = _is3D ? _overviewTilt : 0.0;
@@ -2870,7 +3879,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
     if (_navTracking) _setNavTracking(false);
     _animateTo(
       CameraPosition(
-        target: _fauCenter,
+        target: _place.center,
         zoom: _overviewZoom,
         bearing: 0,
         tilt: _is3D ? _overviewTilt : 0,
@@ -2884,31 +3893,56 @@ class _FauMapScreenState extends State<FauMapScreen> {
   // ==========================================
 
   void _startCompassTracking() {
+    // A real compass always wobbles a little, so no reading other than
+    // exactly 0° within a few seconds means there's no compass sensor.
+    _compassCheckTimer = Timer(const Duration(seconds: 5), () {
+      if (mounted && _compassWorks == null) {
+        setState(() => _compassWorks = false);
+      }
+    });
     _compassSub = FlutterCompass.events?.listen((event) {
+      final reading = event.heading;
+      if (!mounted || reading == null) return;
+      if (reading != 0 && _compassWorks != true) {
+        _shownFacing = reading % 360.0; // the cone starts out pointing right
+        setState(() => _compassWorks = true);
+      }
+      // Exactly 0° before any real reading: no sensor, don't point north.
+      if (_compassWorks != true) return;
+
+      // `heading` is where the top of the device points. (On Android the
+      // plugin never fills in headingForCameraMode and sends 0, which
+      // pinned the arrow to north; `heading` already allows for how the
+      // device is tilted.)
+      final h = reading % 360.0;
+      _compassAccuracy = event.accuracy;
+
+      // The facing cone always shows which way the device really points
+      // (the frame loop turns it there smoothly).
+      if (Geo.shortestAngle(_compassHeading, h).abs() >= 1.5) {
+        _compassHeading = h;
+        if (_devMode) {
+          setState(() {}); // the dev readout shows the compass value
+        }
+        _wake();
+      }
+
       // While the position is dev-controlled (Simulate Run/Walk, tap-move,
       // teleport) the direction comes from that movement. The device compass
       // must not steer it: on a computer it often reports 0° (north), which
       // fought the walk's direction and made the arrow/camera flip back and
       // forth.
-      if (!mounted || _isSimulating || _isWalkSim || _devLocationOverride) {
-        return;
-      }
-      if (DateTime.now().difference(_lastGpsHeadingAt) <
+      if (_isSimulating || _isWalkSim || _devLocationOverride) return;
+      if (DateTime.now().difference(_gpsCourseAt) <
           const Duration(seconds: 3)) {
         return; // GPS course wins while driving
       }
-      final raw = event.headingForCameraMode ?? event.heading;
-      if (raw == null) return;
-      final h = raw % 360.0;
       if (Geo.shortestAngle(_heading, h).abs() < 2.0) return;
 
+      // The arrow (and in focus mode the camera) turns toward it smoothly in
+      // the frame loop; no camera animation is restarted per reading.
       setState(() => _heading = h);
-      _pushPuck();
-      if (_navTracking && _isOnCampus) {
-        // On a route the camera stays course-up; the compass only steers it
-        // when there is no route to follow.
-        _refreshNavCamera(const Duration(milliseconds: 300));
-      }
+      _wake();
     });
   }
 
@@ -2951,10 +3985,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
       }
 
       _positionSub = geo.Geolocator.getPositionStream(
-        locationSettings: const geo.LocationSettings(
-          accuracy: geo.LocationAccuracy.bestForNavigation,
-          distanceFilter: 2,
-        ),
+        locationSettings: _streamSettings(),
       ).listen(
         _handlePosition,
         onError: (Object e) => fail('GPS stream error: $e'),
@@ -2964,32 +3995,106 @@ class _FauMapScreenState extends State<FauMapScreen> {
     }
   }
 
+  /// Where the arrow should glide to for a new fix (and its distance along
+  /// the route when it's on the road). The glide takes about as long as the
+  /// gap between fixes, so aiming at the fix itself always showed where you
+  /// were a second ago. Moving, it aims at where you'll be by the time it
+  /// gets there (your speed and direction, along the road when driving the
+  /// route), like Google Maps; standing still, at the fix itself.
+  (LatLng, double?) _leadTarget(geo.Position p) {
+    final pos = _userPos!;
+    final along = _arrowOnRoute ? _snapAlong : null;
+    final moving = p.speed >= GpsSmoother._minMovingSpeed && p.heading >= 0;
+    if (!moving) return (pos, along);
+
+    // Where you'll be when the glide ends, capped so a burst of speed or a
+    // long gap can't throw the arrow far ahead.
+    final glide = _nextGlideDuration();
+    final ahead = math.min(p.speed * glide.inMilliseconds / 1000, 40.0);
+
+    if (along != null) {
+      final s = math.min(along + ahead, _routeSuffix.first);
+      return (Geo.pointAlong(_fullRoute, _routeSuffix, s).point, s);
+    }
+    return (Geo.offset(pos, p.heading, ahead), null);
+  }
+
+  /// Live GPS stream settings. Without an interval, Android delivers a fix
+  /// only every 5 s (the plugin's default): 100 m apart at 45 mph, so the
+  /// arrow lagged far behind the car and jumped. Ask for them as often as
+  /// the phone can deliver.
+  /// No minimum distance: at walking pace a 2 m minimum meant a fix only
+  /// every ~1.5 s (GpsSmoother keeps standing-still jitter off the map).
+  static geo.LocationSettings _streamSettings() {
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      return geo.AndroidSettings(
+        accuracy: geo.LocationAccuracy.bestForNavigation,
+        distanceFilter: 0,
+        // As often as the phone can; most GPS chips give one a second.
+        intervalDuration: const Duration(milliseconds: 500),
+      );
+    }
+    return const geo.LocationSettings(
+      accuracy: geo.LocationAccuracy.bestForNavigation,
+      distanceFilter: 0,
+    );
+  }
+
   void _handlePosition(geo.Position p) {
     if (!mounted) return;
     if (_isSimulating || _devLocationOverride) return;
 
-    final loc = LatLng(p.latitude, p.longitude);
+    // Weighted by the fix's accuracy, so a poor fix (indoors, between
+    // buildings) doesn't throw the arrow around.
+    final loc = _gpsSmoother.add(
+      LatLng(p.latitude, p.longitude),
+      accuracy: p.accuracy,
+      speed: p.speed,
+      heading: p.heading,
+      at: DateTime.now(),
+    );
     final onCampus = _inCampus(loc);
-    final hasCourse = p.speed > 1.0 && p.heading >= 0;
+    // Direction of travel from GPS only at driving speed; walking or
+    // standing, the compass shows which way you face (like Google Maps).
+    final steadyCourse = p.speed >= _minCourseSpeed && p.heading >= 0;
+    // No compass on this device: walking, the direction you're moving is
+    // the best guess at which way you face.
+    final walkingCourse = _compassWorks == false &&
+        p.speed >= GpsSmoother._minMovingSpeed &&
+        p.heading >= 0;
     var progress = _Progress.none;
     final wasTracking = _navTracking;
 
     setState(() {
-      _userPos = loc;
       _isLocating = false;
+      _gpsAccuracy = p.accuracy > 0 ? p.accuracy : null;
       _gpsStatus =
           'Live GPS: ${p.latitude.toStringAsFixed(4)}, ${p.longitude.toStringAsFixed(4)}';
-      if (hasCourse) {
-        _heading = p.heading;
-        _lastGpsHeadingAt = DateTime.now();
+      if (steadyCourse || walkingCourse) _heading = p.heading;
+      if (steadyCourse) {
+        _gpsCourse = p.heading;
+        _gpsCourseAt = DateTime.now();
       }
-      progress = _updateRouteProgress(loc);
+      progress = _updateRouteProgress(
+        loc,
+        course: steadyCourse ? p.heading : null,
+      );
+      // Driving the route: the arrow sits on the road (phone GPS is a few
+      // meters off, your lane plus GPS error). Otherwise it's exactly where
+      // GPS says you are, e.g. at home after picking a building.
+      _arrowOnRoute = _routeSnap != null &&
+          DateTime.now().difference(_gpsCourseAt) < _drivingSnapHold;
+      _userPos = _arrowOnRoute ? _routeSnap! : loc;
     });
 
-    if (wasTracking && !onCampus) {
+    // Leaving campus ends focus mode (dev mode keeps following you).
+    if (wasTracking && !onCampus && !_devMode) {
       _setNavTracking(false);
     }
-    _startGlide(loc); // moves the arrow (and nav camera) smoothly to the fix
+    // Moves the arrow (and nav camera) smoothly to the new position; on the
+    // road it follows the road around corners.
+    final (target, targetAlong) = _leadTarget(p);
+    _startGlide(target, along: targetAlong);
 
     if (progress == _Progress.arrived) _onArrived();
     // Parked and walking: follow the walking line (and reroute if needed).
@@ -3002,134 +4107,261 @@ class _FauMapScreenState extends State<FauMapScreen> {
 
   /// Starts (or retargets) the arrow glide toward a new position (a GPS fix,
   /// or the next simulated position). In focus mode the camera eases along
-  /// with it over the same time.
-  void _startGlide(LatLng target) {
-    final now = DateTime.now();
+  /// with it over the same time. [along] is the target's distance along the
+  /// driving route when it's on the route; the arrow then follows the road
+  /// around corners instead of cutting straight across them.
+  void _startGlide(LatLng target, {double? along}) {
     final from = _shownPos ?? _userPos;
-    final sinceLastFix = now.difference(_lastFixAt);
-    _lastFixAt = now;
+    final duration = _nextGlideDuration();
+    _lastFixAt = DateTime.now();
 
-    // First fix, or a jump too big to be driving: just place the arrow.
+    // First fix, or a jump too big to be driving: just place the arrow
+    // (and draw it there, so the next position glides on from it). The
+    // focus camera follows it on the next frame.
     if (from == null || Geo.meters(from, target) > _glideSnapMeters) {
       _stopGlide();
+      _shownPos = target;
+      _shownAlong = along;
+      _glideRoute = _fullRoute;
+      _shownBearing = _puckBearing(); // no spinning round after a jump
       _pushPuck();
       _pushRoute();
-      if (_navTracking) _jumpNavCamera(target);
       return;
     }
 
-    _glideFrom = from;
-    _glideTo = target;
-    _glideStart = now;
-    // Glide for about as long as fixes are arriving, so the arrow is still
-    // moving when the next one lands instead of stopping and restarting.
-    final ms = sinceLastFix.inMilliseconds.clamp(300, 1500);
-    _glideDuration = Duration(milliseconds: ms);
-    _glideTimer ??= Timer.periodic(_glideFrame, (_) => _glideStep());
-    if (_navTracking) _easeNavCamera(target, _glideDuration);
+    // Where the drawn arrow is along the route, if known. (Nothing drawn
+    // yet: it's at _userPos, which may not be [target] when aiming ahead,
+    // so that first glide goes straight.)
+    final fromAlong = _shownPos != null && identical(_glideRoute, _fullRoute)
+        ? _shownAlong
+        : null;
+    _glideBetween(
+      from,
+      target,
+      duration,
+      fromAlong: fromAlong,
+      toAlong: along,
+    );
   }
 
+  /// How long the next glide takes: a bit longer than the gap since the
+  /// last fix ([_glideStretch]), so the arrow never stops between fixes.
+  Duration _nextGlideDuration() {
+    final gap = DateTime.now().difference(_lastFixAt).inMilliseconds;
+    final ms = (gap * _glideStretch).round().clamp(300, 1800);
+    return Duration(milliseconds: ms);
+  }
+
+  /// Glides the arrow from [from] to [to] over [d]: along the current route
+  /// when both ends' distances along it are known, otherwise straight.
+  void _glideBetween(
+    LatLng from,
+    LatLng to,
+    Duration d, {
+    double? fromAlong,
+    double? toAlong,
+  }) {
+    _glideFrom = from;
+    _glideTo = to;
+    _glideRoute = _fullRoute;
+    _glideFromAlong = fromAlong;
+    _glideToAlong = toAlong;
+    _glideStart = DateTime.now();
+    _glideDuration = d;
+    _gliding = true;
+    _wake();
+  }
+
+  /// One frame of the arrow's glide (run by the frame loop).
   void _glideStep() {
     final from = _glideFrom;
     final to = _glideTo;
-    if (!mounted || from == null || to == null) {
-      _stopGlide();
+    if (from == null || to == null) {
+      _gliding = false;
       return;
     }
     final elapsed = DateTime.now().difference(_glideStart).inMilliseconds;
     final t = (elapsed / _glideDuration.inMilliseconds).clamp(0.0, 1.0);
-    final pos = Geo.lerp(from, to, t);
+
+    // Along the road when both ends are on the route (and it hasn't been
+    // replaced since); otherwise in a straight line.
+    final fa = _glideFromAlong;
+    final ta = _glideToAlong;
+    final sameRoute =
+        identical(_glideRoute, _fullRoute) && _fullRoute.length >= 2;
+    final LatLng pos;
+    int? seg;
+    if (sameRoute && fa != null && ta != null) {
+      final s = fa + (ta - fa) * t;
+      final at = Geo.pointAlong(_fullRoute, _routeSuffix, s);
+      pos = at.point;
+      seg = at.seg;
+      _shownAlong = s;
+    } else {
+      pos = Geo.lerp(from, to, t);
+      _shownAlong = (t >= 1 && sameRoute) ? ta : null;
+    }
     _shownPos = pos;
-    _glideFrameCount++;
+    if (t >= 1) _gliding = false;
+    _pushPuck();
 
-    // Keep the route line attached to the arrow instead of the latest fix.
-    if (_displayRoute.length >= 2) {
-      _displayRoute = [pos, ..._displayRoute.skip(1)];
-      if (_glideFrameCount % 3 == 0 || t >= 1) _pushRoute(); // ~10 Hz
+    // The lines follow the arrow about 10 times a second (rebuilt only
+    // then, not every frame).
+    final now = DateTime.now();
+    if (t < 1 && now.difference(_lastRoutePushAt) < _routePushEvery) return;
+    _lastRoutePushAt = now;
+    // The route line starts at the arrow while you're on the route (arrow
+    // -> nearest point of the road -> on to the lot). Off it, the line stays
+    // where you left it until the reroute, instead of a diagonal from the
+    // arrow to a point of the old route.
+    if (_routeSnap != null && _displayRoute.length >= 2) {
+      _displayRoute = seg != null
+          ? [pos, ..._fullRoute.sublist(seg + 1)]
+          : [pos, ..._displayRoute.skip(1)];
+      _pushRoute();
     }
-    _pushPuck(); // the camera is already easing along on its own
-    // Walking: keep the walking line attached to the arrow (~10 Hz).
-    if (_walkActive && _glideFrameCount % 3 == 0) {
-      _drawWalkLine(pos);
-    }
-
-    if (t >= 1) {
-      _glideTimer?.cancel();
-      _glideTimer = null;
-    }
+    if (_walkActive) _drawWalkLine(pos);
   }
 
   /// Cancels any glide and draws the arrow at the real position again.
   void _stopGlide() {
-    _glideTimer?.cancel();
-    _glideTimer = null;
+    _gliding = false;
     _glideFrom = null;
     _glideTo = null;
+    _glideFromAlong = null;
+    _glideToAlong = null;
     _shownPos = null;
+    _shownAlong = null;
   }
 
-  CameraPosition _navCamera(LatLng target, double bearing) => CameraPosition(
-        target: target,
-        zoom: _navZoom,
-        bearing: bearing,
-        tilt: _is3D ? _navTilt : 0,
-      );
+  // ---- frame loop ----
 
-  /// Focus mode: ease the camera linearly to [target] over [d], facing the
-  /// car's direction. One call per position; the map animates it smoothly.
-  void _easeNavCamera(LatLng target, Duration d) {
-    final m = _map;
-    if (m == null || !_navTracking) return;
-    // Let a deliberate animation (intro, 2D/3D) finish first.
-    if (DateTime.now().isBefore(_camAnimUntil)) return;
-    final fromTarget = _expectedCamTarget() ?? target;
-    final fromBearing = _expectedCamBearing();
-    final bearing = _navCameraBearing();
-    _camBearing = bearing;
-    _setCameraCommand(
-      target,
-      bearing,
-      easeFrom: fromTarget,
-      easeFromBearing: fromBearing,
-      easeDuration: d,
+  /// Starts the frame loop if it isn't running (it stops itself when idle).
+  void _wake() {
+    if (mounted && !_frameTicker.isActive) {
+      _lastFrameAt = null;
+      _frameTicker.start();
+    }
+  }
+
+  /// Runs once per screen frame while anything moves or turns, and all the
+  /// time in focus mode: turns the arrow and the cone, glides the arrow,
+  /// and puts the focus camera on it.
+  void _onFrame(Duration elapsed) {
+    if (!mounted) return;
+    final last = _lastFrameAt;
+    _lastFrameAt = elapsed;
+    final dt = last == null ? 1 / 60 : (elapsed - last).inMicroseconds / 1e6;
+
+    final bearing =
+        _approachAngle(_shownBearing, _puckBearing(), dt, _turnSmoothing);
+    final facing =
+        _approachAngle(_shownFacing, _compassHeading, dt, _turnSmoothing);
+    final turning = bearing != _shownBearing || facing != _shownFacing;
+    _shownBearing = bearing;
+    _shownFacing = facing;
+
+    final gliding = _gliding;
+    if (gliding) {
+      _glideStep(); // also draws the arrow
+    } else if (turning) {
+      _pushPuck();
+    }
+    if (_navTracking) _followCamera(dt);
+    if (!gliding && !turning && !_navTracking) _frameTicker.stop();
+  }
+
+  /// Moves angle [from] toward [to] the shortest way round, about 63% of the
+  /// way every [tau] seconds; lands exactly on [to] once within 0.1°.
+  static double _approachAngle(double from, double to, double dt, double tau) {
+    final d = Geo.shortestAngle(from, to);
+    if (d.abs() < 0.1) return to % 360;
+    return (from + d * (1 - math.exp(-dt / tau))) % 360;
+  }
+
+  /// The same for a plain number (zoom, tilt).
+  static double _approach(double from, double to, double dt, double tau) {
+    final d = to - from;
+    if (d.abs() < 0.001) return to;
+    return from + d * (1 - math.exp(-dt / tau));
+  }
+
+  /// Focus mode, every frame: the camera exactly on the arrow, facing the
+  /// arrow's (smoothed) direction, so the arrow stays pinned on screen and
+  /// points straight up. Zoom and tilt ease to their targets (2D/3D switch).
+  /// For [_focusEntryTime] after focus mode is turned on, the camera blends
+  /// from where it was onto the arrow, which may be moving.
+  void _followCamera(double dt) {
+    final pos = _shownPos ?? _userPos;
+    if (!_followReady || pos == null || !_styleReady) return;
+
+    _followZoom = _approach(_followZoom, _navZoom, dt, _zoomSmoothing);
+    _followTilt =
+        _approach(_followTilt, _is3D ? _navTilt : 0.0, dt, _zoomSmoothing);
+    var cam = CameraPosition(
+      target: pos,
+      zoom: _followZoom,
+      bearing: _shownBearing,
+      tilt: _followTilt,
     );
-    _guard(() => m.easeCamera(
-          CameraUpdate.newCameraPosition(_navCamera(target, bearing)),
-          duration: d,
-          interpolation: CameraAnimationInterpolation.linear,
-        ));
+
+    final from = _focusEntryFrom;
+    if (from != null) {
+      final raw = DateTime.now().difference(_focusEntryAt).inMicroseconds /
+          _focusEntryTime.inMicroseconds;
+      if (raw >= 1) {
+        _focusEntryFrom = null;
+      } else {
+        final e = Curves.easeInOutCubic.transform(raw);
+        cam = CameraPosition(
+          target: Geo.lerp(from.target, cam.target, e),
+          zoom: from.zoom + (cam.zoom - from.zoom) * e,
+          bearing: (from.bearing +
+                  Geo.shortestAngle(from.bearing, cam.bearing) * e) %
+              360,
+          tilt: from.tilt + (cam.tilt - from.tilt) * e,
+        );
+      }
+    }
+    _sendCamera(cam);
   }
 
-  /// Focus mode: move the camera instantly (used after a big position jump).
-  void _jumpNavCamera(LatLng target) {
-    final m = _map;
-    if (m == null || !_navTracking) return;
-    if (DateTime.now().isBefore(_camAnimUntil)) return;
-    final bearing = _navCameraBearing();
-    _camBearing = bearing;
-    _setCameraCommand(target, bearing);
-    _guard(() => m.moveCamera(
-          CameraUpdate.newCameraPosition(_navCamera(target, bearing)),
-        ));
-  }
-
-  /// Focus mode: re-aim the camera when the direction changes without a new
-  /// position (compass turn, new route). If the arrow is mid-glide, the
-  /// camera keeps travelling with it to the glide's end on the same timing.
-  void _refreshNavCamera(Duration whenStill) {
-    final glideTo = _glideTo;
-    if (_glideTimer != null && glideTo != null) {
-      final left = _glideDuration - DateTime.now().difference(_glideStart);
-      _easeNavCamera(
-        glideTo,
-        left > const Duration(milliseconds: 50)
-            ? left
-            : const Duration(milliseconds: 50),
-      );
+  /// Sends a focus-mode camera position, remembering it for the gesture
+  /// check. One move is in flight at a time; while it is, newer positions
+  /// replace each other, so the map never falls behind.
+  void _sendCamera(CameraPosition cam) {
+    final last = _lastSentCam;
+    if (last != null &&
+        Geo.meters(last.target, cam.target) < 0.01 &&
+        Geo.shortestAngle(last.bearing, cam.bearing).abs() < 0.01 &&
+        (last.zoom - cam.zoom).abs() < 0.0005 &&
+        (last.tilt - cam.tilt).abs() < 0.01) {
+      return; // nothing moved
+    }
+    _lastSentCam = cam;
+    _sentCams.add(cam);
+    if (_sentCams.length > _sentCamMemory) _sentCams.removeAt(0);
+    if (_camBusy) {
+      _camPending = cam;
       return;
     }
-    final pos = _shownPos ?? _userPos;
-    if (pos != null) _easeNavCamera(pos, whenStill);
+    _moveCamera(cam);
+  }
+
+  Future<void> _moveCamera(CameraPosition cam) async {
+    final m = _map;
+    if (m == null) return;
+    _camBusy = true;
+    try {
+      await m.moveCamera(CameraUpdate.newCameraPosition(cam));
+    } catch (e) {
+      debugPrint('[map] $e');
+    } finally {
+      _camBusy = false;
+    }
+    final next = _camPending;
+    _camPending = null;
+    if (next != null && _navTracking && mounted) _moveCamera(next);
   }
 
   Future<void> _resyncRealGps() async {
@@ -3163,10 +4395,17 @@ class _FauMapScreenState extends State<FauMapScreen> {
   // LIVE PARKING DATA
   // ==========================================
 
+  /// "lot06" -> "Lot 6", "garage2" -> "Garage 2" (used when a lot has no name).
   static String _prettyLotName(String id) {
-    final m = RegExp(r'^lot0*(\d+)$', caseSensitive: false).firstMatch(id);
-    return m != null ? 'Lot ${m.group(1)}' : id.toUpperCase();
+    final m = RegExp(r'^([a-z]+)0*(\d+)$', caseSensitive: false).firstMatch(id);
+    if (m == null) return id.toUpperCase();
+    final word = m.group(1)!;
+    return '${word[0].toUpperCase()}${word.substring(1).toLowerCase()} ${m.group(2)}';
   }
+
+  /// "Lot 12 — Red Permit" -> "Lot 12": the short name fits the map label
+  /// (the dashboard's lot sign splits names the same way).
+  static String _shortLotName(String name) => name.split(' — ').first.trim();
 
   static LatLng? _readLatLng(Map<String, dynamic> data) {
     final lat = data['lat'] ?? data['latitude'];
@@ -3175,10 +4414,14 @@ class _FauMapScreenState extends State<FauMapScreen> {
     return null;
   }
 
-  Map<String, Map<String, dynamic>> _parseLots(Object? raw) {
-    if (raw is! Map) return {};
-    final rawLots = raw['lots'] is Map ? raw['lots'] as Map : const {};
-    final rawUnits = raw['units'] is Map ? raw['units'] as Map : const {};
+  /// Groups the curb units in `units/` by their `lot` id: a lot's capacity
+  /// is how many of its curbs are online, and its occupied count is how
+  /// many of those are taken. Offline curbs count toward neither until they
+  /// report again. `lots/` only supplies display names. Lots with no curbs
+  /// at all are sensorless (see [_sensorlessLot]).
+  Map<String, Map<String, dynamic>> _parseLots(Object? rawLotsValue, Object? rawUnitsValue) {
+    final rawLots = rawLotsValue is Map ? rawLotsValue : const {};
+    final rawUnits = rawUnitsValue is Map ? rawUnitsValue : const {};
 
     final capacity = <String, int>{};
     final occupied = <String, int>{};
@@ -3192,11 +4435,13 @@ class _FauMapScreenState extends State<FauMapScreen> {
       // Units without an `online` flag are treated as reporting.
       final on = unit['online'];
       final isOnline = !(on == false || on == 0 || on == 'false');
-      capacity[lot] = (capacity[lot] ?? 0) + 1;
-      // An offline curb can't be trusted as free, so it counts as taken:
-      // it stays in the lot's total but drops out of the free count
-      // (labels, colours and best-lot routing all use this tally).
-      if (isOcc || !isOnline) occupied[lot] = (occupied[lot] ?? 0) + 1;
+      // An offline curb's state is unknown, so it is left out of the lot's
+      // total and its free count alike (labels, colours and best-lot
+      // routing all use this tally). It still shows, gray, in the spot list.
+      if (isOnline) {
+        capacity[lot] = (capacity[lot] ?? 0) + 1;
+        if (isOcc) occupied[lot] = (occupied[lot] ?? 0) + 1;
+      }
       (spots[lot] ??= []).add({
         'id': unitId.toString(),
         'occupied': isOcc,
@@ -3208,12 +4453,29 @@ class _FauMapScreenState extends State<FauMapScreen> {
     }
 
     final result = <String, Map<String, dynamic>>{};
-    rawLots.forEach((key, val) {
-      final lotId = key.toString();
+    // Every lot the place knows, every lot in `lots/`, and any lot a unit
+    // points at that is in neither.
+    final lotIds = {
+      ..._place.lotPositions.keys,
+      for (final k in rawLots.keys) k.toString(),
+      ...spots.keys,
+    };
+    for (final lotId in lotIds) {
+      final val = rawLots[lotId];
       final lotData =
           val is Map ? Map<String, dynamic>.from(val) : <String, dynamic>{};
-      final pos = _lotPositions[lotId] ?? _readLatLng(lotData);
-      if (pos == null) return;
+      final pos = _place.lotPositions[lotId] ?? _readLatLng(lotData);
+      if (pos == null) continue;
+      final name = _shortLotName(lotData['name']?.toString() ??
+          _place.lotNames[lotId] ??
+          _prettyLotName(lotId));
+
+      // No curbs installed at all (online or not): a plain map point, like
+      // a place without live parking (see [_staticLots]).
+      if (!spots.containsKey(lotId)) {
+        result[lotId] = _sensorlessLot(name, pos);
+        continue;
+      }
 
       final total = capacity[lotId] ?? 0;
       final occ = occupied[lotId] ?? 0;
@@ -3231,46 +4493,139 @@ class _FauMapScreenState extends State<FauMapScreen> {
       }
 
       result[lotId] = {
-        'name': lotData['name']?.toString() ?? _prettyLotName(lotId),
+        'name': name,
         'status': '$occ/$total',
         'occupied': occ,
         'capacity': total,
+        'sensors': true,
         'position': pos,
         'color': color,
         // Every curb unit in the lot, for the tap-a-lot spot grid.
         'units': spots[lotId] ?? const <Map<String, dynamic>>[],
       };
-    });
+    }
     return result;
   }
 
+  /// A place without curbs (see [Place.liveParking]): all its lots are
+  /// sensorless.
+  Map<String, Map<String, dynamic>> _staticLots() => {
+        for (final e in _place.lotPositions.entries)
+          e.key: _sensorlessLot(
+            _place.lotNames[e.key] ?? _prettyLotName(e.key),
+            e.value,
+          ),
+      };
+
+  /// A lot with no curbs: a plain map point, gray like a lot with nothing
+  /// reporting, with nothing to count. It can always be recommended (see
+  /// [CampusPathfinder.findBestAvailableRoute]).
+  static Map<String, dynamic> _sensorlessLot(String name, LatLng pos) => {
+        'name': name,
+        'status': '',
+        'occupied': 0,
+        'capacity': 0,
+        'sensors': false,
+        'position': pos,
+        'color': kTextMuted,
+        'units': const <Map<String, dynamic>>[],
+      };
+
+  /// "3 free", or null for a lot without sensors (nothing to count).
+  static String? _freeText(Map<String, dynamic> lot) => lot['sensors'] == false
+      ? null
+      : '${(lot['capacity'] as int) - (lot['occupied'] as int)} free';
+
+  // Latest raw `lots/` and `units/` snapshots, and whether each has arrived.
+  Object? _rawLots;
+  Object? _rawUnits;
+  bool _gotLots = false;
+  bool _gotUnits = false;
+
+  /// Live curb data: every unit in `units/` (each names its lot) and the
+  /// lot names in `lots/`. Recomputed whenever either one changes.
   void _listenToFirebaseParking() {
-    _parkingSub = FirebaseDatabase.instance.ref('demo').onValue.listen((event) {
-      if (!mounted) return;
-      final lots = _parseLots(event.snapshot.value);
-      setState(() => _liveLots = lots);
-
-      final building = _selectedBuilding;
-      if (building == null) {
-        _pushOverlays();
-        return;
-      }
-
-      final best = CampusPathfinder.findBestAvailableRoute(
-        buildingPos: building.position,
-        lots: lots,
-      );
-
-      // Only hit OSRM when the recommended lot actually changes.
-      if (best?.lotId != _routeLotId) {
-        _updateNavigationRoute();
-      } else if (_fullRoute.isEmpty && !_isRouting && !_arrived) {
-        _updateNavigationRoute();
-      } else if (best != null) {
-        setState(() => _walkResult = best);
-      }
-      _pushOverlays();
+    if (!_place.liveParking) {
+      _liveLots = _staticLots(); // nothing live to listen to
+      return;
+    }
+    final db = FirebaseDatabase.instance;
+    _unitsSub = db.ref('units').onValue.listen((event) {
+      _rawUnits = event.snapshot.value;
+      _gotUnits = true;
+      _onParkingData();
     });
+    _lotsSub = db.ref('lots').onValue.listen((event) {
+      _rawLots = event.snapshot.value;
+      _gotLots = true;
+      _onParkingData();
+    });
+  }
+
+  void _onParkingData() {
+    // Wait for both, so a lot never flashes as empty before its units load.
+    if (!mounted || !_gotUnits || !_gotLots) return;
+    final lots = _parseLots(_rawLots, _rawUnits);
+    setState(() => _liveLots = lots);
+
+    final building = _selectedBuilding;
+    // Parked, or nearly at the curb: keep it. A curb that fills up now is
+    // almost certainly you pulling into it.
+    if (building == null || _arrived || _closeToTargetCurb) {
+      _pushOverlays();
+      return;
+    }
+
+    final best = _bestParking(building);
+
+    // Only hit OSRM when the place to park actually changes.
+    if (best?.lotId != _routeLotId || best?.unitId != _routeUnitId) {
+      _updateNavigationRoute();
+    } else if (_fullRoute.isEmpty && !_isRouting) {
+      _updateNavigationRoute();
+    } else if (best != null) {
+      setState(() => _walkResult = best);
+    }
+    _pushOverlays();
+  }
+
+  /// Within this of the target curb, it is kept even if it turns occupied.
+  static const double _keepCurbMeters = 40;
+
+  bool get _closeToTargetCurb =>
+      _routeUnitId != null &&
+      _fullRoute.length >= 2 &&
+      _routeRemaining <= _keepCurbMeters;
+
+  /// Where to park for [building]: the recommended lot (the closest one
+  /// with space, by walking distance) and, in it, the open curb with the
+  /// shortest walk to the building. When none of the lot's open curbs has
+  /// a known position, the lot itself.
+  PathResult? _bestParking(PlaceBuilding building) {
+    final lot = _place.pathfinder.findBestAvailableRoute(
+      buildingPos: building.position,
+      lots: _liveLots,
+    );
+    if (lot == null) return null;
+
+    final open = {
+      for (final u in _liveLots[lot.lotId]!['units'] as List<Map<String, dynamic>>)
+        if (u['online'] == true && u['occupied'] != true) u['id'] as String,
+    };
+    PathResult? best;
+    for (final s in _place.spotShapes) {
+      if (!open.contains(s.unitId)) continue;
+      final r = _place.pathfinder.walkingRoute(
+        lot.lotId,
+        s.center,
+        building.position,
+        unitId: s.unitId,
+      );
+      if (best == null || r.totalDistanceMeters < best.totalDistanceMeters) {
+        best = r;
+      }
+    }
+    return best ?? lot;
   }
 
   // ==========================================
@@ -3290,15 +4645,13 @@ class _FauMapScreenState extends State<FauMapScreen> {
     if (building == null || _liveLots.isEmpty) return;
 
     final reqId = ++_routeRequestId;
-    final best = CampusPathfinder.findBestAvailableRoute(
-      buildingPos: building.position,
-      lots: _liveLots,
-    );
+    final best = _bestParking(building);
 
     if (best == null) {
       setState(() {
         _walkResult = null;
         _routeLotId = null;
+        _routeUnitId = null;
         _isRouting = false;
         _clearDrivingRoute();
       });
@@ -3307,7 +4660,10 @@ class _FauMapScreenState extends State<FauMapScreen> {
       return;
     }
 
-    final lotPos = _liveLots[best.lotId]!['position'] as LatLng;
+    // A curb is driven into from its open end: the road route goes to the
+    // lane behind its row, and the drive-in path finishes the route.
+    final approach = best.unitId == null ? null : _place.spotApproach[best.unitId];
+    final dest = approach?.first ?? best.parkAt;
     setState(() {
       _walkResult = best;
       _isRouting = true;
@@ -3315,34 +4671,54 @@ class _FauMapScreenState extends State<FauMapScreen> {
     _pushOverlays();
     _lastRouteAt = DateTime.now();
 
-    final start = _userPos ?? await _quickFix() ?? _campusEntrance;
+    final start = _userPos ?? await _quickFix() ?? _place.entrance;
     if (!mounted || reqId != _routeRequestId) return;
 
-    final road =
-        await RealRoadRouter.getRoadRoute(start: start, destination: lotPos);
+    var road = await RealRoadRouter.getRoadRoute(
+      start: start,
+      destination: dest,
+      startHeading: _routeStartHeading(),
+    );
     if (!mounted || reqId != _routeRequestId) return;
+    if (approach != null) {
+      road = [
+        ...road,
+        if (Geo.meters(road.last, approach.first) > 1) approach.first,
+        ...approach.skip(1),
+      ];
+    }
 
     setState(() {
       _isRouting = false;
       _routeLotId = best.lotId;
+      _routeUnitId = best.unitId;
       _fullRoute = road;
       _routeSuffix = _suffixLengths(road);
       _routeSeg = 0;
-      _distToRoute = 0;
+      _routeSnap = null;
       _arrived = false;
       _walkDone = false;
       _displayRoute = List<LatLng>.of(road);
       _routeRemaining = _routeSuffix.first;
     });
+
+    // Match where you are to the new route right away (which way the arrow
+    // points; in focus mode the camera turns with it, smoothly).
+    final pos = _userPos;
+    var progress = _Progress.none;
+    if (pos != null) setState(() => progress = _updateRouteProgress(pos));
     _pushRoute();
     _pushPuck();
+    if (progress == _Progress.arrived) _onArrived();
+  }
 
-    // Already navigating: turn the camera to face the new route right away.
-    final pos = _userPos;
-    if (_navTracking && pos != null) {
-      setState(() => _updateRouteProgress(pos));
-      _refreshNavCamera(const Duration(milliseconds: 600));
-    }
+  /// The car's direction of travel for a route request: a GPS course from
+  /// the last few seconds while clearly moving, otherwise null.
+  double? _routeStartHeading() {
+    if (_devLocationOverride) return null;
+    final fresh =
+        DateTime.now().difference(_gpsCourseAt) < const Duration(seconds: 3);
+    return fresh ? _gpsCourse : null;
   }
 
   void _maybeReroute() {
@@ -3358,7 +4734,8 @@ class _FauMapScreenState extends State<FauMapScreen> {
     _displayRoute = const [];
     _routeSeg = 0;
     _routeRemaining = 0;
-    _distToRoute = 0;
+    _routeSnap = null;
+    _arrowOnRoute = false;
     _arrived = false;
     _walkDone = false;
   }
@@ -3376,7 +4753,15 @@ class _FauMapScreenState extends State<FauMapScreen> {
   }
 
   /// Mutates state only — call inside setState.
-  _Progress _updateRouteProgress(LatLng pos) {
+  ///
+  /// Matches [pos] to the route (progress, arrival, leaving it). It never
+  /// moves the arrow. While you're on the route, [_routeSnap] is the nearest
+  /// point of it, where the route line joins the road. [course] (the GPS
+  /// course, when moving fast enough to trust it) must roughly agree with
+  /// the road's direction; on the other side of a divided road the arrow
+  /// keeps its own direction instead of the route's.
+  _Progress _updateRouteProgress(LatLng pos, {double? course}) {
+    _routeSnap = null;
     final route = _fullRoute;
     if (route.length < 2 || _arrived) return _Progress.none;
 
@@ -3385,7 +4770,6 @@ class _FauMapScreenState extends State<FauMapScreen> {
       math.max(0, _routeSeg - 2),
       math.min(route.length - 2, _routeSeg + 25),
     );
-    _distToRoute = proj.dist;
     if (proj.dist > _offRouteMeters) return _Progress.offRoute;
 
     _routeSeg = proj.seg;
@@ -3397,9 +4781,31 @@ class _FauMapScreenState extends State<FauMapScreen> {
       _displayRoute = const [];
       return _Progress.arrived;
     }
-    _displayRoute = [pos, ...route.sublist(proj.seg + 1)];
+    // The line goes from you to the nearest point of the road, then along
+    // it (not straight from you to the next bend of the route, which drew
+    // a diagonal across the map).
+    _displayRoute = [pos, proj.point, ...route.sublist(proj.seg + 1)];
+
+    bool alongSegment(int i) {
+      if (i < 0 || i > route.length - 2) return false;
+      final a = route[i];
+      final b = route[i + 1];
+      return Geo.meters(a, b) < 1 || // too short to have a direction
+          Geo.shortestAngle(course!, Geo.bearing(a, b)).abs() <=
+              _snapMaxHeadingDiff;
+    }
+
+    final headingOk = course == null ||
+        alongSegment(proj.seg) ||
+        alongSegment(proj.seg - 1) ||
+        alongSegment(proj.seg + 1);
+    if (headingOk) _routeSnap = proj.point;
     return _Progress.onRoute;
   }
+
+  /// How far along the route the arrow is when it's drawn on it.
+  double? get _snapAlong =>
+      _routeSnap == null ? null : _routeSuffix.first - _routeRemaining;
 
   void _onArrived() {
     if (!mounted) return;
@@ -3407,43 +4813,50 @@ class _FauMapScreenState extends State<FauMapScreen> {
     // building (_pushRoute also pushes the walking line).
     _pushRoute();
     final lotName = _liveLots[_routeLotId]?['name'] ?? 'the lot';
+    final place = _routeUnitId != null ? '$_routeUnitId in $lotName' : lotName;
     final walk = _walkResult;
     final building = _selectedBuilding;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
           walk != null && building != null
-              ? 'Arrived at $lotName. About ${formatDistance(walk.totalDistanceMeters)} walk to ${building.code}.'
-              : 'Arrived at $lotName.',
+              ? 'Arrived at $place. About ${formatDistance(walk.totalDistanceMeters)} walk to ${building.code}.'
+              : 'Arrived at $place.',
         ),
       ),
     );
   }
 
-  void _onBuildingSelected(FauBuilding building) {
+  void _onBuildingSelected(PlaceBuilding building) {
     _stopSimulation();
     _searchCtrl.text = building.name; // also covers picks made by map tap
     setState(() {
       _selectedBuilding = building;
       _routeLotId = null;
+      _routeUnitId = null;
       _clearDrivingRoute();
-      _walkResult = CampusPathfinder.findBestAvailableRoute(
-        buildingPos: building.position,
-        lots: _liveLots,
-      );
+      _walkResult = _bestParking(building);
     });
     _pushOverlays();
     _pushRoute();
     _updateNavigationRoute();
 
     final m = _map;
-    if (m != null && !_navTracking) {
-      _clearNavPadding();
-      _guard(() => m.animateCamera(
-            CameraUpdate.newLatLngZoom(building.position, 17.0),
-            duration: const Duration(milliseconds: 900),
-          ));
+    if (m == null || _navTracking) return; // already following you
+    // Picking a destination starts guidance from where you are: the camera
+    // goes to your live position in focus mode (the route appears as soon
+    // as it's calculated).
+    if (_userPos != null && _canFocus) {
+      _setNavTracking(true);
+      return;
     }
+    // Nothing to follow here (no GPS fix yet, or off campus outside dev
+    // mode, where the map can't go): show the destination instead.
+    _clearNavPadding();
+    _guard(() => m.animateCamera(
+          CameraUpdate.newLatLngZoom(building.position, 17.0),
+          duration: const Duration(milliseconds: 900),
+        ));
   }
 
   void _clearDestination() {
@@ -3454,6 +4867,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
       _selectedBuilding = null;
       _walkResult = null;
       _routeLotId = null;
+      _routeUnitId = null;
       _isRouting = false;
       _clearDrivingRoute();
     });
@@ -3484,9 +4898,9 @@ class _FauMapScreenState extends State<FauMapScreen> {
 
     // With ~60 buildings close together, a tap picks whichever building or
     // lot is actually nearest (lots first on a tie), within reach.
-    FauBuilding? nearest;
+    PlaceBuilding? nearest;
     var nearestDist = 35.0; // meters
-    for (final b in _campusBuildings) {
+    for (final b in _place.buildings) {
       final d = Geo.meters(latLng, b.position);
       if (d < nearestDist) {
         nearestDist = d;
@@ -3527,7 +4941,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
   void _teleportToCampus() {
     _stopSimulation();
     _stopGlide();
-    var target = _campusEntrance;
+    var target = _place.entrance;
     for (final p in _fullRoute) {
       if (_inCampus(p)) {
         target = p;
@@ -3537,7 +4951,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
     setState(() {
       _devLocationOverride = true;
       _userPos = target;
-      _gpsStatus = 'Teleported to campus (dev)';
+      _gpsStatus = 'Teleported to ${_place.nickname} (dev)';
     });
     _pushPuck();
     final m = _map;
@@ -3570,6 +4984,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
       _devLocationOverride = true;
       _userPos = onRoute ? proj.point : _fullRoute.first;
       _routeSeg = onRoute ? proj.seg : 0;
+      _routeSnap = _userPos;
     });
     _simTimer = Timer.periodic(_simTick, (_) => _simStep());
   }
@@ -3604,6 +5019,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
       setState(() {
         _userPos = route.last;
         _arrived = true;
+        _routeSnap = null;
         _displayRoute = const [];
         _routeRemaining = 0;
         _gpsStatus = 'Simulation finished';
@@ -3620,9 +5036,9 @@ class _FauMapScreenState extends State<FauMapScreen> {
     // Per-tick state is updated WITHOUT setState; Flutter widgets only
     // refresh a few times a second.
     _userPos = cur;
+    _routeSnap = cur; // the simulated car is always on the route
     _routeSeg = seg;
     _heading = bearing;
-    _distToRoute = 0;
     _displayRoute = [cur, ...route.sublist(seg + 1)];
     _routeRemaining = Geo.meters(cur, route[seg + 1]) + _routeSuffix[seg + 1];
 
@@ -3633,7 +5049,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
     // Feed the simulated car through the same glide as live GPS (a "fix"
     // every 0.5 s): the arrow, the route line and the focus-mode camera all
     // move exactly as they do when driving for real.
-    if (_simTickCount % 10 == 1) _startGlide(cur);
+    if (_simTickCount % 10 == 1) _startGlide(cur, along: _snapAlong);
   }
 
   void _stopSimulation() {
@@ -3756,7 +5172,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
     final building = _selectedBuilding;
     if (building == null || !_arrived || _walkDone) return;
     _lastWalkRerouteAt = DateTime.now();
-    final path = CampusPathfinder.findPath(from, building.position);
+    final path = _place.pathfinder.findPath(from, building.position);
     if (path.length < 2) return;
     setState(() => _setWalkPath(path));
     _revealWalk(path); // the new line draws itself out from you
@@ -3809,30 +5225,27 @@ class _FauMapScreenState extends State<FauMapScreen> {
       _gpsStatus = 'Dev location (tap the map to move)';
     });
 
+    _applyDevFix(p);
+
+    // Quick glide from where the arrow was; the lines (and in focus mode the
+    // camera) follow the arrow the same way they do for real GPS.
     const moveTime = Duration(milliseconds: 450);
     if (from == null || reduceMotion(context)) {
       _pushPuck();
-      if (_navTracking) _jumpNavCamera(p);
     } else {
-      // Quick glide from where the arrow was; the lines follow the arrow
-      // the same way they do for real GPS.
       _shownPos = from;
-      _glideFrom = from;
-      _glideTo = p;
-      _glideStart = DateTime.now();
-      _glideDuration = moveTime;
-      _glideTimer = Timer.periodic(_glideFrame, (_) => _glideStep());
-      if (_navTracking) _easeNavCamera(p, moveTime);
+      _glideBetween(from, p, moveTime);
     }
-
-    _applyDevFix(p);
   }
 
   /// Runs a dev-moved position through the same route logic as a GPS fix.
   void _applyDevFix(LatLng p) {
     // Driving: progress along the route, arrival, or leaving it.
     var progress = _Progress.none;
-    setState(() => progress = _updateRouteProgress(p));
+    setState(() {
+      progress = _updateRouteProgress(p);
+      _arrowOnRoute = false; // a dev move is placed exactly where tapped
+    });
     _pushRoute();
     if (progress == _Progress.arrived) {
       _onArrived();
@@ -3958,6 +5371,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
     setState(() {
       _devMode = !_devMode;
       if (turningOff) _clickToMove = false; // always starts off
+      if (!turningOff) _freeRoam = true; // roam anywhere, follow live GPS
     });
     if (turningOff) {
       _stopSimulation();
@@ -3966,7 +5380,39 @@ class _FauMapScreenState extends State<FauMapScreen> {
         _devLocationOverride = false;
         _resyncRealGps();
       }
+      _restoreCampusLimits();
     }
+  }
+
+  /// Dev mode ended: puts the campus limits back. Focus mode ends if you're
+  /// off campus, and if the view is off campus (or zoomed out past the
+  /// limit) it flies back first, so the limits never snap the map.
+  void _restoreCampusLimits() {
+    if (!_freeRoam) return;
+    if (_navTracking && !_isOnCampus) _setNavTracking(false);
+
+    final cam = _map?.cameraPosition;
+    final viewOnCampus = cam == null ||
+        (_inCampus(cam.target) && cam.zoom >= _place.minZoom);
+    if (viewOnCampus) {
+      setState(() => _freeRoam = false);
+      return;
+    }
+
+    const flyBack = Duration(milliseconds: 1200);
+    _animateTo(
+      CameraPosition(
+        target: _place.center,
+        zoom: _overviewZoom,
+        bearing: 0,
+        tilt: _is3D ? _overviewTilt : 0,
+      ),
+      flyBack,
+    );
+    Future.delayed(flyBack, () {
+      // Still out of dev mode (it may have been switched back on).
+      if (mounted && !_devMode) setState(() => _freeRoam = false);
+    });
   }
 
   // ==========================================
@@ -3974,8 +5420,11 @@ class _FauMapScreenState extends State<FauMapScreen> {
   // ==========================================
 
   double _puckBearing() {
-    if (_displayRoute.length >= 2 &&
-        _distToRoute < 15 &&
+    // Arrow on the road: point along it (steadier than GPS course).
+    // Otherwise _heading: the compass, or GPS course when moving fast.
+    if ((_isSimulating || _arrowOnRoute) &&
+        _routeSnap != null &&
+        _displayRoute.length >= 2 &&
         _routeSeg < _fullRoute.length - 1) {
       return Geo.bearing(_fullRoute[_routeSeg], _fullRoute[_routeSeg + 1]);
     }
@@ -3991,7 +5440,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
 
   /// Every building in random order, shown while the box is empty
   /// (reshuffled each time the search opens).
-  List<FauBuilding> _randomPicks = const [];
+  List<PlaceBuilding> _randomPicks = const [];
   DateTime _searchOpenedAt = DateTime.fromMillisecondsSinceEpoch(0);
 
   void _onSearchFocusChanged() {
@@ -3999,9 +5448,11 @@ class _FauMapScreenState extends State<FauMapScreen> {
     setState(() {
       if (_searchFocus.hasFocus) {
         _searchOpenedAt = DateTime.now();
-        _randomPicks = List<FauBuilding>.of(_campusBuildings)..shuffle();
-        // Show fresh suggestions; typing replaces the selected name.
-        _searchQuery = '';
+        _randomPicks = List<PlaceBuilding>.of(_place.buildings)..shuffle();
+        // Search what the box shows: with a destination picked that's its
+        // name, so the list is just that building. The name is selected, so
+        // typing replaces it (and the clear button empties it to browse).
+        _searchQuery = _searchCtrl.text;
         _searchCtrl.selection = TextSelection(
           baseOffset: 0,
           extentOffset: _searchCtrl.text.length,
@@ -4014,7 +5465,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
     });
   }
 
-  void _pickSuggestion(FauBuilding building) {
+  void _pickSuggestion(PlaceBuilding building) {
     _onBuildingSelected(building); // first, so unfocus shows the new name
     _searchFocus.unfocus();
   }
@@ -4022,7 +5473,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
   @override
   Widget build(BuildContext context) {
     final onCampus = _isOnCampus;
-    final navActive = _navTracking && onCampus;
+    final navActive = _navTracking && _canFocus;
     final bottomInset = MediaQuery.of(context).padding.bottom;
 
     return Scaffold(
@@ -4030,11 +5481,11 @@ class _FauMapScreenState extends State<FauMapScreen> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('FAU Campus Map'),
+            Text(_place.mapTitle),
             Text(
               navActive
                   ? 'Navigation Mode Active (${_heading.round()}°)'
-                  : (_devMode ? 'Dev Mode Active' : 'Boca Raton Main Campus'),
+                  : (_devMode ? 'Dev Mode Active' : _place.areaName),
               style: GoogleFonts.archivo(
                 fontSize: 12.5,
                 color: navActive ? kAccent : (_devMode ? kDev : kTextMuted),
@@ -4066,7 +5517,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
             tooltip: _is3D ? 'Switch to 2D view' : 'Switch to 3D view',
             onPressed: _toggle3D,
           ),
-          if (onCampus)
+          if (_canFocus)
             IconButton(
               icon: _isLocating
                   ? const SizedBox(
@@ -4090,7 +5541,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
             ),
           IconButton(
             icon: const Icon(Icons.center_focus_strong),
-            tooltip: 'Reset Campus View',
+            tooltip: 'Reset Map View',
             onPressed: _resetView,
           ),
         ],
@@ -4139,17 +5590,25 @@ class _FauMapScreenState extends State<FauMapScreen> {
       },
       onPointerUp: (_) => _pointerDownAt = null,
       onPointerCancel: (_) => _pointerDownAt = null,
+      // Mouse wheel or trackpad zoom: the user is taking the camera over.
+      onPointerSignal: (_) {
+        if (_navTracking) _setNavTracking(false, userGesture: true);
+      },
+      onPointerPanZoomStart: (_) {
+        if (_navTracking) _setNavTracking(false, userGesture: true);
+      },
       child: MapLibreMap(
         styleString: _styleUrl,
-        initialCameraPosition: const CameraPosition(
-          target: _fauCenter,
+        initialCameraPosition: CameraPosition(
+          target: _place.center,
           zoom: 15.0,
         ),
         onMapCreated: (controller) => _map = controller,
         onStyleLoadedCallback: _onStyleLoaded,
         onMapClick: _onMapClick,
-        cameraTargetBounds: _cameraBounds,
-        minMaxZoomPreference: const MinMaxZoomPreference(14.5, 20.0),
+        cameraTargetBounds:
+            _freeRoam ? CameraTargetBounds.unbounded : _cameraBounds,
+        minMaxZoomPreference: _freeRoam ? _freeRoamZoom : _campusZoom,
         compassEnabled: false,
         rotateGesturesEnabled: true,
         tiltGesturesEnabled: true,
@@ -4169,18 +5628,27 @@ class _FauMapScreenState extends State<FauMapScreen> {
     final focused = _searchFocus.hasFocus;
     final hasText = _searchCtrl.text.isNotEmpty;
 
-    final List<FauBuilding> suggestions;
-    if (_searchQuery.trim().isEmpty) {
-      suggestions = _randomPicks;
-    } else {
-      final q = _searchQuery.trim().toLowerCase();
-      suggestions = _campusBuildings
-          .where((b) =>
-              b.code.toLowerCase().contains(q) ||
-              b.name.toLowerCase().contains(q))
-          .toList();
-    }
+    // Nothing typed: the current destination first, then the shuffle.
+    // Typing: the best matches first (see [rankBuildingMatches]).
+    final List<PlaceBuilding> suggestions = _searchQuery.trim().isEmpty
+        ? [
+            ?selected,
+            for (final b in _randomPicks)
+              if (b.id != selected?.id) b,
+          ]
+        : rankBuildingMatches(_place.buildings, _searchQuery);
     final scrolls = suggestions.length > _maxVisibleSuggestions;
+    final active = focused || selected != null;
+    const hint = 'Search for destination...';
+    const fieldStyle = TextStyle(
+      color: kText,
+      fontSize: 14,
+      fontWeight: FontWeight.w600,
+    );
+    const hintStyle = TextStyle(color: kTextMuted, fontSize: 14);
+    // Fixed icon boxes, so the label drawn over the field lines up with the
+    // field's own text.
+    const iconBox = BoxConstraints.tightFor(width: 48, height: 48);
 
     const shadow = [
       // Light shadow only so the panel separates from the bright map.
@@ -4201,53 +5669,103 @@ class _FauMapScreenState extends State<FauMapScreen> {
         child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Container(
+          // Border and icon colours ease between idle and active.
+          AnimatedContainer(
+            duration: kMotion,
+            curve: kEaseOut,
             decoration: BoxDecoration(
               color: kCard,
               borderRadius: BorderRadius.circular(kRadius),
-              border: Border.all(
-                color: (focused || selected != null) ? kAccent : kDivider,
-              ),
+              border: Border.all(color: active ? kAccent : kDivider),
               boxShadow: shadow,
             ),
-            child: TextField(
-              controller: _searchCtrl,
-              focusNode: _searchFocus,
-              cursorColor: kAccent,
-              textAlignVertical: TextAlignVertical.center,
-              textInputAction: TextInputAction.search,
-              style: const TextStyle(
-                color: kText,
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-              ),
-              onChanged: (v) => setState(() => _searchQuery = v),
-              onSubmitted: (_) {
-                if (suggestions.isNotEmpty) _pickSuggestion(suggestions.first);
-              },
-              decoration: InputDecoration(
-                border: InputBorder.none,
-                isDense: true,
-                contentPadding: const EdgeInsets.symmetric(vertical: 15),
-                hintText: 'Search for destination...',
-                hintStyle: const TextStyle(color: kTextMuted, fontSize: 14),
-                prefixIcon: Icon(
-                  Icons.search,
-                  color: (focused || selected != null) ? kAccent : kTextMuted,
+            child: Stack(
+              children: [
+                TextField(
+                  controller: _searchCtrl,
+                  focusNode: _searchFocus,
+                  cursorColor: kAccent,
+                  textAlignVertical: TextAlignVertical.center,
+                  textInputAction: TextInputAction.search,
+                  // Not typing, the field's own text is hidden and the
+                  // label on top shows it instead (see below).
+                  style: fieldStyle.copyWith(
+                    color: focused ? kText : Colors.transparent,
+                  ),
+                  onChanged: (v) => setState(() => _searchQuery = v),
+                  onSubmitted: (_) {
+                    if (suggestions.isNotEmpty) {
+                      _pickSuggestion(suggestions.first);
+                    }
+                  },
+                  decoration: InputDecoration(
+                    border: InputBorder.none,
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 15),
+                    hintText: focused ? hint : null,
+                    hintStyle: hintStyle,
+                    prefixIcon: TweenAnimationBuilder<Color?>(
+                      tween: ColorTween(end: active ? kAccent : kTextMuted),
+                      duration: kMotion,
+                      curve: kEaseOut,
+                      builder: (_, color, _) =>
+                          Icon(Icons.search, color: color),
+                    ),
+                    prefixIconConstraints: iconBox,
+                    // Always there (empty when there's nothing to clear), so
+                    // the clear button can pop in and out without the text
+                    // width jumping.
+                    suffixIcon: AnimatedSwitcher(
+                      duration: kMotion,
+                      transitionBuilder: (child, anim) => FadeTransition(
+                        opacity: anim,
+                        child: ScaleTransition(
+                          scale: Tween(begin: 0.6, end: 1.0).animate(
+                            CurvedAnimation(parent: anim, curve: kEaseOut),
+                          ),
+                          child: child,
+                        ),
+                      ),
+                      child: (hasText || selected != null)
+                          ? IconButton(
+                              key: const ValueKey('clear'),
+                              icon: const Icon(Icons.cancel, size: 20),
+                              color: kTextMuted,
+                              tooltip: 'Clear',
+                              onPressed: () {
+                                _searchCtrl.clear();
+                                setState(() => _searchQuery = '');
+                                if (selected != null) _clearDestination();
+                              },
+                            )
+                          : const SizedBox(key: ValueKey('no-clear')),
+                    ),
+                    suffixIconConstraints: iconBox,
+                  ),
                 ),
-                suffixIcon: (hasText || selected != null)
-                    ? IconButton(
-                        icon: const Icon(Icons.cancel, size: 20),
-                        color: kTextMuted,
-                        tooltip: 'Clear',
-                        onPressed: () {
-                          _searchCtrl.clear();
-                          setState(() => _searchQuery = '');
-                          if (selected != null) _clearDestination();
-                        },
-                      )
-                    : null,
-              ),
+                // Not typing: the destination's name (or the hint), which
+                // fades and slides when a building is picked, changed or
+                // cleared instead of jumping. It fades away as you start
+                // typing, leaving the field's own text.
+                Positioned.fill(
+                  left: iconBox.maxWidth,
+                  right: iconBox.maxWidth,
+                  child: IgnorePointer(
+                    child: AnimatedOpacity(
+                      opacity: focused ? 0 : 1,
+                      duration: kMotionFast,
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: AnimatedText(
+                          selected?.name ?? hint,
+                          style: selected != null ? fieldStyle : hintStyle,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
           // The suggestion panel unfolds from under the search bar and folds
@@ -4276,53 +5794,57 @@ class _FauMapScreenState extends State<FauMapScreen> {
                       boxShadow: shadow,
                     ),
                     clipBehavior: Clip.antiAlias,
+                    // As you type, rows that stop matching fold away and new
+                    // matches grow in, the panel resizing smoothly; scrolling,
+                    // rows recede under the edges.
                     child: AnimatedSize(
                       duration: kMotion,
                       curve: kEaseOut,
                       alignment: Alignment.topCenter,
-                      child: suggestions.isEmpty
-                          ? Padding(
-                              padding: const EdgeInsets.all(16),
-                              child: Text(
-                                'No buildings match "${_searchQuery.trim()}".',
-                                style: const TextStyle(
-                                  color: kTextMuted,
-                                  fontSize: 13,
-                                ),
-                              ),
-                            )
-                          // At most 5 rows tall; more scroll smoothly inside.
-                          : ConstrainedBox(
-                              constraints: const BoxConstraints(
-                                maxHeight: _suggestionRowHeight *
-                                        _maxVisibleSuggestions +
-                                    (_maxVisibleSuggestions - 1),
-                              ),
-                              child: StaggerScope(
-                                openedAt: _searchOpenedAt,
-                                child: SmoothScroll(
-                                  fade: scrolls ? 14 : 0,
-                                  alwaysShowThumb: scrolls,
-                                  child: ListView.separated(
-                                    shrinkWrap: true,
-                                    physics: scrolls
-                                        ? kScrollPhysics
-                                        : const NeverScrollableScrollPhysics(),
-                                    padding: EdgeInsets.zero,
-                                    itemCount: suggestions.length,
-                                    separatorBuilder: (_, _) =>
-                                        const Divider(height: 1),
-                                    itemBuilder: (context, i) => FadeSlideIn(
-                                      key: ValueKey('sug-${suggestions[i].id}'),
-                                      index: i,
-                                      offsetY: -8,
-                                      duration: kMotion,
-                                      child: _buildSuggestionRow(suggestions[i]),
-                                    ),
-                                  ),
-                                ),
+                      // At most 5 rows tall; more scroll smoothly inside.
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(
+                          maxHeight: _suggestionRowHeight *
+                                  _maxVisibleSuggestions +
+                              _maxVisibleSuggestions,
+                        ),
+                        child: AnimatedRowList(
+                          shrinkWrap: true,
+                          physics: scrolls
+                              ? kScrollPhysics
+                              : const NeverScrollableScrollPhysics(),
+                          openedAt: _searchOpenedAt,
+                          divided: true,
+                          springy: true,
+                          entranceOffset: -8,
+                          entranceDuration: kMotion,
+                          // Back to the top as you type: best match in view.
+                          scrollToTopOn: _searchQuery.trim(),
+                          fade: scrolls ? 14 : 0,
+                          alwaysShowThumb: scrolls,
+                          isEmpty: suggestions.isEmpty,
+                          empty: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Text(
+                              'No buildings match "${_searchQuery.trim()}".',
+                              style: const TextStyle(
+                                color: kTextMuted,
+                                fontSize: 13,
                               ),
                             ),
+                          ),
+                          children: [
+                            // Built only once on screen: each row works out
+                            // its best lot, which is too slow for all ~60 at
+                            // once.
+                            for (final s in suggestions)
+                              Builder(
+                                key: ValueKey('sug-${s.id}'),
+                                builder: (_) => _buildSuggestionRow(s),
+                              ),
+                          ],
+                        ),
+                      ),
                     ),
                   ),
           ),
@@ -4333,14 +5855,11 @@ class _FauMapScreenState extends State<FauMapScreen> {
     );
   }
 
-  Widget _buildSuggestionRow(FauBuilding bldg) {
-    final best = CampusPathfinder.findBestAvailableRoute(
-      buildingPos: bldg.position,
-      lots: _liveLots,
-    );
+  Widget _buildSuggestionRow(PlaceBuilding bldg) {
+    final best = _bestParking(bldg);
     final lot = best != null ? _liveLots[best.lotId] : null;
-    final free =
-        lot == null ? 0 : (lot['capacity'] as int) - (lot['occupied'] as int);
+    final free = lot == null ? null : _freeText(lot);
+    final current = bldg.id == _selectedBuilding?.id;
 
     return InkWell(
       onTap: () => _pickSuggestion(bldg),
@@ -4376,7 +5895,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
                   const SizedBox(height: 2),
                   Text(
                     lot != null
-                        ? 'Best lot: ${lot['name']} ($free free, ${formatDistance(best!.totalDistanceMeters)} walk)'
+                        ? '${best!.unitId != null ? 'Park at ${best.unitId}, ${lot['name']}' : 'Best lot: ${lot['name']}'} (${[?free, '${formatDistance(best.totalDistanceMeters)} walk'].join(', ')})'
                         : (_liveLots.isEmpty
                             ? 'Loading parking data...'
                             : 'All nearby lots full'),
@@ -4385,6 +5904,11 @@ class _FauMapScreenState extends State<FauMapScreen> {
                 ],
               ),
             ),
+            // The destination you have now (listed first).
+            if (current) ...[
+              const SizedBox(width: 8),
+              const Icon(Icons.check_circle, color: kAccent, size: 18),
+            ],
           ],
         ),
       ),
@@ -4528,7 +6052,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
                     child: ElevatedButton.icon(
                       onPressed: _teleportToCampus,
                       icon: const Icon(Icons.flight_takeoff, size: 18),
-                      label: const Text('Travel to FAU'),
+                      label: Text('Travel to ${_place.nickname}'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: kDev,
                         foregroundColor: kOnAccent,
@@ -4649,12 +6173,12 @@ class _FauMapScreenState extends State<FauMapScreen> {
     final String phase; // kind of message; the subtitle animates when it changes
 
     if (building == null) {
-      title = 'FAU Boca Raton Main Campus';
+      title = _place.guidanceTitle;
       subtitle = _userPos == null
           ? _gpsStatus
           : (onCampus
-              ? 'On Campus • Heading: ${_heading.round()}°'
-              : 'Outside Campus Area');
+              ? '${_place.insideLabel} • Heading: ${_heading.round()}°'
+              : _place.outsideLabel);
       phase = _userPos == null ? 'gps' : (onCampus ? 'on' : 'off');
     } else if (walk == null) {
       title =
@@ -4665,10 +6189,12 @@ class _FauMapScreenState extends State<FauMapScreen> {
       phase = 'nolot';
     } else {
       final lot = _liveLots[walk.lotId];
-      final free = lot == null
-          ? 0
-          : (lot['capacity'] as int) - (lot['occupied'] as int);
-      title = 'Best Lot: ${lot?['name'] ?? walk.lotId} ($free free)';
+      final free = lot == null ? null : _freeText(lot);
+      final lotName = lot?['name'] ?? walk.lotId;
+      final lotText = free == null ? '$lotName' : '$lotName ($free)';
+      title = walk.unitId != null
+          ? 'Park at ${walk.unitId} • $lotText'
+          : 'Best Lot: $lotText';
       final walkText = formatDistance(walk.totalDistanceMeters);
       if (_isWalkSim) {
         subtitle =
@@ -4694,6 +6220,22 @@ class _FauMapScreenState extends State<FauMapScreen> {
 
     final routing =
         _isRouting || (walk != null && _fullRoute.isEmpty && !_arrived);
+
+    // Dev mode: how good live GPS and the compass are right now (these
+    // update in place). GPS ±m = how far off the phone says its position may
+    // be; turning the device should change the compass value.
+    final accuracy = _gpsAccuracy;
+    final devInfo = [
+      if (accuracy != null && !_devLocationOverride)
+        'GPS ±${accuracy.round()} m',
+      switch (_compassWorks) {
+        true => 'Compass ${_compassHeading.round()}°',
+        false => 'No compass sensor detected',
+        null => 'Checking compass…',
+      },
+    ];
+    final shownSubtitle =
+        _devMode ? [subtitle, ...devInfo].join(' • ') : subtitle;
 
     return Positioned(
       bottom: 24 + bottomInset,
@@ -4762,7 +6304,7 @@ class _FauMapScreenState extends State<FauMapScreen> {
                             const SizedBox(width: 6),
                             Expanded(
                               child: AnimatedText(
-                                subtitle,
+                                shownSubtitle,
                                 switchKey: phase,
                                 style: const TextStyle(
                                   fontSize: 12.5,
@@ -4871,7 +6413,10 @@ class _FauMapScreenState extends State<FauMapScreen> {
                     children: [
                       Expanded(
                         child: Text(
-                          '${lot['name']} • $free/${units.length} free',
+                          // Out of the curbs that are online.
+                          lot['sensors'] == false
+                              ? '${lot['name']}'
+                              : '${lot['name']} • $free/${lot['capacity']} free',
                           style: mono(fontSize: 11.5),
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -5099,11 +6644,15 @@ class _VehicleTabState extends State<_VehicleTab> {
             onPressed: () {
               Navigator.of(ctx).pop();
               final uid = _uid;
-              if (uid != null) {
+              if (uid == null) return;
+              // After the dialog has faded away, so the card's swipe-out
+              // plays in full view instead of behind it.
+              final wait = reduceMotion(context) ? Duration.zero : kMotion;
+              Future.delayed(wait, () {
                 FirebaseDatabase.instance
                     .ref('drivers/$uid/vehicles/$key')
                     .remove();
-              }
+              });
             },
             style: TextButton.styleFrom(foregroundColor: kRed),
             child: const Text('Delete Vehicle'),
@@ -5125,38 +6674,54 @@ class _VehicleTabState extends State<_VehicleTab> {
       stream: _stream,
       builder: (context, snapshot) {
         if (snapshot.hasError) {
-          return Center(
-            child: Text(
-              'Error: ${snapshot.error}',
-              style: const TextStyle(color: kRed),
+          return FadeSwitcher(
+            child: Center(
+              key: const ValueKey('error'),
+              child: Text(
+                'Error: ${snapshot.error}',
+                style: const TextStyle(color: kRed),
+              ),
             ),
           );
         }
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-
-        final rawData = snapshot.data?.snapshot.value;
-        if (rawData is! Map) {
-          return AnimatedAddCard(
-            title: 'No Vehicle Found',
-            subtitle: 'Tap to add a new vehicle to your account',
-            onTap: _openAddVehicleDialog,
+          return const FadeSwitcher(
+            child: Center(
+              key: ValueKey('loading'),
+              child: CircularProgressIndicator(),
+            ),
           );
         }
 
-        return _ListWithBottomAction(
-          actionTitle: 'Add more vehicle',
-          actionIcon: Icons.add,
-          onAction: _openAddVehicleDialog,
-          children: [
+        final rawData = snapshot.data?.snapshot.value;
+        final cards = [
+          if (rawData is Map)
             for (final entry in rawData.entries)
               if (entry.value is Map)
                 _buildVehicleCard(
                   entry.key.toString(),
                   Map<String, dynamic>.from(entry.value as Map),
                 ),
-          ],
+        ];
+
+        // Always the same list, even with no cars left, so the last card
+        // swipes away like the others before the empty card takes over.
+        return FadeSwitcher(
+          child: _ListWithBottomAction(
+            key: const ValueKey('list'),
+            // Deleted cars swipe away to the left.
+            swipeOut: true,
+            isEmpty: cards.isEmpty,
+            empty: AnimatedAddCard(
+              title: 'No Vehicle Found',
+              subtitle: 'Tap to add a new vehicle to your account',
+              onTap: _openAddVehicleDialog,
+            ),
+            actionTitle: 'Add more vehicle',
+            actionIcon: Icons.add,
+            onAction: _openAddVehicleDialog,
+            children: cards,
+          ),
         );
       },
     );
@@ -5236,13 +6801,26 @@ class _VehicleTabState extends State<_VehicleTab> {
 
 /// Smooth-scrolling list of cards followed by a compact, centred action
 /// button. Shared by the Home, Vehicle and Profile tabs.
-class _ListWithBottomAction extends StatefulWidget {
+class _ListWithBottomAction extends StatelessWidget {
   final List<Widget> children;
   final String actionTitle;
   final IconData actionIcon;
   final VoidCallback onAction;
 
+  /// Removed rows swipe off to the left (see [CollapsibleRow.swipeOut]).
+  final bool swipeOut;
+
+  /// There's nothing to list (the last place or car is gone): [empty] is
+  /// shown instead, but only once any deleted rows have finished swiping
+  /// away, so deleting the last card animates like any other.
+  final bool isEmpty;
+  final Widget? empty;
+
   const _ListWithBottomAction({
+    super.key,
+    this.swipeOut = false,
+    this.isEmpty = false,
+    this.empty,
     required this.children,
     required this.actionTitle,
     required this.actionIcon,
@@ -5250,41 +6828,23 @@ class _ListWithBottomAction extends StatefulWidget {
   });
 
   @override
-  State<_ListWithBottomAction> createState() => _ListWithBottomActionState();
-}
-
-class _ListWithBottomActionState extends State<_ListWithBottomAction> {
-  final DateTime _openedAt = DateTime.now();
-
-  @override
   Widget build(BuildContext context) {
-    final children = widget.children;
-    // Rows rise in one after another when the tab opens; rows further down
-    // reveal themselves as they scroll into view (ListView builds lazily).
-    // Keyed rows keep their state, so only newly shown rows animate.
     return SafeArea(
-      child: StaggerScope(
-        openedAt: _openedAt,
-        child: SmoothScroll(
-          child: ListView(
-            physics: kScrollPhysics,
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
-            children: [
-              for (var i = 0; i < children.length; i++)
-                FadeSlideIn(key: children[i].key, index: i, child: children[i]),
-              const SizedBox(height: 8),
-              FadeSlideIn(
-                index: children.length,
-                child: PrimaryButton(
-                  title: widget.actionTitle,
-                  icon: widget.actionIcon,
-                  onPressed: widget.onAction,
-                  compact: true,
-                ),
-              ),
-            ],
+      child: AnimatedRowList(
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+        swipeOut: swipeOut,
+        isEmpty: isEmpty,
+        empty: empty,
+        footer: [
+          const SizedBox(height: 8),
+          PrimaryButton(
+            title: actionTitle,
+            icon: actionIcon,
+            onPressed: onAction,
+            compact: true,
           ),
-        ),
+        ],
+        children: children,
       ),
     );
   }
@@ -5452,7 +7012,7 @@ class _ProfileTabState extends State<_ProfileTab> {
   late final User? _user = FirebaseAuth.instance.currentUser;
   late final Stream<DatabaseEvent>? _stream = _user == null
       ? null
-      : FirebaseDatabase.instance.ref('drivers/${_user!.uid}/profile').onValue;
+      : FirebaseDatabase.instance.ref('drivers/${_user.uid}/profile').onValue;
 
   void _openContactDialog({Map<String, dynamic>? data}) {
     showAppDialog(
@@ -5471,15 +7031,23 @@ class _ProfileTabState extends State<_ProfileTab> {
       stream: _stream,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
+          return const FadeSwitcher(
+            child: Center(
+              key: ValueKey('loading'),
+              child: CircularProgressIndicator(),
+            ),
+          );
         }
 
         final rawData = snapshot.data?.snapshot.value;
         if (rawData is! Map || rawData['firstName'] == null) {
-          return AnimatedAddCard(
-            title: 'Profile Incomplete',
-            subtitle: 'Tap to add your contact information',
-            onTap: _openContactDialog,
+          return FadeSwitcher(
+            child: AnimatedAddCard(
+              key: const ValueKey('empty'),
+              title: 'Profile Incomplete',
+              subtitle: 'Tap to add your contact information',
+              onTap: _openContactDialog,
+            ),
           );
         }
 
@@ -5496,7 +7064,9 @@ class _ProfileTabState extends State<_ProfileTab> {
         final fullAddress =
             '$line1\n${data['city']}, ${data['state']} $zip\n${data['country']}';
 
-        return _ListWithBottomAction(
+        return FadeSwitcher(
+          child: _ListWithBottomAction(
+          key: const ValueKey('list'),
           actionTitle: 'Edit Information',
           actionIcon: Icons.edit_outlined,
           onAction: () => _openContactDialog(data: data),
@@ -5565,6 +7135,7 @@ class _ProfileTabState extends State<_ProfileTab> {
                     ),
                     const SizedBox(height: 12),
           ],
+          ),
         );
       },
     );
@@ -5853,12 +7424,18 @@ class FadeSlideIn extends StatefulWidget {
   final double offsetY; // start this many px lower (negative = higher)
   final Duration duration;
 
+  /// Asked once, when first built; false just shows the child (e.g. a list
+  /// row that merely scrolled into view, which should sit still where it
+  /// is). Always animates when not given.
+  final ValueGetter<bool>? animateIf;
+
   const FadeSlideIn({
     super.key,
     required this.child,
     this.index = 0,
     this.offsetY = 14,
     this.duration = kMotionSlow,
+    this.animateIf,
   });
 
   @override
@@ -5876,7 +7453,7 @@ class _FadeSlideInState extends State<FadeSlideIn>
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (_c.status != AnimationStatus.dismissed || _delay != null) return;
-    if (reduceMotion(context)) {
+    if (!(widget.animateIf?.call() ?? true) || reduceMotion(context)) {
       _c.value = 1;
       return;
     }
@@ -5913,6 +7490,532 @@ class _FadeSlideInState extends State<FadeSlideIn>
   }
 }
 
+/// A list row that comes and goes smoothly: with [growIn] (a row just added
+/// to the list) it grows open, so the rows below slide down; when [present]
+/// turns false it fades and collapses, the rows below sliding up, then calls
+/// [onGone]. With [swipeOut] it leaves faster, swiped off to the left first.
+class CollapsibleRow extends StatefulWidget {
+  final Widget child;
+  final bool present;
+  final VoidCallback? onGone;
+  final bool swipeOut;
+
+  /// Asked once, when the row is first built: true only for a row that is
+  /// new to the list. Never for one a lazy list merely built because it
+  /// scrolled into view: a row growing from nothing changes the list's
+  /// length mid-scroll, which made it jump.
+  final ValueGetter<bool>? growIn;
+
+  const CollapsibleRow({
+    super.key,
+    required this.child,
+    this.present = true,
+    this.onGone,
+    this.swipeOut = false,
+    this.growIn,
+  });
+
+  @override
+  State<CollapsibleRow> createState() => _CollapsibleRowState();
+}
+
+class _CollapsibleRowState extends State<CollapsibleRow>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c =
+      AnimationController(vsync: this, duration: kMotion, value: 1);
+  late final Animation<double> _size = CurvedAnimation(
+    parent: _c,
+    curve: Curves.easeOutCubic,
+    reverseCurve: Curves.easeInOutCubic,
+  );
+  bool _started = false;
+
+  /// Swiping out: the whole exit, the share of it spent sliding off to the
+  /// left, and where the gap starts closing (overlapping the slide's end).
+  static const Duration _swipeExit = Duration(milliseconds: 250);
+  static const double _swipePart = 0.65;
+  static const double _closeFrom = 0.5;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final reduce = reduceMotion(context);
+    _c.duration = reduce ? Duration.zero : kMotion;
+    _c.reverseDuration =
+        reduce ? Duration.zero : (widget.swipeOut ? _swipeExit : kMotion);
+    if (_started) return;
+    _started = true;
+    if (!widget.present) {
+      // Built only after it was removed (it was off screen until now): it's
+      // already gone, so it never shows.
+      _c.value = 0;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !widget.present) widget.onGone?.call();
+      });
+    } else if (widget.growIn?.call() ?? false) {
+      _c.forward(from: 0);
+    }
+  }
+
+  @override
+  void didUpdateWidget(CollapsibleRow old) {
+    super.didUpdateWidget(old);
+    if (widget.present == old.present) return;
+    if (widget.present) {
+      _c.forward();
+    } else {
+      _c.reverse().whenCompleteOrCancel(() {
+        if (mounted && !widget.present) widget.onGone?.call();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // One widget structure for every phase, so the row's content keeps its
+    // state (and doesn't replay its entrance) when it starts leaving.
+    return AnimatedBuilder(
+      animation: _c,
+      // A leaving row can't be tapped again while it collapses.
+      child: IgnorePointer(ignoring: !widget.present, child: widget.child),
+      builder: (context, child) {
+        var height = _size.value;
+        var opacity = _c.value;
+        var slide = 0.0;
+        if (widget.swipeOut && !widget.present) {
+          final gone = 1 - _c.value; // 0 -> 1 over the exit
+          // Flicked off to the left, picking up speed as it goes...
+          final swipe =
+              Curves.easeInCubic.transform((gone / _swipePart).clamp(0.0, 1.0));
+          slide = -1.1 * swipe;
+          // Solid for most of the slide, fading only at the end, so no
+          // see-through ghost of the card trails behind.
+          opacity = 1 - ((swipe - 0.6) / 0.4).clamp(0.0, 1.0);
+          // ...then the gap closes, the rows below gliding up and easing to
+          // a soft stop.
+          final close = ((gone - _closeFrom) / (1 - _closeFrom)).clamp(0.0, 1.0);
+          height = 1 - Curves.easeOutCubic.transform(close);
+        }
+        // Not clipped, so a swiped row slides off the screen edge rather
+        // than vanishing at its own edge.
+        final row = Align(
+          alignment: Alignment.topCenter,
+          heightFactor: height.clamp(0.0, 1.0),
+          child: Opacity(
+            opacity: opacity.clamp(0.0, 1.0),
+            child: FractionalTranslation(
+              translation: Offset(slide, 0),
+              child: child,
+            ),
+          ),
+        );
+        return widget.swipeOut ? row : ClipRect(child: row);
+      },
+    );
+  }
+}
+
+/// A scrolling list whose rows come and go smoothly. They rise in one after
+/// another when it opens; rows added later grow in and removed ones (deleted,
+/// filtered out by a search) collapse away, or swipe off with [swipeOut].
+/// With [springy], rows trail a little behind as it scrolls and catch up
+/// (see [ScrollSpring]). Rows are matched by key (unkeyed ones by position),
+/// and the list builds them lazily, so wrap an expensive row in a [Builder].
+class AnimatedRowList extends StatefulWidget {
+  final List<Widget> children;
+
+  /// After the rows, rising in with them (not animated in or out).
+  final List<Widget> footer;
+
+  final bool swipeOut;
+
+  /// Nothing to list: [empty] is shown instead, once removed rows have
+  /// finished leaving (so the last one animates out like any other).
+  final bool isEmpty;
+  final Widget? empty;
+
+  final bool springy;
+
+  /// When this changes (e.g. the search text), the list glides back to the
+  /// top, so the best matches are in view.
+  final Object? scrollToTopOn;
+
+  /// A hairline between rows.
+  final bool divided;
+
+  final bool shrinkWrap;
+  final ScrollPhysics physics;
+  final EdgeInsetsGeometry padding;
+
+  /// When the list opened (for the stagger); defaults to when it was built.
+  final DateTime? openedAt;
+
+  /// The rows' entrance (see [FadeSlideIn]).
+  final double entranceOffset;
+  final Duration entranceDuration;
+
+  /// See [SmoothScroll].
+  final double fade;
+  final bool alwaysShowThumb;
+
+  const AnimatedRowList({
+    super.key,
+    required this.children,
+    this.footer = const [],
+    this.swipeOut = false,
+    this.isEmpty = false,
+    this.empty,
+    this.springy = false,
+    this.scrollToTopOn,
+    this.divided = false,
+    this.shrinkWrap = false,
+    this.physics = kScrollPhysics,
+    this.padding = EdgeInsets.zero,
+    this.openedAt,
+    this.entranceOffset = 14,
+    this.entranceDuration = kMotionSlow,
+    this.fade = 18,
+    this.alwaysShowThumb = false,
+  });
+
+  @override
+  State<AnimatedRowList> createState() => _AnimatedRowListState();
+}
+
+class _AnimatedRowListState extends State<AnimatedRowList> {
+  late final DateTime _openedAt = widget.openedAt ?? DateTime.now();
+  final GlideWheelScrollController _scroll = GlideWheelScrollController();
+
+  @override
+  void dispose() {
+    _sweep?.cancel();
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  /// The rows on screen: the current children plus removed ones that are
+  /// still leaving.
+  late List<_ListRow> _rows = _fresh(widget.children);
+
+  /// A row's identity: its widget key, or (unkeyed) its position.
+  static List<_ListRow> _fresh(List<Widget> children) => [
+        for (var i = 0; i < children.length; i++)
+          _ListRow(children[i].key ?? ValueKey<int>(i), children[i]),
+      ];
+
+  /// Rows added to the list after it opened, and when: they grow in and
+  /// fade up, but only right after being added. A row built later only
+  /// because it scrolled into view just appears, still, at full size.
+  final Map<Key, DateTime> _addedAt = {};
+  static const Duration _addedWindow = Duration(milliseconds: 600);
+
+  /// A removed row normally drops itself once its exit animation ends, but
+  /// one that's off screen was never built and never animates. So once an
+  /// exit's time is up, every row still leaving is dropped regardless;
+  /// otherwise they'd linger in the list as leftovers.
+  Timer? _sweep;
+  static const Duration _exitTime = Duration(milliseconds: 400);
+
+  void _sweepLeftovers() {
+    _sweep?.cancel();
+    _sweep = Timer(_exitTime, () {
+      if (!mounted || !_rows.any((r) => r.leaving)) return;
+      setState(() => _rows.removeWhere((r) => r.leaving));
+    });
+  }
+
+  bool _justAdded(Key key) {
+    final at = _addedAt[key];
+    return at != null && DateTime.now().difference(at) < _addedWindow;
+  }
+
+  @override
+  void didUpdateWidget(AnimatedRowList old) {
+    super.didUpdateWidget(old);
+    final rows = _fresh(widget.children);
+    final now = DateTime.now();
+    final had = {for (final r in _rows) r.key};
+    _addedAt.removeWhere((_, at) => now.difference(at) >= _addedWindow);
+    for (final r in rows) {
+      if (!had.contains(r.key)) _addedAt[r.key] = now;
+    }
+    final kept = {for (final r in rows) r.key};
+    // A removed row stays where it was (after the row it used to follow)
+    // and leaves from there, so the rows below slide up instead of jumping.
+    for (var i = 0; i < _rows.length; i++) {
+      final old = _rows[i];
+      if (kept.contains(old.key)) continue;
+      var at = 0;
+      for (var j = i - 1; j >= 0; j--) {
+        final before = rows.indexWhere((r) => r.key == _rows[j].key);
+        if (before >= 0) {
+          at = before + 1;
+          break;
+        }
+      }
+      rows.insert(at, _ListRow(old.key, old.child, leaving: true));
+    }
+    final newlyLeaving = rows.any(
+      (r) => r.leaving && !_rows.any((o) => o.key == r.key && o.leaving),
+    );
+    _rows = rows;
+    if (newlyLeaving) _sweepLeftovers();
+
+    if (widget.scrollToTopOn != old.scrollToTopOn &&
+        _scroll.hasClients &&
+        _scroll.offset > 0) {
+      if (reduceMotion(context)) {
+        _scroll.jumpTo(0);
+      } else {
+        _scroll.animateTo(0, duration: kMotion, curve: kEaseOut);
+      }
+    }
+  }
+
+  void _drop(Key key) {
+    if (!mounted) return;
+    setState(() => _rows.removeWhere((r) => r.leaving && r.key == key));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final empty = widget.empty;
+    final showEmpty =
+        widget.isEmpty && empty != null && !_rows.any((r) => r.leaving);
+    // Quick, so what's left of the list doesn't linger behind the empty
+    // state (or the other way round).
+    return FadeSwitcher(
+      duration: kMotionFast,
+      child: showEmpty
+          ? KeyedSubtree(key: const ValueKey('empty'), child: empty)
+          : KeyedSubtree(key: const ValueKey('list'), child: _buildList()),
+    );
+  }
+
+  Widget _buildList() {
+    final rows = _rows;
+    final footer = widget.footer;
+    // Rows rise in one after another when the list opens, and rows added
+    // later grow in. The list builds rows lazily, so a row is also built
+    // when it first scrolls into view; that one just appears, at full size,
+    // so nothing moves or changes length under the scroll.
+    bool opening() => DateTime.now().difference(_openedAt) <
+        StaggerScope.openingWindow;
+    return StaggerScope(
+      openedAt: _openedAt,
+      child: SmoothScroll(
+        controller: _scroll,
+        fade: widget.fade,
+        alwaysShowThumb: widget.alwaysShowThumb,
+        child: ListView(
+          shrinkWrap: widget.shrinkWrap,
+          physics: widget.physics,
+          padding: widget.padding,
+          children: [
+            // Callbacks hold the row's own key, never its index: rows come
+            // and go, so an index captured now points at another row (or
+            // past the end) by the time a callback runs.
+            for (final (i, row) in rows.indexed)
+              CollapsibleRow(
+                key: row.key,
+                present: !row.leaving,
+                swipeOut: widget.swipeOut,
+                onGone: () => _drop(row.key),
+                growIn: () => _justAdded(row.key),
+                child: FadeSlideIn(
+                  index: i,
+                  offsetY: widget.entranceOffset,
+                  duration: widget.entranceDuration,
+                  animateIf: () => opening() || _justAdded(row.key),
+                  child: _decorate(i, row.child),
+                ),
+              ),
+            for (var j = 0; j < footer.length; j++)
+              FadeSlideIn(
+                index: rows.length + j,
+                offsetY: widget.entranceOffset,
+                duration: widget.entranceDuration,
+                animateIf: opening,
+                child: footer[j],
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _decorate(int i, Widget row) {
+    if (widget.divided) {
+      // Always there (clear above the first row), so a row keeps its
+      // content's state when it moves to or from the top.
+      row = Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Divider(height: 1, color: i == 0 ? Colors.transparent : null),
+          row,
+        ],
+      );
+    }
+    return widget.springy ? ScrollSpring(child: row) : row;
+  }
+}
+
+class _ListRow {
+  final Key key;
+  final Widget child;
+  final bool leaving;
+  const _ListRow(this.key, this.child, {this.leaving = false});
+}
+
+/// Springy scrolling, like iOS Messages: when you drag or fling the list,
+/// rows nearest the way it's moving go straight along with it, and rows
+/// further back trail a little behind and catch up. The list stretches
+/// slightly as it moves (rows never overlap) and settles back into a tidy
+/// list the moment it stops. Mouse-wheel scrolling stays rigid.
+class ScrollSpring extends StatefulWidget {
+  final Widget child;
+
+  const ScrollSpring({super.key, required this.child});
+
+  @override
+  State<ScrollSpring> createState() => _ScrollSpringState();
+}
+
+class _ScrollSpringState extends State<ScrollSpring>
+    with SingleTickerProviderStateMixin {
+  /// The share of each scroll step the row furthest behind trails by.
+  static const double _maxLag = 0.14;
+
+  /// Furthest a row ever trails (px).
+  static const double _maxOffset = 16;
+
+  /// How quickly a row catches up: about 63% of the way every this many
+  /// seconds (no overshoot, so it settles calmly).
+  static const double _catchUp = 0.09;
+
+  ScrollPosition? _position;
+  double? _lastPixels;
+
+  /// Where the row's centre is, from the top (0) to the bottom (1) of the
+  /// view, as of the last time it could be measured.
+  double _down = 0.5;
+
+  /// How far the row trails its place in the list (px, + = below it).
+  double _offset = 0;
+  bool _reduce = false;
+  late final Ticker _ticker = createTicker(_tick);
+  Duration? _lastTick;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _reduce = reduceMotion(context);
+    final position = Scrollable.maybeOf(context)?.position;
+    if (position != _position) {
+      _position?.removeListener(_onScroll);
+      _position = position?..addListener(_onScroll);
+      _lastPixels = position?.hasPixels == true ? position!.pixels : null;
+    }
+  }
+
+  @override
+  void dispose() {
+    _position?.removeListener(_onScroll);
+    _ticker.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    final p = _position;
+    if (!mounted || p == null || !p.hasPixels) return;
+    final last = _lastPixels;
+    _lastPixels = p.pixels;
+    if (last == null || _reduce) return;
+    // Touch drags and flings only: on a mouse wheel or touchpad glide, rows
+    // still catching up after the list has stopped look like it overshot
+    // and got pulled back.
+    if (p is _GlideWheelPosition && p.wheelGliding) return;
+    final delta = p.pixels - last;
+    if (delta == 0) return;
+    _measure(p);
+    // Scrolling down (content moving up), the top rows lead and lower rows
+    // trail; scrolling up, the other way round.
+    final lag = _maxLag * (delta > 0 ? _down : 1 - _down);
+    _offset = (_offset + delta * lag).clamp(-_maxOffset, _maxOffset);
+    if (!_ticker.isActive) {
+      _lastTick = null;
+      _ticker.start();
+    }
+  }
+
+  /// Updates [_down]. Where the row sits in the list (fixed while scrolling)
+  /// minus how far the list has scrolled, so it's right as the scroll
+  /// changes, before the rows are laid out again.
+  void _measure(ScrollPosition p) {
+    // Mid-layout, geometry can be stale; keep the last value.
+    if (SchedulerBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      return;
+    }
+    final box = context.findRenderObject();
+    if (box is! RenderBox || !box.attached || !box.hasSize) return;
+    final viewport = RenderAbstractViewport.maybeOf(box);
+    if (viewport == null || !p.hasViewportDimension) return;
+    final top = viewport.getOffsetToReveal(box, 0).offset - p.pixels;
+    final h = p.viewportDimension;
+    if (h <= 0) return;
+    _down = ((top + box.size.height / 2) / h).clamp(0.0, 1.0);
+  }
+
+  void _tick(Duration now) {
+    final last = _lastTick;
+    _lastTick = now;
+    final dt = last == null ? 1 / 60 : (now - last).inMicroseconds / 1e6;
+    _offset *= math.exp(-dt / _catchUp);
+    if (_offset.abs() < 0.05) {
+      _offset = 0;
+      _ticker.stop();
+    }
+    setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Transform.translate(
+      offset: Offset(0, _offset),
+      child: widget.child,
+    );
+  }
+}
+
+/// Cross-fades between the states of a screen (loading, empty, list)
+/// instead of swapping them in one frame: deleting the last car fades the
+/// list out as the "add" card fades in. Give each state's widget its own
+/// key.
+class FadeSwitcher extends StatelessWidget {
+  final Widget child;
+  final Duration duration;
+
+  const FadeSwitcher({super.key, required this.child, this.duration = kMotion});
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedSwitcher(
+      duration: reduceMotion(context) ? Duration.zero : duration,
+      switchInCurve: kEaseOut,
+      switchOutCurve: Curves.easeInCubic,
+      child: child,
+    );
+  }
+}
+
 /// Marks when a list first appeared, so [FadeSlideIn] can tell the opening
 /// stagger apart from items that scroll into view later.
 class StaggerScope extends InheritedWidget {
@@ -5920,8 +8023,10 @@ class StaggerScope extends InheritedWidget {
 
   const StaggerScope({super.key, required this.openedAt, required super.child});
 
-  bool get isOpening =>
-      DateTime.now().difference(openedAt) < const Duration(milliseconds: 700);
+  /// How long after opening its rows still count as part of the opening.
+  static const Duration openingWindow = Duration(milliseconds: 700);
+
+  bool get isOpening => DateTime.now().difference(openedAt) < openingWindow;
 
   static StaggerScope? maybeOf(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<StaggerScope>();
@@ -5931,47 +8036,220 @@ class StaggerScope extends InheritedWidget {
 }
 
 /// Smooth, springy scrolling (iOS-style bounce on every platform), always
-/// scrollable so the bounce works even when the content fits.
+/// scrollable so the bounce works even when the content fits. Normal
+/// deceleration: a flick glides on and eases to a stop, like iOS.
 const ScrollPhysics kScrollPhysics = BouncingScrollPhysics(
   parent: AlwaysScrollableScrollPhysics(),
-  decelerationRate: ScrollDecelerationRate.fast,
 );
 
-/// Polished scroll container: slim themed scrollbar plus soft fades at the
-/// top and bottom edges so content melts away instead of being cut off.
-class SmoothScroll extends StatelessWidget {
+/// How quickly a wheel glide closes in on its target: about 63% of the
+/// remaining distance every this many seconds (~95% within 0.27 s).
+const double _wheelGlideTau = 0.09;
+
+/// A scroll controller whose mouse-wheel and touchpad scrolling glides (see
+/// [_GlideWheelPosition]). Touch and drag scrolling are unchanged.
+class GlideWheelScrollController extends ScrollController {
+  @override
+  ScrollPosition createScrollPosition(
+    ScrollPhysics physics,
+    ScrollContext context,
+    ScrollPosition? oldPosition,
+  ) =>
+      _GlideWheelPosition(
+        physics: physics,
+        context: context,
+        initialPixels: initialScrollOffset,
+        keepScrollOffset: keepScrollOffset,
+        oldPosition: oldPosition,
+        debugLabel: debugLabel,
+      );
+}
+
+/// Mouse-wheel (and touchpad) scrolling glides instead of jumping a notch at
+/// a time. There's one target, kept within the list, and the list closes in
+/// on it smoothly every frame; each notch just moves the target on. So quick
+/// notches (or a touchpad's stream of small steps) blend into one continuous
+/// glide that never runs past the end and never restarts its motion, which
+/// is what made a fresh animation per notch stutter.
+class _GlideWheelPosition extends ScrollPositionWithSingleContext {
+  _GlideWheelPosition({
+    required super.physics,
+    required super.context,
+    super.initialPixels,
+    super.keepScrollOffset,
+    super.oldPosition,
+    super.debugLabel,
+  });
+
+  /// True while a wheel glide is moving the list (see [ScrollSpring]).
+  bool get wheelGliding => activity is _WheelGlideActivity;
+
+  @override
+  void pointerScroll(double delta) {
+    final reduce = WidgetsBinding
+        .instance.platformDispatcher.accessibilityFeatures.disableAnimations;
+    if (delta == 0 || reduce) {
+      super.pointerScroll(delta);
+      return;
+    }
+    final current = activity;
+    final from = current is _WheelGlideActivity ? current.target : pixels;
+    final target = (from + delta).clamp(minScrollExtent, maxScrollExtent);
+    if (current is _WheelGlideActivity) {
+      current.target = target;
+    } else if (target != pixels) {
+      beginActivity(
+          _WheelGlideActivity(this, vsync: context.vsync, target: target));
+    }
+  }
+}
+
+/// Moves the list toward [target] a little every frame (see
+/// [_GlideWheelPosition]), going idle once it's there.
+class _WheelGlideActivity extends ScrollActivity {
+  _WheelGlideActivity(
+    _GlideWheelPosition super.delegate, {
+    required TickerProvider vsync,
+    required this.target,
+  }) : _position = delegate {
+    _ticker = vsync.createTicker(_tick)..start();
+  }
+
+  final _GlideWheelPosition _position;
+  double target;
+  late final Ticker _ticker;
+  Duration? _lastTick;
+  double _velocity = 0;
+
+  void _tick(Duration now) {
+    final last = _lastTick;
+    _lastTick = now;
+    final dt = last == null ? 1 / 60 : (now - last).inMicroseconds / 1e6;
+    if (dt <= 0) return;
+    final pixels = _position.pixels;
+    final left = target - pixels;
+    if (left.abs() < 0.5) {
+      _velocity = 0;
+      delegate.setPixels(target);
+      delegate.goIdle();
+      return;
+    }
+    final next = pixels + left * (1 - math.exp(-dt / _wheelGlideTau));
+    _velocity = (next - pixels) / dt;
+    // Ran into an end (the list got shorter mid-glide): stop there.
+    if (delegate.setPixels(next) != 0) delegate.goIdle();
+  }
+
+  @override
+  bool get shouldIgnorePointer => false;
+
+  @override
+  bool get isScrolling => true;
+
+  @override
+  double get velocity => _velocity;
+
+  @override
+  void dispose() {
+    _ticker.dispose();
+    super.dispose();
+  }
+}
+
+/// Polished scroll container: slim themed scrollbar, soft fades at the top
+/// and bottom edges so content melts away instead of being cut off (only at
+/// an edge with more beyond it, so nothing fades when it all fits), and a
+/// gliding mouse wheel. [child] is a scroll view without its own controller
+/// (it picks this one up).
+class SmoothScroll extends StatefulWidget {
   final Widget child; // a scroll view
   final double fade;
   final bool alwaysShowThumb;
+
+  /// To scroll the list from outside; one is made if not given.
+  final GlideWheelScrollController? controller;
 
   const SmoothScroll({
     super.key,
     required this.child,
     this.fade = 18,
     this.alwaysShowThumb = false,
+    this.controller,
   });
 
   @override
+  State<SmoothScroll> createState() => _SmoothScrollState();
+}
+
+class _SmoothScrollState extends State<SmoothScroll> {
+  GlideWheelScrollController? _own;
+
+  GlideWheelScrollController get _controller =>
+      widget.controller ?? (_own ??= GlideWheelScrollController());
+
+  @override
+  void dispose() {
+    _own?.dispose();
+    super.dispose();
+  }
+
+  /// How deep (px) to fade an edge with [hidden] px of content beyond it:
+  /// growing over the first [SmoothScroll.fade] px of scrolling, so the fade
+  /// eases in rather than snapping on.
+  double _fadeFor(double hidden) {
+    final fade = widget.fade;
+    return fade <= 0 ? 0 : fade * (hidden / fade).clamp(0.0, 1.0);
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return Scrollbar(
-      thumbVisibility: alwaysShowThumb,
-      child: ShaderMask(
-        blendMode: BlendMode.dstIn,
-        shaderCallback: (rect) {
-          final f = rect.height <= 0 ? 0.0 : (fade / rect.height).clamp(0.0, 0.5);
-          return LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: const [
-              Colors.transparent,
-              Colors.black,
-              Colors.black,
-              Colors.transparent,
-            ],
-            stops: [0, f, 1 - f, 1],
-          ).createShader(rect);
-        },
-        child: child,
+    // Every platform, not just phones, so web and desktop get the glide too.
+    return PrimaryScrollController(
+      controller: _controller,
+      automaticallyInheritForPlatforms: TargetPlatform.values.toSet(),
+      child: Scrollbar(
+        controller: _controller,
+        thumbVisibility: widget.alwaysShowThumb,
+        // Rows coming or going change what's hidden without any scrolling;
+        // re-check the edges then too.
+        child: NotificationListener<ScrollMetricsNotification>(
+          onNotification: (_) {
+            if (mounted) setState(() {});
+            return false;
+          },
+          child: AnimatedBuilder(
+            animation: _controller,
+            child: widget.child,
+            builder: (context, child) {
+              final p = _controller.hasClients &&
+                      _controller.position.hasContentDimensions
+                  ? _controller.position
+                  : null;
+              final top = p == null ? 0.0 : _fadeFor(p.extentBefore);
+              final bottom = p == null ? 0.0 : _fadeFor(p.extentAfter);
+              return ShaderMask(
+                blendMode: BlendMode.dstIn,
+                shaderCallback: (rect) {
+                  final h = rect.height <= 0 ? 1.0 : rect.height;
+                  final t = (top / h).clamp(0.0, 0.5);
+                  final b = (bottom / h).clamp(0.0, 0.5);
+                  return LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: const [
+                      Colors.transparent,
+                      Colors.black,
+                      Colors.black,
+                      Colors.transparent,
+                    ],
+                    stops: [0, t, 1 - b, 1],
+                  ).createShader(rect);
+                },
+                child: child,
+              );
+            },
+          ),
+        ),
       ),
     );
   }
@@ -6795,7 +9073,7 @@ class _UserSettingsPageState extends State<UserSettingsPage> {
                 trailing: Switch(
                   value: enabled,
                   onChanged:
-                      _notifRef == null ? null : (val) => _notifRef!.set(val),
+                      _notifRef == null ? null : (val) => _notifRef.set(val),
                 ),
               );
             },

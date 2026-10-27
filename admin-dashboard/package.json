@@ -12,6 +12,7 @@
     "build:demo": "vite build --mode demo",
     "check:real": "node scripts/check-build.mjs dist real",
     "check:demo": "node scripts/check-build.mjs dist-demo demo",
+    "test:rules": "node --test scripts/test-rules.mjs",
     "lint": "eslint .",
     "preview": "vite preview"
   },

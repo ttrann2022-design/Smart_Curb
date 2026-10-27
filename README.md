@@ -206,7 +206,9 @@ The **Simulation** page provides:
 
 ## Security rules
 
-`admin-dashboard/database.rules.json` is a **draft that has not been published**. It limits each role to what it should do, keeps driver accounts out of staff data, and only lets the Receiver write `occupied`, `lastUpdated`, and `lastSnapshot` on `units/`. The Receiver section has a placeholder that must be filled in once we know how the Receiver signs in; publishing before then would lock the Receiver out. Test changes locally with `npm run emulators`.
+`admin-dashboard/database.rules.json` is a **draft that has not been published**. It limits each role to what it should do and keeps driver accounts out of staff data. Test changes locally with `npm run emulators`.
+
+The hardware Receiver writes with the legacy database secret (Ryan confirmed), which bypasses security rules, so publishing them doesn't interrupt it. The rules file has an optional **Receiver section** for when the Receiver moves to a Firebase Auth account: fill in its UID and it can write only `occupied`, `lastUpdated`, and `lastSnapshot` on `units/`. Until then the placeholder matches no one, which is safe to publish.
 
 ## Roles
 
@@ -224,7 +226,8 @@ The **Simulation** page provides:
 
 ## Roadmap
 
-- [ ] Fill in the Receiver section and publish the Firebase security rules (test mode ends Oct 27)
+- [ ] Publish the Firebase security rules by Oct 22 (deadline Oct 27)
+- [ ] Move the Receiver from the database secret to a Firebase Auth account (fill in the Receiver section of the rules)
 - [ ] Receiver heartbeat, then turn on the stale-curb alert in Settings
 - [ ] LoRa gateway writing live curb readings and lot counts
 - [ ] LED control (Node 2) so dashboard LED changes reach the curb
