@@ -82,7 +82,7 @@ function Layout() {
     const stopAuth = onAuthStateChanged(auth, async (user) => {
       stopRole();
       if (!user) {
-        if (!cancelled) navigate("/", { replace: true, state: { from: location.pathname } });
+        if (!cancelled) navigate("/login", { replace: true, state: { from: location.pathname } });
         return;
       }
 
@@ -97,7 +97,7 @@ function Layout() {
           if (!invite.exists()) {
             cancelled = true;
             await signOut(auth);
-            navigate("/?noaccess=1", { replace: true });
+            navigate("/login?noaccess=1", { replace: true });
             return;
           }
 
@@ -148,7 +148,7 @@ function Layout() {
   const handleSignOut = async () => {
     await stopSimulation();
     await signOut(auth);
-    navigate("/");
+    navigate("/login");
   };
 
   if (phase === "checking") {
