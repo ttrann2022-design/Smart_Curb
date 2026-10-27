@@ -82,7 +82,7 @@ function Signup() {
 
         <div style={{ fontSize: "var(--fs-body)", color: c.dim, textAlign: "center", marginTop: "var(--sp-1)" }}>
           Already have an account?{" "}
-          <Link to="/" className="sws-btn sws-btn-link" style={{ fontSize: "var(--fs-body)" }}>Sign in</Link>
+          <Link to="/login" className="sws-btn sws-btn-link" style={{ fontSize: "var(--fs-body)" }}>Sign in</Link>
         </div>
       </form>
     </AuthShell>

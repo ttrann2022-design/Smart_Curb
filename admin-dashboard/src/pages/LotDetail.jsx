@@ -11,6 +11,12 @@ import { PageHeader, Card, Chips, Button, Field, Input, EmptyState, Notice, Stat
 
 const BRIGHTNESS_DEBOUNCE_MS = 300;
 
+// What happens after an LED change is saved. Live: the dashboard writes to Firebase
+// and the Receiver sends it to the LED matrix. Simulation: nothing leaves the database.
+// Say no more than that: the dashboard doesn't see whether the panel actually updated.
+const LIVE_LED_NOTE = "The Receiver sends it to the curb's LED matrix.";
+const SIM_LED_NOTE = "Simulated curbs aren't real hardware, so no LED panel changes.";
+
 // Saved LED brightness as a whole percent. Units that don't have one yet show 100.
 function brightnessOf(u) {
   const v = u?.ledBrightness;
@@ -113,8 +119,8 @@ function LotDetail() {
       setStatus({
         ok: true,
         text: p.sim
-          ? `${p.id} brightness set to ${p.value}% in the simulation.`
-          : `${p.id} brightness set to ${p.value}%. LED control isn't connected to the curb hardware yet, so the physical panel won't change.`,
+          ? `${p.id} brightness set to ${p.value}% in the simulation. ${SIM_LED_NOTE}`
+          : `${p.id} brightness set to ${p.value}% and saved to Firebase. ${LIVE_LED_NOTE}`,
       });
     } catch (err) {
       setStatus({ ok: false, text: err.code === "PERMISSION_DENIED" ? "You don't have permission to change this curb." : "Couldn't save brightness: " + err.message });
@@ -185,12 +191,11 @@ function LotDetail() {
     setSaving(true);
     try {
       await update(ref(database, dataPath(`units/${selectedUnit}`)), { ledColor, panelText: panelText.trim() });
-      // Real curbs can't receive LED commands yet (Node 2 isn't built), so don't promise it.
       setStatus({
         ok: true,
         text: getDataMode() === "sim"
-          ? "Saved to the simulation."
-          : "Saved. LED control isn't connected to the curb hardware yet, so the physical panel won't change.",
+          ? `Saved to the simulation. ${SIM_LED_NOTE}`
+          : `Saved to Firebase. ${LIVE_LED_NOTE}`,
       });
     } catch (err) {
       setStatus({ ok: false, text: err.code === "PERMISSION_DENIED" ? "You don't have permission to change this curb." : "Couldn't save: " + err.message });
@@ -262,6 +267,11 @@ function LotDetail() {
                     </div>
 
                     <LedPreview color={ledColor} text={panelText.trim()} brightness={brightness} />
+                    <p className="sws-note" style={{ margin: 0 }}>
+                      {mode === "sim"
+                        ? `Changes are saved to the simulation only. ${SIM_LED_NOTE}`
+                        : "Changes are saved to Firebase, and the Receiver sends them to the curb's LED matrix."}
+                    </p>
 
                     {!canEdit && <Notice tone="info" icon="lock">Viewers can see LED settings. Operators and managers can change them.</Notice>}
 

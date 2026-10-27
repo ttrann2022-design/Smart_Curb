@@ -493,6 +493,24 @@ test("only managers write the simulated site config, with the same validation", 
   denied(await call("PUT", "demo", AS.manager, { config: { site: { siteName: "x" } } }));
 });
 
+test("signed-out visitors and driver accounts cannot write demo/leads at all", async () => {
+  for (const who of ["signedOut", "driver"]) {
+    denied(await call("PUT", "demo/leads/v1", AS[who], LEAD));
+    denied(await call("PATCH", "", AS[who], { "demo/leads/v2": LEAD }));
+    denied(await call("PUT", "demo/leads", AS[who], { x: LEAD }));
+  }
+  assert.equal((await call("GET", "demo/leads", OWNER)).body, null);
+});
+
+test("staff can still send fake quote requests and change their status in Simulation", async () => {
+  // Same shapes as the simulator: a whole fake list on reset, or one new request.
+  allowed(await call("PATCH", "", AS.operator, { "demo/leads": { lead00: { ...LEAD_SAVED, status: "contacted" } } }));
+  allowed(await call("PATCH", "", AS.operator, { "demo/leads/k1": { ...LEAD_SAVED, createdAt: 1760000500000 } }));
+  allowed(await call("PATCH", "demo/leads/lead00", AS.manager, { status: "closed" }));
+  assert.equal((await call("GET", "demo/leads/lead00/status", null)).body, "closed");
+  assert.equal(await savedLead("k1"), null, "a simulated lead must not reach the real leads/");
+});
+
 test("simulated site config never reaches the real config/site", async () => {
   allowed(await call("PATCH", "demo/config/site", AS.manager, { siteName: "Simulated Site" }));
   assert.deepEqual((await call("GET", "config/site", OWNER)).body, SITE);

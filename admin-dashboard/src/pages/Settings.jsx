@@ -184,7 +184,7 @@ function Settings() {
   const handleSignOut = async () => {
     await stopSimulation();
     await signOut(auth);
-    navigate("/");
+    navigate("/login");
   };
 
   return (
