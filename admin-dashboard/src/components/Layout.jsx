@@ -26,7 +26,7 @@ const navItems = [
 function Brand({ size = 40 }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-      <img src={logo} alt="" style={{ width: size, height: size, borderRadius: 8, objectFit: "cover", flexShrink: 0 }} />
+      <img src={logo} alt="" width={size} height={size} style={{ width: size, height: size, borderRadius: 8, objectFit: "cover", flexShrink: 0 }} />
       <div style={{ minWidth: 0 }}>
         <div style={{ fontFamily: mono, fontSize: 12.5, fontWeight: 600, letterSpacing: 0.3, whiteSpace: "nowrap" }}>SMART WHEEL STOP</div>
         <div style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: 1.4, color: c.dim }}>ADMIN CONSOLE</div>
@@ -39,7 +39,7 @@ function FullScreen({ children }) {
   return (
     <div style={{ minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", background: c.bg, padding: 24 }}>
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 18, textAlign: "center", maxWidth: 380 }}>
-        <img src={logo} alt="Smart Wheel Stop" style={{ width: 64, height: 64, borderRadius: 12, objectFit: "cover" }} />
+        <img src={logo} alt="Smart Wheel Stop" width={64} height={64} style={{ width: 64, height: 64, borderRadius: 12, objectFit: "cover" }} />
         {children}
       </div>
     </div>
@@ -261,7 +261,10 @@ function Layout() {
         </div>
         {mode === "sim" && <SimBanner />}
         <main id="main" tabIndex={-1} className="sws-main" style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-          <Outlet key={mode} context={{ role, mode }} />
+          {/* Keyed by path so each route fades in (.sws-route); query changes don't refade. */}
+          <div key={location.pathname} className="sws-route">
+            <Outlet key={mode} context={{ role, mode }} />
+          </div>
         </main>
       </div>
     </div>
