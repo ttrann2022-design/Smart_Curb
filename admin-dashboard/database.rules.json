@@ -87,6 +87,7 @@
           "$module": { ".validate": "newData.isBoolean() && $module.matches(/^(eventMode|gateRouting|demandPricing|tailgateZones|permitTiers|semesterCalendar|rateTiers|patientPriority|staffShifts|dwellLimits|meteredParking|enforcementRouting)$/)" }
         },
         "setupComplete": { ".validate": "newData.isBoolean() && (newData.val() === false || (newData.parent().child('siteName').exists() && newData.parent().child('facilityType').exists()))" },
+        "theme": { ".validate": "newData.isString() && newData.val().matches(/^(lime|paper|midnight|ember|mint|violet)$/)" },
         "$other": { ".validate": false }
       }
     },
@@ -227,6 +228,7 @@
             "$module": { ".validate": "newData.isBoolean() && $module.matches(/^(eventMode|gateRouting|demandPricing|tailgateZones|permitTiers|semesterCalendar|rateTiers|patientPriority|staffShifts|dwellLimits|meteredParking|enforcementRouting)$/)" }
           },
           "setupComplete": { ".validate": "newData.isBoolean() && (newData.val() === false || (newData.parent().child('siteName').exists() && newData.parent().child('facilityType').exists()))" },
+          "theme": { ".validate": "newData.isString() && newData.val().matches(/^(lime|paper|midnight|ember|mint|violet)$/)" },
           "$other": { ".validate": false }
         }
       },

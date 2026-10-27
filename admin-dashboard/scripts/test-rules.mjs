@@ -9,6 +9,7 @@
 import { test, before, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { THEME_IDS } from "../src/themes.js";
 
 const HOST = process.env.FIREBASE_DATABASE_EMULATOR_HOST || "127.0.0.1:9000";
 if (!/^(127\.0\.0\.1|localhost|\[::1\]):\d+$/.test(HOST)) {
@@ -317,7 +318,7 @@ test("site config fields are validated", async () => {
   denied(await patchSite("manager", { contact: { name: "Dana Ops", email: "not an email" } }));
   denied(await patchSite("manager", { contact: { name: "Dana Ops" } }));
   denied(await patchSite("manager", { contact: { ...SITE.contact, fax: "555" } }));
-  denied(await patchSite("manager", { theme: "midnight" }));
+  denied(await patchSite("manager", { logoUrl: "https://example.com/logo.png" }));
 });
 
 test("setupComplete can't turn true before the site has a name and facility type", async () => {
@@ -327,6 +328,55 @@ test("setupComplete can't turn true before the site has a name and facility type
   denied(await patchSite("manager", { setupComplete: true }));
   allowed(await patchSite("manager", { facilityType: "city" }));
   allowed(await patchSite("manager", { setupComplete: true }));
+});
+
+// ---------- Site theme ----------
+
+// Each site config (live and simulated) gets the same theme checks.
+for (const [label, path] of [["config/site", "config/site"], ["demo/config/site", "demo/config/site"]]) {
+  test(`a manager can set every theme at ${label}`, async () => {
+    for (const theme of THEME_IDS) {
+      allowed(await call("PATCH", path, AS.manager, { theme }));
+      assert.equal((await call("GET", `${path}/theme`, OWNER)).body, theme);
+      allowed(await call("PUT", `${path}/theme`, AS.manager, theme));
+    }
+  });
+
+  test(`viewers, operators, drivers and signed-out users can't set the theme at ${label}`, async () => {
+    allowed(await call("PATCH", path, AS.manager, { theme: "ember" }));
+    for (const who of ["operator", "viewer", "driver", "signedOut"]) {
+      denied(await call("PATCH", path, AS[who], { theme: "mint" }));
+      denied(await call("PUT", `${path}/theme`, AS[who], "mint"));
+      denied(await call("DELETE", `${path}/theme`, AS[who]));
+    }
+    assert.equal((await call("GET", `${path}/theme`, OWNER)).body, "ember");
+  });
+
+  test(`only the six theme names are accepted at ${label}`, async () => {
+    for (const theme of ["red", "Lime", "LIME", " lime", "lime ", "", "midnight-blue", "default"]) {
+      denied(await call("PATCH", path, AS.manager, { theme }));
+    }
+    for (const theme of [7, true, { name: "lime" }, ["lime"]]) {
+      denied(await call("PATCH", path, AS.manager, { theme }));
+    }
+  });
+}
+
+test("the theme saves alongside the wizard's fields and doesn't upset setupComplete", async () => {
+  await call("DELETE", "config/site", OWNER);
+  // Theme alone, before anything else exists: fine, and setup is still not complete.
+  allowed(await patchSite("manager", { theme: "paper" }));
+  denied(await patchSite("manager", { setupComplete: true }));
+  // The wizard's last step saves the theme with setupComplete in one write.
+  allowed(await patchSite("manager", { siteName: "North Campus", facilityType: "city", setupComplete: false }));
+  allowed(await patchSite("manager", { theme: "violet", setupComplete: true }));
+  const site = (await call("GET", "config/site", OWNER)).body;
+  assert.equal(site.theme, "violet");
+  assert.equal(site.setupComplete, true);
+  // A bad theme fails the whole write, setupComplete included.
+  allowed(await patchSite("manager", { setupComplete: false }));
+  denied(await patchSite("manager", { theme: "red", setupComplete: true }));
+  assert.equal((await call("GET", "config/site/setupComplete", OWNER)).body, false);
 });
 
 // ---------- Quote requests (leads) ----------
@@ -487,7 +537,7 @@ test("only managers write the simulated site config, with the same validation", 
     denied(await call("PATCH", "demo/config/site", AS[who], { siteName: "Mine now" }));
   }
   denied(await call("PATCH", "demo/config/site", AS.manager, { facilityType: "casino" }));
-  denied(await call("PATCH", "demo/config/site", AS.manager, { theme: "midnight" }));
+  denied(await call("PATCH", "demo/config/site", AS.manager, { logoUrl: "https://example.com/logo.png" }));
   denied(await call("PUT", "demo/config/other", AS.manager, { a: 1 }));
   // A staff write to the whole demo/ node would skip these rules, so it's refused.
   denied(await call("PUT", "demo", AS.manager, { config: { site: { siteName: "x" } } }));
