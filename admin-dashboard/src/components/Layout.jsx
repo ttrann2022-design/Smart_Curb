@@ -4,7 +4,6 @@ import { onAuthStateChanged, signOut } from "firebase/auth";
 import { ref, get, set, update, remove, onValue, serverTimestamp } from "firebase/database";
 import { auth, database, emailKey } from "../firebase";
 import { c, mono } from "../theme";
-import logo from "../assets/smartcurb-logo.jpg";
 import { DEMO_BUILD, useDataMode } from "../dataMode";
 import { MODULES, enabledModules, useSiteConfig } from "../site";
 import { applyTheme, clearTheme, normalizeTheme } from "../themes";
@@ -12,6 +11,7 @@ import { useLeads } from "../leads";
 import { stopSimulation, watchSimulation } from "../demo/simulator";
 import DataModeSwitch from "./DataModeSwitch";
 import SimBanner from "./SimBanner";
+import { Brand, FullScreen } from "./Brand";
 import Icon from "./Icon";
 import { Button } from "./ui";
 
@@ -26,29 +26,6 @@ const navItems = [
   { label: "Simulation", to: "/simulation", icon: "simulation", simOnly: true },
   { label: "Settings", to: "/settings", icon: "settings" },
 ];
-
-function Brand({ size = 40, sub = "ADMIN CONSOLE" }) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-      <img src={logo} alt="" width={size} height={size} style={{ width: size, height: size, borderRadius: 8, objectFit: "cover", flexShrink: 0 }} />
-      <div style={{ minWidth: 0 }}>
-        <div style={{ fontFamily: mono, fontSize: 12.5, fontWeight: 600, letterSpacing: 0.3, whiteSpace: "nowrap" }}>SMART WHEEL STOP</div>
-        <div style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: 1.4, color: c.dim }}>{sub}</div>
-      </div>
-    </div>
-  );
-}
-
-function FullScreen({ children }) {
-  return (
-    <div style={{ minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", background: c.bg, padding: 24 }}>
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 18, textAlign: "center", maxWidth: 380 }}>
-        <img src={logo} alt="Smart Wheel Stop" width={64} height={64} style={{ width: 64, height: 64, borderRadius: 12, objectFit: "cover" }} />
-        {children}
-      </div>
-    </div>
-  );
-}
 
 function Layout() {
   const [userEmail, setUserEmail] = useState("");
