@@ -49,15 +49,21 @@ export function sourceLine(ctx, entries = curbEntries(ctx.units)) {
   return `${source} · ${latest ? `latest reading ${formatAgo(latest, ctx.now)}` : "no reading times yet"}.`;
 }
 
-// "C-041 in Lot 14" lines, at most `max`, then a count of the rest.
-export function listCurbs(ctx, entries, detail = () => "", max = 8) {
-  const lines = entries.slice(0, max).map(([id, u]) => {
+export const PAGE = 8;
+
+// "C-041 in Lot 14" lines for one page of `entries`, then a count of the rest.
+export function listCurbs(ctx, entries, detail = () => "", page = 0) {
+  const start = page * PAGE;
+  const lines = entries.slice(start, start + PAGE).map(([id, u]) => {
     const where = ctx.lots?.[u.lot] ? lotName(ctx.lots, u.lot) : "no lot";
     const extra = detail(u);
     return `• ${id} in ${where}${extra ? `: ${extra}` : ""}`;
   });
-  if (entries.length > max) lines.push(`…and ${entries.length - max} more. Curb units lists them all.`);
+  const rest = entries.length - start - PAGE;
+  if (rest > 0) lines.push(`…and ${rest} more. Say "show me more" for the next ${Math.min(rest, PAGE)}.`);
   return lines.join("\n");
 }
+
+export const hasMore = (entries, page = 0) => entries.length > (page + 1) * PAGE;
 
 export const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;

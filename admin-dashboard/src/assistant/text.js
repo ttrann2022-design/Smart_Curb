@@ -3,6 +3,16 @@
 
 // Multi-word forms that mean one thing, joined before splitting into words.
 const JOINS = [
+  [/\b(is|are|does|did|has|have|was|were|should|could|would|do)nt\b/g, "$1 not"],
+  [/\bwont\b/g, "will not"],
+  [/\bcant\b/g, "can not"],
+  [/\byoure\b/g, "you are"],
+  [/\bim\b/g, "i am"],
+  [/\b(what|how|where|who|that|there|it)s\b/g, "$1 is"],
+  [/\blog off\b/g, "signout"],
+  [/\b(quietest|emptiest|slowest)\b/g, "least busy"],
+  [/\b(running|run|ran) out\b/g, "low"],
+  [/\bin one go\b/g, "at once"],
   [/\bset up\b/g, "setup"],
   [/\b(sign|log) ?out\b/g, "signout"],
   [/\b(sign|log) ?in\b/g, "signin"],
@@ -17,7 +27,7 @@ const JOINS = [
 
 // word -> canonical word. Every canonical word maps to itself implicitly.
 const SYNONYMS = {
-  free: ["open", "available", "vacant", "empty", "unoccupied", "spare"],
+  free: ["open", "available", "vacant", "unoccupied", "spare"],
   spot: ["space", "stall", "place", "bay", "slot"],
   lot: ["garage", "deck"],
   curb: ["kerb", "unit", "sensor", "device", "wheelstop"],
@@ -30,22 +40,22 @@ const SYNONYMS = {
   text: ["wording", "words", "caption"],
   user: ["person", "people", "account", "colleague", "coworker", "teammate", "member", "staff", "someone", "somebody", "employee"],
   role: ["permission", "access", "rights", "privilege", "privileges"],
-  add: ["invite", "onboard", "register"],
-  change: ["set", "edit", "modify", "adjust", "alter", "tweak", "customize", "customise", "configure"],
+  add: ["onboard", "register"],
+  park: ["parking"],
+  change: ["edit", "modify", "adjust", "alter", "tweak", "customize", "customise", "configure"],
   busy: ["busiest", "busier", "crowded", "packed", "popular", "fullest"],
   thanks: ["thank", "thx", "ty", "ta", "cheers", "appreciate", "appreciated"],
   hello: ["hi", "hey", "hiya", "howdy", "greetings", "yo", "hallo", "hola", "morning", "afternoon", "evening"],
   bye: ["goodbye", "cya", "farewell"],
-  simulation: ["sim", "simulated", "simulator", "demo", "fake"],
+  simulation: ["sim", "simulated", "simulator", "fake"],
   live: ["real", "production", "actual"],
-  latency: ["delay", "lag", "slow"],
-  analytics: ["stats", "statistics", "chart", "graph", "heatmap", "trend"],
+  latency: ["delay", "lag"],
+  analytics: ["stats", "statistics", "chart", "graph", "trend"],
   fresh: ["latest", "recent", "freshness", "newest", "updated"],
-  attention: ["problem", "issue", "wrong", "broken", "alert", "fault", "trouble", "error", "warning"],
+  attention: ["problem", "issue", "broken", "alert", "fault", "trouble", "warning"],
   occupied: ["taken", "used"],
   theme: ["skin", "appearance"],
   password: ["passcode", "pwd"],
-  stale: ["quiet", "silent"],
   mean: ["means", "meaning", "definition"],
   remove: ["delete", "kick", "deactivate"],
   find: ["locate", "search", "lookup"],
@@ -106,7 +116,7 @@ const COMMON = [
   "without", "from", "this", "that", "these", "those", "again", "about", "today", "right", "still", "been", "back",
   "work", "make", "data", "site", "does", "could", "would", "should", "give", "look", "much", "many", "want", "know",
   "like", "them", "they", "their", "here", "into", "onto", "over", "under", "after", "before", "than", "then", "only",
-  "also", "very", "really", "every", "each", "other", "another", "same", "such", "being", "time", "your", "mine", "doing", "going", "thing", "things", "stuff",
+  "also", "very", "really", "every", "each", "other", "another", "same", "such", "being", "time", "your", "mine", "doing", "going", "thing", "things", "stuff", "send", "sent", "deal", "take", "taken", "away", "today", "ages", "long", "kind", "sort", "said", "says", "seen", "seem", "feel", "just", "next", "last", "most", "less", "few", "lots", "whole", "part", "same", "keep", "kept", "came", "come", "goes", "gone", "went", "done", "call", "able", "real", "true", "sure", "yeah", "nope", "okay", "fine", "good", "well", "best", "ever", "even", "much", "more", "only", "both", "either", "never", "always", "maybe", "where", "near", "close", "open", "nothing", "happened", "moved", "point", "capable", "together", "swap", "swapping", "waiting", "brilliant", "computer", "stayed", "pressed", "together", "slowly", "loading", "showing", "sending", "anyone", "everyone", "everything", "something", "someone",
 ];
 COMMON.forEach((w) => VOCAB.add(w));
 
@@ -136,10 +146,13 @@ function correct(word) {
   return best;
 }
 
+// Words ending in s that aren't plurals ("news" isn't "new").
+const NOT_PLURAL = new Set(["news", "sms", "always", "analytics", "stats", "status", "yes", "this", "is", "was", "has", "does", "plus", "bus", "gas", "less", "bonus", "focus", "series", "species", "ages", "whats", "thanks", "ms"]);
+
 // A word's canonical form: its synonym group, or the singular of a known plural.
 function canonical(w) {
   if (CANON.has(w)) return CANON.get(w);
-  const single = w.endsWith("s") && w.length > 3 ? w.slice(0, -1) : null;
+  const single = w.endsWith("s") && w.length > 3 && !NOT_PLURAL.has(w) ? w.slice(0, -1) : null;
   if (single && (CANON.has(single) || VOCAB.has(single))) return CANON.get(single) || single;
   return w;
 }
