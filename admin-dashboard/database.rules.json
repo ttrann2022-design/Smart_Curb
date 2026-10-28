@@ -111,8 +111,16 @@
         "createdAt": { ".validate": "!data.exists() && newData.isNumber() && newData.val() === now" },
         "status": {
           ".write": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true && data.exists()",
-          // A new lead starts as "new"; platform admins then move it between the three.
-          ".validate": "newData.isString() && (data.exists() ? newData.val().matches(/^(new|contacted|closed)$/) : newData.val() === 'new')"
+          // A new lead starts as "new"; platform admins then move it between new,
+          // contacted and closed. "won" means converted to a customer: it needs the
+          // siteId below, and it's final.
+          ".validate": "newData.isString() && (data.exists() ? ((data.val() === 'won' ? newData.val() === 'won' : newData.val().matches(/^(new|contacted|closed|won)$/)) && (newData.val() !== 'won' || newData.parent().child('siteId').exists())) : newData.val() === 'new')"
+        },
+        // The customer a lead was converted into. Set once, in the same write that
+        // creates sites/<siteId> with fromLeadId pointing back here and sets status "won".
+        "siteId": {
+          ".write": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true && data.parent().exists() && !data.exists()",
+          ".validate": "newData.isString() && newData.val().matches(/^[A-Za-z0-9_-]+$/) && newData.parent().child('status').val() === 'won' && newData.parent().parent().parent().child('sites').child(newData.val()).child('fromLeadId').val() === $leadId"
         },
         "$other": { ".validate": false }
       }
@@ -139,8 +147,10 @@
         "contactName": { ".validate": "newData.isString() && newData.val().length <= 80" },
         "contactEmail": { ".validate": "newData.isString() && newData.val().length <= 120 && newData.val().matches(/^[^@ ]+@[^@ ]+[.][^@ ]+$/)" },
         "notes": { ".validate": "newData.isString() && newData.val().length <= 500" },
-        // The quote request the site came from. Must be a real lead when set or changed.
-        "fromLeadId": { ".validate": "newData.isString() && newData.val().matches(/^[A-Za-z0-9_-]+$/) && (newData.val() === data.val() || root.child('leads').child(newData.val()).exists())" },
+        // The quote request the site came from. Set only by converting that lead: in the
+        // same write the lead gets siteId = this site, and it can't already be "won",
+        // so one lead never becomes two customers. Unchanged values always pass.
+        "fromLeadId": { ".validate": "newData.isString() && newData.val().matches(/^[A-Za-z0-9_-]+$/) && (newData.val() === data.val() || (root.child('leads').child(newData.val()).child('status').val() !== 'won' && newData.parent().parent().parent().child('leads').child(newData.val()).child('siteId').val() === $siteId))" },
         // Server time on create, then fixed.
         "createdAt": { ".validate": "newData.isNumber() && (data.exists() ? newData.val() === data.val() : newData.val() === now)" },
         "$other": { ".validate": false }
@@ -152,10 +162,11 @@
       ".read": true,
       "$lotId": {
         // Which customer site a lot belongs to. Platform admins only, on a lot
-        // that already exists, and only to an existing site (or removed).
+        // that already exists, and only to a site that exists once the write lands
+        // (so a site can be created and given lots in one write), or removed.
         "siteId": {
           ".write": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true && data.parent().exists()",
-          ".validate": "newData.isString() && newData.val().matches(/^[A-Za-z0-9_-]+$/) && root.child('sites').child(newData.val()).exists()"
+          ".validate": "newData.isString() && newData.val().matches(/^[A-Za-z0-9_-]+$/) && newData.parent().parent().parent().child('sites').child(newData.val()).exists()"
         }
       }
     },
@@ -272,16 +283,24 @@
           "$other": { ".validate": false }
         }
       },
-      // Fake quote requests from the simulator: public read, staff write, as before.
-      // Platform admins aren't staff, so they get their own status rule for the console.
+      // Fake quote requests for the company console's Simulation mode. Platform
+      // admins only, like leads/. They're fake, so the console seeds them with past
+      // dates and any status, and can replace or delete them; the shape is still
+      // checked, and converting follows the same won/siteId rules as leads/.
       "leads": {
-        ".read": true,
-        ".write": "auth != null && root.child('users').child(auth.uid).exists()",
+        ".read": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true",
         "$leadId": {
-          "status": {
-            ".write": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true && data.exists()",
-            ".validate": "newData.isString() && newData.val().matches(/^(new|contacted|closed)$/)"
-          }
+          ".write": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true",
+          ".validate": "newData.hasChildren(['name', 'email', 'facilityType', 'status', 'createdAt'])",
+          "name": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 80" },
+          "email": { ".validate": "newData.isString() && newData.val().length < 120 && newData.val().matches(/^[^@ ]+@[^@ ]+[.][^@ ]+$/)" },
+          "organization": { ".validate": "newData.isString() && newData.val().length < 120" },
+          "facilityType": { ".validate": "newData.isString() && newData.val().matches(/^(university|stadium|airport|hospital|shopping|city)$/)" },
+          "message": { ".validate": "newData.isString() && newData.val().length < 1000" },
+          "createdAt": { ".validate": "newData.isNumber() && newData.val() <= now" },
+          "status": { ".validate": "newData.isString() && newData.val().matches(/^(new|contacted|closed|won)$/) && (newData.val() !== 'won' || newData.parent().child('siteId').exists()) && (data.val() !== 'won' || newData.val() === 'won')" },
+          "siteId": { ".validate": "newData.isString() && newData.val().matches(/^[A-Za-z0-9_-]+$/) && (newData.val() === data.val() || (newData.parent().child('status').val() === 'won' && newData.parent().parent().parent().child('sites').child(newData.val()).child('fromLeadId').val() === $leadId))" },
+          "$other": { ".validate": false }
         }
       },
       // Simulated lots: public read, staff write, as before. siteId follows the live
@@ -294,7 +313,7 @@
         "$lotId": {
           "siteId": {
             ".write": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true && data.parent().exists()",
-            ".validate": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true && newData.isString() && newData.val().matches(/^[A-Za-z0-9_-]+$/) && root.child('demo').child('sites').child(newData.val()).exists()"
+            ".validate": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true && newData.isString() && newData.val().matches(/^[A-Za-z0-9_-]+$/) && newData.parent().parent().parent().child('sites').child(newData.val()).exists()"
           }
         }
       },
@@ -311,7 +330,7 @@
           "contactName": { ".validate": "newData.isString() && newData.val().length <= 80" },
           "contactEmail": { ".validate": "newData.isString() && newData.val().length <= 120 && newData.val().matches(/^[^@ ]+@[^@ ]+[.][^@ ]+$/)" },
           "notes": { ".validate": "newData.isString() && newData.val().length <= 500" },
-          "fromLeadId": { ".validate": "newData.isString() && newData.val().matches(/^[A-Za-z0-9_-]+$/) && (newData.val() === data.val() || root.child('demo').child('leads').child(newData.val()).exists())" },
+          "fromLeadId": { ".validate": "newData.isString() && newData.val().matches(/^[A-Za-z0-9_-]+$/) && (newData.val() === data.val() || (root.child('demo').child('leads').child(newData.val()).child('status').val() !== 'won' && newData.parent().parent().parent().child('leads').child(newData.val()).child('siteId').val() === $siteId))" },
           "createdAt": { ".validate": "newData.isNumber() && (data.exists() ? newData.val() === data.val() : newData.val() === now)" },
           "$other": { ".validate": false }
         }

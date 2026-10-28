@@ -394,6 +394,7 @@ test("the theme saves alongside the wizard's fields and doesn't upset setupCompl
 
 // ---------- Quote requests (leads) ----------
 
+const STAFF = ["manager", "operator", "viewer"];
 const ALL = ["platformAdmin", "manager", "operator", "viewer", "driver", "signedOut"];
 const createLead = (who, lead, id = "new1") => call("PUT", `leads/${id}`, AS[who], lead);
 const savedLead = async (id) => (await call("GET", `leads/${id}`, OWNER)).body;
@@ -568,13 +569,17 @@ test("signed-out visitors and driver accounts cannot write demo/leads at all", a
   assert.equal((await call("GET", "demo/leads", OWNER)).body, null);
 });
 
-test("staff can still send fake quote requests and change their status in Simulation", async () => {
-  // Same shapes as the simulator: a whole fake list on reset, or one new request.
-  allowed(await call("PATCH", "", AS.operator, { "demo/leads": { lead00: { ...LEAD_SAVED, status: "contacted" } } }));
-  allowed(await call("PATCH", "", AS.operator, { "demo/leads/k1": { ...LEAD_SAVED, createdAt: 1760000500000 } }));
-  allowed(await call("PATCH", "demo/leads/lead00", AS.manager, { status: "closed" }));
-  assert.equal((await call("GET", "demo/leads/lead00/status", null)).body, "closed");
-  assert.equal(await savedLead("k1"), null, "a simulated lead must not reach the real leads/");
+test("customer staff can't read or write demo/leads any more: they belong to the console", async () => {
+  await call("PUT", "demo/leads/l1", OWNER, LEAD_SAVED);
+  for (const who of STAFF) {
+    denied(await call("GET", "demo/leads", AS[who]));
+    denied(await call("GET", "demo/leads/l1", AS[who]));
+    // The shapes the old customer simulator wrote: a whole list on reset, or one new request.
+    denied(await call("PATCH", "", AS[who], { "demo/leads": { lead00: LEAD_SAVED } }));
+    denied(await call("PATCH", "", AS[who], { "demo/leads/k1": LEAD_SAVED }));
+    denied(await call("PATCH", "demo/leads/l1", AS[who], { status: "closed" }));
+  }
+  assert.equal((await call("GET", "demo/leads/l1/status", OWNER)).body, "new");
 });
 
 test("simulated site config never reaches the real config/site", async () => {
@@ -584,7 +589,6 @@ test("simulated site config never reaches the real config/site", async () => {
 
 // ---------- Company console: platform admins ----------
 
-const STAFF = ["manager", "operator", "viewer"];
 const NOT_ADMIN = [...STAFF, "driver", "signedOut"];
 
 for (const root of ["", "demo/"]) {
@@ -639,7 +643,8 @@ test("a demo/platformAdmins entry alone doesn't open the console's data", async 
 
 for (const root of ["", "demo/"]) {
   const base = root === "" ? CUSTOMER : DEMO_CUSTOMER;
-  const fresh = { ...base, createdAt: SERVER_TIME };
+  // A brand-new site: fromLeadId only ever arrives by converting a lead (tested below).
+  const fresh = { ...DEMO_CUSTOMER, createdAt: SERVER_TIME };
   const saved = async (id) => (await call("GET", `${root}sites/${id}`, OWNER)).body;
 
   test(`only platform admins can read ${root}sites`, async () => {
@@ -720,17 +725,19 @@ for (const root of ["", "demo/"]) {
     allowed(await call("PUT", `${root}sites/site1`, AS.platformAdmin, { ...base, status: "active" }));
   });
 
-  test(`${root}sites fromLeadId must name an existing ${root}leads entry`, async () => {
+  test(`${root}sites fromLeadId can't be set by hand, only by converting the lead`, async () => {
     await call("PUT", `${root}leads/lead7`, OWNER, LEAD_SAVED);
-    allowed(await call("PATCH", `${root}sites/site1`, AS.platformAdmin, { fromLeadId: "lead7" }));
-    denied(await call("PATCH", `${root}sites/site1`, AS.platformAdmin, { fromLeadId: "ghost" }));
-    denied(await call("PATCH", `${root}sites/site1`, AS.platformAdmin, { fromLeadId: 7 }));
-    denied(await call("PATCH", `${root}sites/site1`, AS.platformAdmin, { fromLeadId: "lead7/email" }));
-    denied(await call("PATCH", `${root}sites/site1`, AS.platformAdmin, { fromLeadId: "" }));
-    denied(await call("PUT", `${root}sites/s2`, AS.platformAdmin, { ...fresh, fromLeadId: "ghost" }));
+    denied(await call("PATCH", `${root}sites/site1`, AS.platformAdmin, { fromLeadId: "lead7" }));
+    denied(await call("PUT", `${root}sites/s2`, AS.platformAdmin, { ...fresh, fromLeadId: "lead7" }));
+    for (const fromLeadId of ["ghost", 7, "lead7/email", ""]) {
+      denied(await call("PATCH", `${root}sites/site1`, AS.platformAdmin, { fromLeadId }));
+    }
     // A site can still be saved after its lead is deleted, as long as fromLeadId doesn't change.
+    await call("PUT", `${root}sites/site1/fromLeadId`, OWNER, "lead7");
     await call("DELETE", `${root}leads/lead7`, OWNER);
     allowed(await call("PATCH", `${root}sites/site1`, AS.platformAdmin, { status: "active", fromLeadId: "lead7" }));
+    allowed(await call("PUT", `${root}sites/site1`, AS.platformAdmin, { ...base, fromLeadId: "lead7" }));
+    allowed(await call("PATCH", `${root}sites/site1`, AS.platformAdmin, { fromLeadId: null }));
   });
 }
 
@@ -810,18 +817,149 @@ test("Simulation lots keep their rules: public read, staff write, reset can drop
 
 // ---------- Simulation reads after demo/ lost its blanket .read ----------
 
-test("the public still reads every part of the simulation it read before", async () => {
+test("the public still reads the simulation's curbs, lots and settings; demo/leads are console-only", async () => {
   await call("PATCH", "demo", OWNER, { units: { "C-001": { lot: "lot06" } }, history: { week: { Mon: [1] } }, latency: { "C-001": { s0: SAMPLE } }, simLock: { owner: "x" }, config: { site: SITE }, leads: { l1: LEAD_SAVED } });
-  for (const path of ["units", "lots", "history", "latency", "simLock", "config", "config/site", "leads", "leads/l1"]) {
+  for (const path of ["units", "lots", "history", "latency", "simLock", "config", "config/site"]) {
     for (const who of ["signedOut", "driver", "viewer"]) allowed(await call("GET", `demo/${path}`, AS[who]));
   }
+  for (const who of NOT_ADMIN) {
+    denied(await call("GET", "demo/leads", AS[who]));
+    denied(await call("GET", "demo/leads/l1", AS[who]));
+  }
+  allowed(await call("GET", "demo/leads", AS.platformAdmin));
 });
 
-test("platform admins can change a simulated lead's status, but not create or edit one", async () => {
+test("platform admins seed and manage fake demo/leads, with the shape still checked", async () => {
   await call("PUT", "demo/leads/l1", OWNER, LEAD_SAVED);
   for (const status of ["contacted", "closed", "new"]) allowed(await call("PATCH", "demo/leads/l1", AS.platformAdmin, { status }));
+  // Fake data: past dates, any starting status, edits and deletes are fine.
+  allowed(await call("PUT", "demo/leads/l2", AS.platformAdmin, { ...LEAD_SAVED, status: "contacted" }));
+  allowed(await call("PUT", "demo/leads/l3", AS.platformAdmin, { ...LEAD, createdAt: SERVER_TIME }));
+  allowed(await call("PATCH", "demo/leads/l1", AS.platformAdmin, { name: "Changed" }));
+  allowed(await call("DELETE", "demo/leads/l2", AS.platformAdmin));
+  // But it must still look like a lead.
   denied(await call("PATCH", "demo/leads/l1", AS.platformAdmin, { status: "archived" }));
   denied(await call("PATCH", "demo/leads/ghost", AS.platformAdmin, { status: "new" }));
-  denied(await call("PATCH", "demo/leads/l1", AS.platformAdmin, { name: "Changed" }));
-  denied(await call("PUT", "demo/leads/l2", AS.platformAdmin, LEAD_SAVED));
+  denied(await call("PUT", "demo/leads/l4", AS.platformAdmin, { ...LEAD_SAVED, phone: "555" }));
+  denied(await call("PUT", "demo/leads/l4", AS.platformAdmin, { ...LEAD_SAVED, name: "" }));
+  denied(await call("PUT", "demo/leads/l4", AS.platformAdmin, { ...LEAD_SAVED, facilityType: "casino" }));
+  denied(await call("PUT", "demo/leads/l4", AS.platformAdmin, { ...LEAD_SAVED, createdAt: Date.now() + 86400000 }));
+  const noEmail = { ...LEAD_SAVED };
+  delete noEmail.email;
+  denied(await call("PUT", "demo/leads/l4", AS.platformAdmin, noEmail));
+  // Not the whole list in one write.
+  denied(await call("PUT", "demo/leads", AS.platformAdmin, { l1: LEAD_SAVED }));
+});
+
+// ---------- Converting a quote request into a customer ----------
+
+// What the console's "Convert to customer" writes: the site, the lead's status and its siteId, together.
+const convert = (who, root, leadId, siteId, site = {}) => call("PATCH", "", AS[who], {
+  [`${root}sites/${siteId}`]: {
+    name: "Westbrook University", type: "campus", status: "prospect", contactName: "Priya Raman",
+    contactEmail: "priya@example.com", fromLeadId: leadId, createdAt: SERVER_TIME, ...site,
+  },
+  [`${root}leads/${leadId}/status`]: "won",
+  [`${root}leads/${leadId}/siteId`]: siteId,
+});
+
+for (const root of ["", "demo/"]) {
+  const lead = async (id) => (await call("GET", `${root}leads/${id}`, OWNER)).body;
+  const setup = () => (root ? call("PATCH", "demo/leads", OWNER, { lead1: LEAD_SAVED, lead2: LEAD_SAVED }) : call("PUT", "leads/lead2", OWNER, LEAD_SAVED));
+
+  test(`a platform admin converts a ${root}lead into a customer in one write`, async () => {
+    await setup();
+    allowed(await convert("platformAdmin", root, "lead1", "conv1"));
+    const l = await lead("lead1");
+    assert.equal(l.status, "won");
+    assert.equal(l.siteId, "conv1");
+    const site = (await call("GET", `${root}sites/conv1`, OWNER)).body;
+    assert.equal(site.fromLeadId, "lead1");
+    assert.equal(site.status, "prospect");
+    // A contacted or closed lead converts too.
+    allowed(await call("PATCH", `${root}leads/lead2`, AS.platformAdmin, { status: "closed" }));
+    allowed(await convert("platformAdmin", root, "lead2", "conv2"));
+  });
+
+  test(`a ${root}lead can't be converted twice`, async () => {
+    await setup();
+    allowed(await convert("platformAdmin", root, "lead1", "conv1"));
+    denied(await convert("platformAdmin", root, "lead1", "conv2"));
+    denied(await convert("platformAdmin", root, "lead1", "conv1"));
+    assert.equal((await call("GET", `${root}sites/conv2`, OWNER)).body, null);
+    denied(await call("PATCH", `${root}leads/lead1`, AS.platformAdmin, { siteId: "site1" }));
+    // Even with the first customer deleted, the lead stays converted.
+    allowed(await call("DELETE", `${root}sites/conv1`, AS.platformAdmin));
+    denied(await convert("platformAdmin", root, "lead1", "conv3"));
+    assert.equal((await lead("lead1")).siteId, "conv1");
+  });
+
+  test(`"won" needs a customer and is final for ${root}leads`, async () => {
+    await setup();
+    denied(await call("PATCH", `${root}leads/lead1`, AS.platformAdmin, { status: "won" }));
+    allowed(await convert("platformAdmin", root, "lead1", "conv1"));
+    for (const status of ["new", "contacted", "closed"]) denied(await call("PATCH", `${root}leads/lead1`, AS.platformAdmin, { status }));
+    allowed(await call("PATCH", `${root}leads/lead1`, AS.platformAdmin, { status: "won" }));
+    assert.equal((await lead("lead1")).status, "won");
+  });
+
+  test(`converting a ${root}lead needs all three parts, pointing at each other`, async () => {
+    await setup();
+    const site = { name: "X", type: "other", status: "prospect", fromLeadId: "lead1", createdAt: SERVER_TIME };
+    // Site without the lead's side.
+    denied(await call("PATCH", "", AS.platformAdmin, { [`${root}sites/c1`]: site }));
+    denied(await call("PATCH", "", AS.platformAdmin, { [`${root}sites/c1`]: site, [`${root}leads/lead1/status`]: "won" }));
+    // Lead side without the site, or pointing at a site that names another lead.
+    denied(await call("PATCH", "", AS.platformAdmin, { [`${root}leads/lead2/status`]: "won", [`${root}leads/lead2/siteId`]: "site1" }));
+    denied(await call("PATCH", "", AS.platformAdmin, { [`${root}sites/c1`]: { ...site, fromLeadId: "lead2" }, [`${root}leads/lead1/status`]: "won", [`${root}leads/lead1/siteId`]: "c1" }));
+    // siteId without "won".
+    denied(await call("PATCH", "", AS.platformAdmin, { [`${root}sites/c1`]: site, [`${root}leads/lead1/siteId`]: "c1" }));
+    // A bad site fails the whole write.
+    denied(await convert("platformAdmin", root, "lead1", "c1", { type: "stadium" }));
+    assert.equal((await lead("lead1")).status, "new");
+  });
+
+  test(`customer roles, drivers and signed-out users can't convert ${root}leads`, async () => {
+    await setup();
+    for (const who of NOT_ADMIN) denied(await convert(who, root, "lead1", "conv1"));
+    assert.equal((await lead("lead1")).status, "new");
+  });
+}
+
+test("the public lead form still can't carry siteId or start as won", async () => {
+  denied(await createLead("signedOut", { ...LEAD, siteId: "site1" }, "x1"));
+  denied(await createLead("signedOut", { ...LEAD, status: "won", siteId: "site1" }, "x2"));
+  denied(await createLead("platformAdmin", { ...LEAD, status: "won", siteId: "site1" }, "x3"));
+});
+
+test("a customer can be created with its lots assigned in one write", async () => {
+  allowed(await call("PATCH", "", AS.platformAdmin, {
+    "sites/new1": { ...DEMO_CUSTOMER, createdAt: SERVER_TIME },
+    "lots/lot14/siteId": "new1",
+  }));
+  assert.equal((await call("GET", "lots/lot14/siteId", OWNER)).body, "new1");
+});
+
+test("the console seeds demo customers, a won lead and lot assignments in one write", async () => {
+  await call("PUT", "demo/lots", OWNER, { lot06: { name: "Lot 6", siteId: "site1" }, lot07: { name: "Lot 7" } });
+  allowed(await call("PATCH", "", AS.platformAdmin, {
+    "demo/sites/site1": null,
+    "demo/sites/u1": { name: "Demo University", type: "campus", status: "active", fromLeadId: "dl1", createdAt: SERVER_TIME },
+    "demo/sites/m1": { name: "Demo Mall", type: "mall", status: "prospect", createdAt: SERVER_TIME },
+    "demo/leads/dl1": { ...LEAD_SAVED, status: "won", siteId: "u1" },
+    "demo/leads/dl2": { ...LEAD_SAVED, status: "contacted" },
+    "demo/lots/lot06/siteId": "u1",
+    "demo/lots/lot07/siteId": "m1",
+  }));
+  const lots = (await call("GET", "demo/lots", OWNER)).body;
+  assert.equal(lots.lot06.siteId, "u1");
+  assert.equal(lots.lot07.siteId, "m1");
+  // And re-seeding replaces it all, won lead included, under new keys.
+  allowed(await call("PATCH", "", AS.platformAdmin, {
+    "demo/sites/u1": null, "demo/sites/m1": null, "demo/leads/dl1": null, "demo/leads/dl2": null,
+    "demo/sites/u2": { name: "Demo University", type: "campus", status: "active", createdAt: SERVER_TIME },
+    "demo/lots/lot06/siteId": "u2", "demo/lots/lot07/siteId": null,
+  }));
+  // Customer staff can't seed.
+  denied(await call("PATCH", "", AS.manager, { "demo/sites/u3": { name: "X", type: "other", status: "prospect", createdAt: SERVER_TIME } }));
 });
