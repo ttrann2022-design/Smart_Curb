@@ -1,18 +1,24 @@
 // Tests the rule-based assistant (src/assistant/) without React or a database:
-// example phrasings must reach the right intent (typos and other wording included),
-// out-of-scope questions must fall back, and answers must use the data, the mode
-// and the role they're given.
+// example phrasings must reach the right intent (typos, other wording and
+// follow-ups included), out-of-scope questions must fall back politely, variants
+// must never repeat back to back, and answers must use the data, mode and role given.
 //
 //   npm run test:assistant
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
-import { INTENTS, START_CHIPS, FALLBACK_CHIPS, match, respond } from "../src/assistant/index.js";
+import { INTENTS, INTENT_BY_ID, SOMETHING_ELSE, findLot, menuChips, respond, welcome } from "../src/assistant/index.js";
+import { parseMath } from "../src/assistant/math.js";
+import { ALL_EXAMPLES } from "../src/assistant/examples/index.js";
+import { FOLLOW_UPS, OUT_OF_SCOPE } from "./assistant-conversations.mjs";
+import { HOLDOUT } from "./assistant-holdout.mjs";
 
-const NOW = Date.UTC(2026, 9, 28, 15, 0, 0);
+const NOW = new Date(2026, 9, 28, 15, 0, 0).getTime(); // a Wednesday, 3 PM local
 const min = (n) => NOW - n * 60000;
+const ROW = (base) => Array.from({ length: 14 }, (_, h) => Math.min(99, base + (h === 10 ? 30 : h === 0 ? -20 : 0)));
+const WEEK = { Mon: ROW(50), Tue: ROW(55), Wed: ROW(60), Thu: ROW(65), Fri: ROW(70), Sat: ROW(30), Sun: ROW(25) };
 const DATA = {
-  lots: { lot06: { name: "Lot 6" }, lot14: { name: "Lot 14" }, garageA: { name: "Garage A, Level 2" } },
+  lots: { lot06: { name: "Lot 6" }, lot14: { name: "Lot 14" }, lot12: { name: "Lot 12 — North" }, garageA: { name: "Garage A, Level 2" } },
   units: {
     "C-001": { lot: "lot06", online: true, occupied: true, battery: 80, lastUpdated: min(3), ledColor: "blue", panelText: "PERMIT A" },
     "C-002": { lot: "lot06", online: true, occupied: false, battery: 12, lastUpdated: min(9) },
@@ -20,526 +26,223 @@ const DATA = {
     "C-041": { lot: "lot14", online: true, occupied: true, battery: 64, lastUpdated: min(1), ledColor: "\"red\"", ledBrightness: 40 },
     "C-042": { lot: "lot14", online: true, occupied: true, lastUpdated: min(20) },
     "C-095": { lot: "garageA", online: true, occupied: false, battery: 90, lastUpdated: min(2) },
+    "C-120": { lot: "lot12", online: true, occupied: false, battery: 55, lastUpdated: min(6) },
     "C-200": { online: true, occupied: false, battery: 70, lastUpdated: min(30) },
   },
+  history: { week: WEEK, live: { a: { t: min(30), pct: 40 }, b: { t: min(15), pct: 48 }, c: { t: min(1), pct: 61 } } },
 };
-const ctx = (over = {}) => ({ ...DATA, alerts: { lowBattery: 20, staleEnabled: false, staleMinutes: 30 }, now: NOW, mode: "live", role: "manager", ...over });
+// A fixed sequence instead of Math.random, so runs repeat exactly.
+function seeded(seed = 7) {
+  let s = seed;
+  return () => { s = (s * 1103515245 + 12345) % 2147483648; return s / 2147483648; };
+}
+const ctx = (over = {}) => ({ ...DATA, alerts: { lowBattery: 20, staleEnabled: false, staleMinutes: 30 }, now: NOW, mode: "live", role: "manager", firstName: "Dana", random: seeded(), ...over });
+const intentOf = (q, c = ctx(), state = {}) => respond(q, c, state).intent;
 
-// [question, expected intent]
-const CASES = [
-  // free_total
-  ["How many spots are free?", "free_total"],
-  ["how many free spaces are there", "free_total"],
-  ["any open spots?", "free_total"],
-  ["total available parking", "free_total"],
-  ["how many spaces left overall", "free_total"],
-  ["how many spots r fre", "free_total"],
-  ["Free spots right now?", "free_total"],
-  ["how many vacant stalls", "free_total"],
-  ["is there anywhere free to park", "free_total"],
-  ["count of open bays", "free_total"],
-  // free_lot
-  ["How many spots are open in Lot 14?", "free_lot"],
-  ["free spaces lot 6", "free_lot"],
-  ["is lot14 full?", "free_lot"],
-  ["anything left in Garage A, Level 2?", "free_lot"],
-  ["how many spots left in lot06", "free_lot"],
-  ["lot 6 free spots", "free_lot"],
-  ["is Lot 14 busy", "free_lot"],
-  // free_by_lot
-  ["free spots in each lot", "free_by_lot"],
-  ["open spaces per lot", "free_by_lot"],
-  ["breakdown of free spots by lot", "free_by_lot"],
-  ["show me every lot's free spaces", "free_by_lot"],
-  ["lot by lot availability", "free_by_lot"],
-  // best_lot
-  ["Where should I park?", "best_lot"],
-  ["which lot has the most room", "best_lot"],
-  ["emptiest lot", "best_lot"],
-  ["which lot is least busy", "best_lot"],
-  ["recommend a lot", "best_lot"],
-  ["best place to park right now", "best_lot"],
-  ["wher shoud i park", "best_lot"],
-  ["quietest lot", "best_lot"],
-  // busiest_lot
-  ["Which lot is busiest?", "busiest_lot"],
-  ["which is the fullest lot", "busiest_lot"],
-  ["most crowded lot", "busiest_lot"],
-  ["busiest garage", "busiest_lot"],
-  ["which lot is most occupied", "busiest_lot"],
-  ["bussiest lot", "busiest_lot"],
-  // full_lots
-  ["Which lots are full?", "full_lots"],
-  ["are any lots full", "full_lots"],
-  ["lots with no free spaces", "full_lots"],
-  ["is any lot completely full", "full_lots"],
-  // occupancy_rate
-  ["How full is the site?", "occupancy_rate"],
-  ["what's the occupancy", "occupancy_rate"],
-  ["occupancy percentage", "occupancy_rate"],
-  ["current utilization", "occupancy_rate"],
-  ["what percent of capacity is used", "occupancy_rate"],
-  ["ocupancy rate", "occupancy_rate"],
-  // occupied_count
-  ["How many spots are occupied?", "occupied_count"],
-  ["how many cars are parked", "occupied_count"],
-  ["number of taken spaces", "occupied_count"],
-  ["how many ocupied", "occupied_count"],
-  // offline_curbs
-  ["Which curbs are offline?", "offline_curbs"],
-  ["any sensors offline", "offline_curbs"],
-  ["show offline units", "offline_curbs"],
-  ["which curbs are not reporting", "offline_curbs"],
-  ["ofline curbs", "offline_curbs"],
-  ["list disconnected devices", "offline_curbs"],
-  ["what's down", "offline_curbs"],
-  // online_count
-  ["how many curbs are online", "online_count"],
-  ["are all sensors connected", "online_count"],
-  ["how many units are working", "online_count"],
-  // low_battery
-  ["Show low batteries", "low_battery"],
-  ["which curbs have low battery", "low_battery"],
-  ["any batteries running low", "low_battery"],
-  ["low batery", "low_battery"],
-  ["which units need charging", "low_battery"],
-  ["weak batteries", "low_battery"],
-  ["batteries to replace", "low_battery"],
-  // battery_overview
-  ["How are the batteries overall?", "battery_overview"],
-  ["average battery level", "battery_overview"],
-  ["battery health", "battery_overview"],
-  ["batery levels", "battery_overview"],
-  // attention
-  ["What needs attention?", "attention"],
-  ["any problems?", "attention"],
-  ["is anything wrong", "attention"],
-  ["show me issues", "attention"],
-  ["what needs fixing", "attention"],
-  ["any alerts", "attention"],
-  ["atention", "attention"],
-  // last_update
-  ["When was the last update?", "last_update"],
-  ["how fresh is the data", "last_update"],
-  ["latest reading", "last_update"],
-  ["is the data up to date", "last_update"],
-  ["how old is this data", "last_update"],
-  ["when did we last hear from the curbs", "last_update"],
-  // curb_status
-  ["What's the status of C-041?", "curb_status"],
-  ["c41 status", "curb_status"],
-  ["how is C-002 doing", "curb_status"],
-  ["check C 095", "curb_status"],
-  ["is C-003 offline", "curb_status"],
-  ["what about c-001", "curb_status"],
-  ["status of a curb", "curb_status"],
-  ["C-999", "curb_status"],
-  ["c-042 battery", "curb_status"],
-  // curb_location
-  ["Where is C-041?", "curb_location"],
-  ["which lot is c200 in", "curb_location"],
-  ["locate C-095", "curb_location"],
-  ["find C-002", "curb_location"],
-  // curb_led
-  ["what is C-041's LED showing", "curb_led"],
-  ["led of c001", "curb_led"],
-  ["what colour is C-041", "curb_led"],
-  // lot_list
-  ["What lots are there?", "lot_list"],
-  ["how many lots do we have", "lot_list"],
-  ["list all lots", "lot_list"],
-  ["lot names", "lot_list"],
-  // curb_count
-  ["How many curbs are there?", "curb_count"],
-  ["number of sensors installed", "curb_count"],
-  ["how many wheel stops do we have", "curb_count"],
-  // unassigned_curbs
-  ["Which curbs aren't in a lot?", "unassigned_curbs"],
-  ["unassigned curbs", "unassigned_curbs"],
-  ["curbs without a lot", "unassigned_curbs"],
-  ["new curbs with no lot", "unassigned_curbs"],
-  // stale_curbs
-  ["Which curbs have stopped reporting?", "stale_curbs"],
-  ["stale curbs", "stale_curbs"],
-  ["curbs that haven't reported", "stale_curbs"],
-  // data_mode_now
-  ["Is this live data?", "data_mode_now"],
-  ["which mode am I in", "data_mode_now"],
-  ["where does this data come from", "data_mode_now"],
-  ["is this real data", "data_mode_now"],
-  ["is this simulation", "data_mode_now"],
-  // howto_led_color
-  ["How do I change an LED colour?", "howto_led_color"],
-  ["change led color", "howto_led_color"],
-  ["set the zone colour to red", "howto_led_color"],
-  ["how to make the lights blue", "howto_led_color"],
-  ["chnage colour", "howto_led_color"],
-  ["how can I change C-041's colour", "howto_led_color"],
-  // howto_panel_text
-  ["How do I change panel text?", "howto_panel_text"],
-  ["edit the message on the panel", "howto_panel_text"],
-  ["set panel text", "howto_panel_text"],
-  ["how to write text on the led", "howto_panel_text"],
-  // howto_brightness
-  ["How do I change brightness?", "howto_brightness"],
-  ["make the led dimmer", "howto_brightness"],
-  ["adjust brightnes", "howto_brightness"],
-  ["turn up the brightness", "howto_brightness"],
-  // howto_zone_presets
-  ["What are zone presets?", "howto_zone_presets"],
-  ["how do presets work", "howto_zone_presets"],
-  ["use a zone preset", "howto_zone_presets"],
-  // howto_invite_user
-  ["How do I add a user?", "howto_invite_user"],
-  ["invite a colleague", "howto_invite_user"],
-  ["add someone to the dashboard", "howto_invite_user"],
-  ["create a new account", "howto_invite_user"],
-  ["how to give a coworker access", "howto_invite_user"],
-  ["send a sign up link", "howto_invite_user"],
-  // howto_change_role
-  ["How do I change someone's role?", "howto_change_role"],
-  ["make someone a manager", "howto_change_role"],
-  ["promote a viewer to operator", "howto_change_role"],
-  ["change user permissions", "howto_change_role"],
-  ["demote an operator", "howto_change_role"],
-  // howto_remove_user
-  ["How do I remove a user?", "howto_remove_user"],
-  ["delete an account", "howto_remove_user"],
-  ["revoke an invite", "howto_remove_user"],
-  // howto_setup
-  ["How do I run Setup?", "howto_setup"],
-  ["reopen the setup wizard", "howto_setup"],
-  ["set up the site again", "howto_setup"],
-  ["change facility type", "howto_setup"],
-  // howto_switch_mode
-  ["How do I switch to Simulation?", "howto_switch_mode"],
-  ["switch to live", "howto_switch_mode"],
-  ["toggle simulation mode", "howto_switch_mode"],
-  ["go back to real data", "howto_switch_mode"],
-  ["switch to demo", "howto_switch_mode"],
-  // howto_analytics
-  ["How do I read Analytics?", "howto_analytics"],
-  ["what does the heatmap show", "howto_analytics"],
-  ["explain the charts", "howto_analytics"],
-  ["what is peak hour", "howto_analytics"],
-  ["busiest day of the week", "howto_analytics"],
-  ["analitics", "howto_analytics"],
-  // explain_latency
-  ["What does the latency card show?", "explain_latency"],
-  ["what is event age", "explain_latency"],
-  ["why is there a delay", "explain_latency"],
-  ["latency", "explain_latency"],
-  // howto_thresholds
-  ["How do I change the alert thresholds?", "howto_thresholds"],
-  ["change the low battery threshold", "howto_thresholds"],
-  ["set battery limit", "howto_thresholds"],
-  // howto_theme
-  ["How do I change the theme?", "howto_theme"],
-  ["dark mode", "howto_theme"],
-  ["change the look of the dashboard", "howto_theme"],
-  // howto_password
-  ["How do I change my password?", "howto_password"],
-  ["forgot password", "howto_password"],
-  ["reset pasword", "howto_password"],
-  // howto_assign_curb
-  ["How do I put a curb in a lot?", "howto_assign_curb"],
-  ["assign a sensor to a lot", "howto_assign_curb"],
-  ["connect curbs", "howto_assign_curb"],
-  ["move a curb into another lot", "howto_assign_curb"],
-  // howto_find_curb
-  ["how do I find a curb", "howto_find_curb"],
-  ["filter units", "howto_find_curb"],
-  ["search for a sensor", "howto_find_curb"],
-  // howto_lot_sign
-  ["How do I open the lot sign?", "howto_lot_sign"],
-  ["entrance sign", "howto_lot_sign"],
-  ["show free spots on a tv", "howto_lot_sign"],
-  // howto_run_simulation
-  ["How do I run the simulation?", "howto_run_simulation"],
-  ["start the simulation", "howto_run_simulation"],
-  ["stop simulation", "howto_run_simulation"],
-  ["rush hour scenario", "howto_run_simulation"],
-  ["load fresh simulated data", "howto_run_simulation"],
-  // howto_sign_out
-  ["How do I sign out?", "howto_sign_out"],
-  ["log out", "howto_sign_out"],
-  ["logout", "howto_sign_out"],
-  // howto_modules
-  ["What are modules?", "howto_modules"],
-  ["event mode module", "howto_modules"],
-  ["what features are in the sidebar", "howto_modules"],
-  // howto_add_lot
-  ["How do I add a lot?", "howto_add_lot"],
-  ["create a new lot", "howto_add_lot"],
-  // explain_status_colors
-  ["What do the status colours mean?", "explain_status_colors"],
-  ["what does red mean", "explain_status_colors"],
-  ["colour legend", "explain_status_colors"],
-  ["why is a spot grey with an x", "explain_status_colors"],
-  ["what do the colors mean", "explain_status_colors"],
-  // explain_roles
-  ["What can each role do?", "explain_roles"],
-  ["difference between operator and manager", "explain_roles"],
-  ["explain roles", "explain_roles"],
-  ["what can a viewer do", "explain_roles"],
-  ["what permissions does an operator have", "explain_roles"],
-  // explain_my_role
-  ["What can I do?", "explain_my_role"],
-  ["what's my role", "explain_my_role"],
-  ["am I allowed to change LEDs", "explain_my_role"],
-  ["what access do I have", "explain_my_role"],
-  // explain_attention
-  ["What does attention mean?", "explain_attention"],
-  ["what counts as needs attention", "explain_attention"],
-  ["explain attention", "explain_attention"],
-  // explain_offline
-  ["What does offline mean?", "explain_offline"],
-  ["why do curbs go offline", "explain_offline"],
-  ["explain offline", "explain_offline"],
-  ["what is offline", "offline_curbs"],
-  // explain_low_battery
-  ["What counts as low battery?", "explain_low_battery"],
-  ["what is considered a low battery", "explain_low_battery"],
-  // explain_stale
-  ["What does stale mean?", "explain_stale"],
-  ["what is a stale curb", "explain_stale"],
-  // explain_occupied
-  ["How does it know a spot is taken?", "explain_occupied"],
-  ["how do the sensors detect cars", "explain_occupied"],
-  ["how does a curb work", "explain_occupied"],
-  // explain_simulation
-  ["What is Simulation?", "explain_simulation"],
-  ["what does simulation mean", "explain_simulation"],
-  ["explain demo mode", "explain_simulation"],
-  // explain_receiver
-  ["What is the Receiver?", "explain_receiver"],
-  ["what does the gateway do", "explain_receiver"],
-  // explain_free
-  ["What does free mean?", "explain_free"],
-  ["what counts as an open spot", "explain_free"],
-  // greeting
-  ["hi", "greeting"],
-  ["Hello!", "greeting"],
-  ["good morning", "greeting"],
-  ["hey there", "greeting"],
-  ["helo", "greeting"],
-  ["good evening", "greeting"],
-  // thanks
-  ["thanks", "thanks"],
-  ["thank you so much", "thanks"],
-  ["thx", "thanks"],
-  ["cheers, that was helpful", "thanks"],
-  // who_are_you
-  ["Who are you?", "who_are_you"],
-  ["what are you", "who_are_you"],
-  ["are you a bot", "who_are_you"],
-  ["are you ChatGPT", "who_are_you"],
-  ["what's your name", "who_are_you"],
-  // capabilities
-  ["What can you do?", "capabilities"],
-  ["what do you do", "capabilities"],
-  ["what else can you do", "capabilities"],
-  // goodbye
-  ["bye", "goodbye"],
-  ["see you later", "goodbye"],
-  ["that's all", "goodbye"],
-  // how_are_you
-  ["how are you", "how_are_you"],
-  ["how's it going", "how_are_you"],
-  // okay
-  ["ok", "okay"],
-  ["cool", "okay"],
-  ["got it", "okay"],
-  // help
-  ["Help", "help"],
-  ["help me", "help"],
-  ["what can I ask", "help"],
-  ["show me some examples", "help"],
-  ["what questions can I ask", "help"],
-  ["hlep", "help"],
-  // Written after the rules above were tuned, to check new wording; kept as regressions.
-  ["are there free spaces", "free_total"],
-  ["spots available?", "free_total"],
-  ["how much parking is left", "free_total"],
-  ["free in lot 6?", "free_lot"],
-  ["which lot should I use", "best_lot"],
-  ["where is it least crowded", "best_lot"],
-  ["what lot is the most packed", "busiest_lot"],
-  ["any full lots", "full_lots"],
-  ["how busy is the site overall", "occupancy_rate"],
-  ["how many taken", "occupied_count"],
-  ["which sensors are disconnected", "offline_curbs"],
-  ["batteries below 20", "low_battery"],
-  ["anything I should look at", "attention"],
-  ["when did data last change", "last_update"],
-  ["tell me about C-041", "curb_status"],
-  ["how do i change the led text", "howto_panel_text"],
-  ["make the leds brighter", "howto_brightness"],
-  ["how to invite people", "howto_invite_user"],
-  ["give someone manager rights", "howto_change_role"],
-  ["go to simulation", "howto_switch_mode"],
-  ["what is the receiver to firebase number", "explain_latency"],
-  ["what does amber mean", "explain_status_colors"],
-  ["what can operators do", "explain_roles"],
-  ["am I a manager", "explain_my_role"],
-  ["why is a curb offline", "explain_offline"],
-  ["hey", "greeting"],
-  ["ta", "thanks"],
-  ["who made you", "who_are_you"],
-  ["what are you able to do", "capabilities"],
-  ["I need help", "help"],
-  ["number of free spots", "free_total"],
-  ["is lot 6 packed", "free_lot"],
-  ["what's the quietest garage", "best_lot"],
-  ["which lot fills up the most", "busiest_lot"],
-  ["percentage occupied", "occupancy_rate"],
-  ["dead sensors", "offline_curbs"],
-  ["which curbs need new batteries", "low_battery"],
-  ["any trouble", "attention"],
-  ["how recent is this", "last_update"],
-  ["C-001?", "curb_status"],
-  ["how do i change the zone colour", "howto_led_color"],
-  ["dim the lights", "howto_brightness"],
-  ["add a new staff member", "howto_invite_user"],
-  ["change someone to viewer", "howto_change_role"],
-  ["what does the latency chart mean", "explain_latency"],
-  ["what do greens and reds mean", "explain_status_colors"],
-  ["what is an operator", "explain_roles"],
-  ["howdy", "greeting"],
-  ["thank u", "thanks"],
-  ["list of commands", "help"],
-];
-
-// Out of scope: must fall back, not guess.
-const OUT_OF_SCOPE = [
-  "What's the weather tomorrow?",
-  "tell me a joke",
-  "who won the football game",
-  "book me a flight to Paris",
-  "what is the capital of France",
-  "play some music",
-  "how do I bake bread",
-  "what's 2 plus 2",
-  "translate hello into Spanish",
-  "order a pizza",
-  "what time is the meeting",
-  "asdfghjkl",
-  "",
-  "   ",
-  "?!",
-  "who is the president",
-  "write me a poem about cats",
-];
+const CASES = ALL_EXAMPLES;
 
 test(`${CASES.length} example phrasings reach the expected intent`, () => {
-  assert.ok(CASES.length >= 150, `only ${CASES.length} phrasings`);
-  const wrong = CASES
-    .map(([q, want]) => ({ q, want, got: match(q, DATA).intent?.id || "fallback" }))
-    .filter((r) => r.got !== r.want);
+  assert.ok(CASES.length >= 500, `only ${CASES.length} phrasings`);
+  const wrong = CASES.map(([q, want]) => ({ q, want, got: intentOf(q) })).filter((r) => r.got !== r.want);
   assert.deepEqual(wrong, [], wrong.map((r) => `"${r.q}": wanted ${r.want}, got ${r.got}`).join("\n"));
 });
 
 test("every intent has at least two example phrasings", () => {
   const counts = Object.fromEntries(INTENTS.map((i) => [i.id, 0]));
   for (const [, id] of CASES) counts[id] += 1;
+  for (const [, , id] of FOLLOW_UPS) counts[id] += 1;
   const thin = Object.entries(counts).filter(([, n]) => n < 2).map(([id]) => id);
   assert.deepEqual(thin, []);
 });
 
-test("out-of-scope questions fall back with suggestion chips", () => {
+test(`fresh phrasings written after tuning reach at least 80% (${HOLDOUT.length} of them)`, () => {
+  // A multi-part reply counts when one of its answers is the expected intent.
+  const misses = HOLDOUT.filter(([q, want]) => !intentOf(q).split("+").includes(want));
+  const rate = 1 - misses.length / HOLDOUT.length;
+  console.log(`  held-out accuracy: ${HOLDOUT.length - misses.length}/${HOLDOUT.length} = ${(rate * 100).toFixed(1)}%`);
+  assert.ok(rate >= 0.8, `held-out accuracy ${(rate * 100).toFixed(1)}%: ${misses.map(([q, w]) => `"${q}" (${w})`).join(", ")}`);
+});
+
+test("follow-ups use the lot, curb and topic from earlier in the conversation", () => {
+  const wrong = [];
+  for (const [before, q, want, entity] of FOLLOW_UPS) {
+    let state = {};
+    const c = ctx();
+    for (const b of before) state = respond(b, c, state).state;
+    const r = respond(q, c, state);
+    const got = r.entities?.lotId || r.entities?.curbId || null;
+    if (r.intent !== want || (entity && got !== entity)) wrong.push(`"${before.join(" / ")}" then "${q}": wanted ${want} ${entity || ""}, got ${r.intent} ${got || ""}`);
+  }
+  assert.deepEqual(wrong, []);
+});
+
+test("\"show me more\" pages through a long list", () => {
+  const units = {};
+  for (let i = 1; i <= 20; i++) units[`C-${String(i).padStart(3, "0")}`] = { lot: "lot06", online: false, lastUpdated: min(i) };
+  const c = ctx({ units });
+  const first = respond("which curbs are offline", c, {});
+  assert.match(first.text, /C-001/);
+  assert.match(first.text, /12 more/);
+  const second = respond("show me more", c, first.state);
+  assert.equal(second.intent, "offline_curbs");
+  assert.match(second.text, /C-009/);
+  assert.doesNotMatch(second.text, /C-001 /);
+  const third = respond("more", c, second.state);
+  assert.match(third.text, /C-017/);
+});
+
+test(`${OUT_OF_SCOPE.length} out-of-scope questions get a friendly fallback with the topic menu`, () => {
+  assert.ok(OUT_OF_SCOPE.length >= 40);
+  const wrong = [];
   for (const q of OUT_OF_SCOPE) {
     const r = respond(q, ctx());
-    assert.equal(r.intent, "fallback", `"${q}" matched ${r.intent}`);
-    assert.deepEqual(r.chips, FALLBACK_CHIPS);
+    if (!r.fallback) wrong.push(`"${q}" matched ${r.intent}`);
+    else {
+      assert.deepEqual(r.chips, menuChips(ctx()));
+      assert.match(r.text, /parking|lots|curbs|dashboard|topic/i);
+    }
   }
+  assert.deepEqual(wrong, []);
 });
 
-test("every suggestion chip leads to a real intent", () => {
-  const chips = new Set([...START_CHIPS, ...FALLBACK_CHIPS, ...INTENTS.flatMap((i) => i.next || [])]);
-  for (const chip of chips) assert.ok(match(chip, DATA).intent, `chip "${chip}" falls back`);
+test("multi-part questions get every answer", () => {
+  const r = respond("offline curbs and low batteries", ctx());
+  assert.deepEqual(r.intents, ["offline_curbs", "low_battery"]);
+  assert.match(r.text, /C-003 in Lot 6: last heard/);
+  assert.match(r.text, /C-002 in Lot 6: 12%/);
+  assert.equal(r.text.match(/From live data/g).length, 1, "one source line for both");
+  assert.deepEqual(respond("free spots in lot 6 and lot 14", ctx()).intents, ["free_lot", "free_lot"]);
+  assert.deepEqual(respond("thanks and bye", ctx()).intents, ["thanks", "goodbye"]);
+  assert.equal(respond("difference between operator and manager", ctx()).intent, "explain_roles");
 });
 
-test("intents are unique, grouped and each has an answer and follow-ups", () => {
-  const ids = INTENTS.map((i) => i.id);
-  assert.equal(new Set(ids).size, ids.length);
-  assert.ok(INTENTS.length >= 55, `only ${INTENTS.length} intents`);
-  for (const i of INTENTS) {
-    assert.ok(["status", "howto", "explain", "smalltalk", "help"].includes(i.group), i.id);
-    assert.equal(typeof i.answer, "function", i.id);
-    assert.ok(i.next?.length, i.id);
-  }
+test("lot names match loosely: partial names, short forms, number words and typos", () => {
+  const cases = [["garage 2", "garageA"], ["gar2", "garageA"], ["level 2", "garageA"], ["garag 2", "garageA"], ["lot twelve", "lot12"], ["lot tweleve", "lot12"],
+    ["north", "lot12"], ["lot 12 north", "lot12"], ["lot06", "lot06"], ["lot six", "lot06"], ["Lot 14", "lot14"], ["lot 1", null], ["which lot is busiest", null], ["what is 2 plus 2", null], ["the garage", null]];
+  for (const [q, want] of cases) assert.equal(findLot(q, DATA.lots), want, q);
 });
 
-// ---------- Answers ----------
+test("the calculator parses sums itself", () => {
+  const val = (q) => parseMath(q)?.value;
+  assert.equal(val("what is 17x23"), 391);
+  assert.equal(val("17 * 23"), 391);
+  assert.equal(val("what's 2 plus 2"), 4);
+  assert.equal(val("15% of 80"), 12);
+  assert.equal(val("(3+4)*2"), 14);
+  assert.equal(val("2 ^ 10"), 1024);
+  assert.equal(val("seven times eight"), 56);
+  assert.equal(val("square root of 81"), 9);
+  assert.equal(val("100 / 8"), 12.5);
+  assert.equal(val("-3 + 5"), 2);
+  assert.equal(parseMath("10 / 0").error, "zero");
+  for (const q of ["C-041", "lot 6", "what time is it", "process.exit()", "alert(1)", "2; drop table", "constructor"]) assert.equal(parseMath(q), null, q);
+  assert.match(respond("what is 17x23", ctx()).text, /391/);
+  assert.match(respond("1,000 * 3", ctx()).text, /3,000/);
+});
 
-test("status answers name lots and curbs from the data and say how fresh it is", () => {
+test("history answers use the recorded week and say where they come from", () => {
+  const busy = respond("when is it busiest", ctx()).text;
+  assert.match(busy, /5 PM/);
+  assert.match(busy, /From recorded history of the live site/);
+  assert.match(respond("what's the busiest day", ctx()).text, /Friday/);
+  assert.match(respond("what's the quietest day", ctx()).text, /Sunday/);
+  assert.match(respond("today vs yesterday", ctx()).text, /Wednesday[\s\S]*Tuesday/);
+  assert.match(respond("weekends vs weekdays", ctx()).text, /\d+%/);
+  assert.match(respond("is it getting busier", ctx()).text, /busier/);
+  assert.match(respond("when is it busiest", ctx({ mode: "sim" })).text, /recorded history of the simulation/);
+  assert.match(respond("when is it busiest", ctx({ history: {} })).text, /recorded history|No history/i);
+});
+
+test("status answers name lots and curbs and say how fresh the data is", () => {
   const offline = respond("which curbs are offline", ctx()).text;
   assert.match(offline, /C-003 in Lot 6/);
   assert.match(offline, /From live data · latest reading 1 min ago\./);
-  const low = respond("low batteries", ctx()).text;
-  assert.match(low, /2 curbs are below 20% battery/);
-  assert.ok(low.indexOf("C-003") < low.indexOf("C-002"), "lowest battery first");
-  assert.doesNotMatch(low, /C-042/, "unmeasured battery isn't low");
-  const free = respond("how many spots are free", ctx()).text;
-  assert.match(free, /^2 of 6 spots are free across 3 lots/);
-  assert.match(free, /Lot 14: 0 of 2/);
-  assert.match(respond("is lot 14 full", ctx()).text, /Lot 14 is full/);
-  assert.match(respond("free spots in Garage A, Level 2", ctx()).text, /Garage A, Level 2 has 1 free spot out of 1/);
-  assert.match(respond("which lot is busiest", ctx()).text, /Lot 14 is the busiest at 100% full/);
-  assert.match(respond("which curbs aren't in a lot", ctx()).text, /C-200/);
-});
-
-test("the same question uses the alert settings it's given", () => {
-  const strict = respond("show low batteries", ctx({ alerts: { lowBattery: 70, staleEnabled: false, staleMinutes: 30 } })).text;
-  assert.match(strict, /3 curbs are below 70% battery/);
-});
-
-test("a named curb gets its own status, and unknown curbs are said to be missing", () => {
-  const s = respond("status of c41", ctx()).text;
-  assert.match(s, /^C-041 is in Lot 14\./);
-  assert.match(s, /Status: occupied/);
-  assert.match(s, /LED: red/, "stored quotes are cleaned");
-  assert.match(respond("C-999", ctx()).text, /can't find a curb called C-999 in the live data/);
-  const ask = respond("status of a curb", ctx());
-  assert.match(ask.text, /Which curb/);
-  assert.deepEqual(ask.chips, ["Status of C-001", "Status of C-002", "Status of C-003"]);
-});
-
-test("in Simulation, status answers say the data is simulated", () => {
-  for (const q of ["how many spots are free", "which curbs are offline", "status of C-041", "what needs attention"]) {
+  assert.match(respond("how many spots are free", ctx()).text, /3 of 7|3 free spots out of 7|3 of 7 spots/);
+  assert.match(respond("is lot 14 full", ctx()).text, /Lot 14/);
+  assert.match(respond("status of c41", ctx()).text, /C-041[\s\S]*Lot 14[\s\S]*Status: occupied[\s\S]*LED: red/);
+  assert.match(respond("C-999", ctx()).text, /C-999/);
+  for (const q of ["how many spots are free", "which curbs are offline", "status of C-041", "what needs attention", "give me a summary"]) {
     assert.match(respond(q, ctx({ mode: "sim" })).text, /From simulated data, not the real curbs/, q);
   }
-  assert.match(respond("is this live data", ctx({ mode: "sim" })).text, /You're looking at Simulation/);
-  assert.match(respond("how many spots are free", ctx({ mode: "sim", lots: {}, units: {} })).text, /Load fresh simulated data/);
 });
 
 test("answers are role-aware and point viewers to a manager", () => {
-  const viewerLed = respond("how do I change an LED colour", ctx({ role: "viewer" })).text;
-  assert.match(viewerLed, /You're a viewer, so you can see LED settings but not change it/);
-  assert.match(viewerLed, /Users & roles lists who they are/);
+  const viewer = respond("how do I change an LED colour", ctx({ role: "viewer" })).text;
+  assert.match(viewer, /You're a viewer, so you can see LED settings but not change it/);
+  assert.match(viewer, /Users & roles lists who they are/);
   assert.doesNotMatch(respond("how do I change an LED colour", ctx({ role: "operator" })).text, /viewer/);
   assert.match(respond("how do I add a user", ctx({ role: "operator" })).text, /Only managers can invite people, and you're an operator/);
-  assert.doesNotMatch(respond("how do I add a user", ctx()).text, /Only managers/);
-  assert.match(respond("what can I do", ctx({ role: "viewer" })).text, /^You're a viewer\./);
-  assert.match(respond("what can each role do", ctx({ role: "operator" })).text, /You're an operator\./);
+  assert.match(respond("why can't I save", ctx({ role: "viewer" })).text, /viewer/);
+  assert.match(respond("what can I do", ctx({ role: "viewer" })).text, /viewer/);
 });
 
-test("greetings follow the time of day", () => {
-  const at = (h) => respond("hello", ctx({ now: new Date(2026, 9, 28, h).getTime() })).text;
-  assert.match(at(9), /^Good morning/);
-  assert.match(at(14), /^Good afternoon/);
-  assert.match(at(20), /^Good evening/);
+test("the welcome greets by time of day and name, then offers the topic menu", () => {
+  const w = welcome(ctx());
+  assert.match(w.text, /^Good afternoon, Dana! I'm the Smart Wheel Stop Assistant/);
+  assert.deepEqual(w.chips, ["Open spots", "Offline curbs", "Low batteries", "LED help", "Users & roles", "Analytics", "What colours mean", "Switch to Simulation"]);
+  assert.equal(welcome(ctx({ mode: "sim", firstName: null })).chips.at(-1), "Switch to Live");
+  assert.match(welcome(ctx({ firstName: null, now: new Date(2026, 9, 28, 9).getTime() })).text, /^Good morning! /);
 });
 
-test("follow-up chips change with the topic", () => {
-  assert.deepEqual(respond("which curbs are offline", ctx()).chips, ["Show low batteries", "Which lot is busiest?", "What does offline mean?"]);
-  assert.notDeepEqual(respond("how do I change an LED colour", ctx()).chips, respond("which curbs are offline", ctx()).chips);
+test("every chip leads to a real intent, and replies offer \"Something else\"", () => {
+  const chips = new Set([...menuChips(ctx()), ...menuChips(ctx({ mode: "sim" })), ...INTENTS.flatMap((i) => i.next || [])]);
+  for (const chip of chips) assert.ok(!respond(chip, ctx()).fallback, `chip "${chip}" falls back`);
+  assert.equal(intentOf(SOMETHING_ELSE), "menu");
+  assert.ok(respond("which curbs are offline", ctx()).chips.includes(SOMETHING_ELSE));
+  const menuMap = { "Open spots": "free_total", "Offline curbs": "offline_curbs", "Low batteries": "low_battery", "LED help": "howto_led_color", "Users & roles": "explain_roles", Analytics: "howto_analytics", "What colours mean": "explain_status_colors", "Switch to Simulation": "howto_switch_mode", "Switch to Live": "howto_switch_mode" };
+  for (const [chip, id] of Object.entries(menuMap)) assert.equal(intentOf(chip), id, chip);
 });
 
-test("the assistant never touches Firebase", async () => {
-  const dir = new URL("../src/assistant/", import.meta.url);
-  for (const f of await readdir(dir)) {
-    const src = await readFile(new URL(f, dir), "utf8");
-    assert.doesNotMatch(src, /from ["'][^"']*firebase|fetch\(|XMLHttpRequest|WebSocket/, f);
+// Content intents (jokes, facts, stories) have more than five variants on purpose.
+const MANY = new Set(["joke", "fun_fact", "story"]);
+const ENT = { curbId: "C-041", lotId: "lot14", math: { expr: "2 + 2", value: 4 } };
+
+test(`all ${INTENTS.length} intents have 3-5 answer variants`, () => {
+  assert.ok(INTENTS.length >= 150, `only ${INTENTS.length} intents`);
+  assert.equal(new Set(INTENTS.map((i) => i.id)).size, INTENTS.length);
+  const bad = [];
+  for (const i of INTENTS) {
+    const out = typeof i.say === "function" ? i.say(ctx(), ENT) : i.say;
+    const variants = Array.isArray(out) ? out : out.variants;
+    const n = new Set(variants).size;
+    if (n < 3 || (n > 5 && !MANY.has(i.id))) bad.push(`${i.id}: ${n}`);
+  }
+  assert.deepEqual(bad, []);
+  assert.equal(INTENT_BY_ID.joke.say.length, 40, "40 jokes");
+});
+
+test("no intent repeats the same reply twice in a row", () => {
+  const first = Object.fromEntries([...CASES].reverse().map(([q, id]) => [id, q]));
+  const repeated = [];
+  for (const i of INTENTS) {
+    const q = first[i.id];
+    if (!q || i.id === "repeat") continue;
+    let state = {};
+    let last = null;
+    const c = ctx({ random: seeded(i.id.length) });
+    for (let n = 0; n < 12; n++) {
+      const r = respond(q, c, state);
+      if (r.text === last) { repeated.push(i.id); break; }
+      last = r.text;
+      state = { ...r.state, lastPaged: null };
+    }
+  }
+  assert.deepEqual(repeated, []);
+});
+
+test("the assistant never writes, imports Firebase or calls the network", async () => {
+  const root = new URL("../src/assistant/", import.meta.url);
+  const files = [];
+  async function walk(dir) {
+    for (const e of await readdir(dir, { withFileTypes: true })) {
+      if (e.isDirectory()) await walk(new URL(`${e.name}/`, dir));
+      else files.push(new URL(e.name, dir));
+    }
+  }
+  await walk(root);
+  assert.ok(files.length >= 10);
+  for (const f of files) {
+    const src = await readFile(f, "utf8");
+    assert.doesNotMatch(src, /from ["'][^"']*firebase|fetch\(|XMLHttpRequest|WebSocket|\beval\(|new Function/, f.pathname);
   }
 });

@@ -18,7 +18,7 @@ const BUILD_CMD = { real: "npm run build", demo: "npm run build:demo", console: 
 // Simulation, Landing). None of it may reach the console bundle.
 const DASHBOARD_MARKERS = [
   "Open lot sign",
-  "Sorry, I didn't catch that",
+  "Smart Wheel Stop Assistant",
   "Pick a lot, then a curb to see its status",
   "Load fresh simulated data",
   "Tell us about your parking",
