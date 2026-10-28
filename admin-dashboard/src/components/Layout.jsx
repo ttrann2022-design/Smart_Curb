@@ -4,14 +4,13 @@ import { onAuthStateChanged, signOut } from "firebase/auth";
 import { ref, get, set, update, remove, onValue, serverTimestamp } from "firebase/database";
 import { auth, database, emailKey } from "../firebase";
 import { c, mono } from "../theme";
-import logo from "../assets/smartcurb-logo.jpg";
 import { DEMO_BUILD, useDataMode } from "../dataMode";
 import { MODULES, enabledModules, useSiteConfig } from "../site";
 import { applyTheme, clearTheme, normalizeTheme } from "../themes";
-import { useLeads } from "../leads";
 import { stopSimulation, watchSimulation } from "../demo/simulator";
 import DataModeSwitch from "./DataModeSwitch";
 import SimBanner from "./SimBanner";
+import { Brand, FullScreen } from "./Brand";
 import Icon from "./Icon";
 import { Button } from "./ui";
 
@@ -22,33 +21,9 @@ const navItems = [
   { label: "Assistant", to: "/assistant", icon: "assistant" },
   { label: "Analytics", to: "/analytics", icon: "analytics" },
   { label: "Users & roles", to: "/users", icon: "users" },
-  { label: "Requests", to: "/requests", icon: "inbox", managerOnly: true },
   { label: "Simulation", to: "/simulation", icon: "simulation", simOnly: true },
   { label: "Settings", to: "/settings", icon: "settings" },
 ];
-
-function Brand({ size = 40, sub = "ADMIN CONSOLE" }) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-      <img src={logo} alt="" width={size} height={size} style={{ width: size, height: size, borderRadius: 8, objectFit: "cover", flexShrink: 0 }} />
-      <div style={{ minWidth: 0 }}>
-        <div style={{ fontFamily: mono, fontSize: 12.5, fontWeight: 600, letterSpacing: 0.3, whiteSpace: "nowrap" }}>SMART WHEEL STOP</div>
-        <div style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: 1.4, color: c.dim }}>{sub}</div>
-      </div>
-    </div>
-  );
-}
-
-function FullScreen({ children }) {
-  return (
-    <div style={{ minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", background: c.bg, padding: 24 }}>
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 18, textAlign: "center", maxWidth: 380 }}>
-        <img src={logo} alt="Smart Wheel Stop" width={64} height={64} style={{ width: 64, height: 64, borderRadius: 12, objectFit: "cover" }} />
-        {children}
-      </div>
-    </div>
-  );
-}
 
 function Layout() {
   const [userEmail, setUserEmail] = useState("");
@@ -80,9 +55,6 @@ function Layout() {
   const theme = themeOverride ?? (siteConfig.loaded ? normalizeTheme(siteConfig.site?.theme) : null);
   useEffect(() => { if (theme) applyTheme(theme); }, [theme]);
   useEffect(() => clearTheme, []);
-  // Quote requests: managers only (the database refuses everyone else).
-  const leadsState = useLeads(mode, role === "manager");
-  const newLeads = leadsState.leads.filter((l) => l.status === "new").length;
 
   useEffect(() => {
     let stopRole = () => {};
@@ -217,7 +189,7 @@ function Layout() {
         </header>
         {mode === "sim" && <SimBanner />}
         <main id="main" tabIndex={-1} className="su-main">
-          <Outlet key={mode} context={{ role, mode, siteConfig, leadsState, theme, previewTheme }} />
+          <Outlet key={mode} context={{ role, mode, siteConfig, theme, previewTheme }} />
         </main>
       </div>
     );
@@ -261,12 +233,6 @@ function Layout() {
               {item.simOnly && (
                 <span className={`sws-badge sws-nav-badge${simActive ? " on" : ""}`} title={simActive ? "Simulation is running" : "Simulation is stopped"}>
                   {simActive ? "ON" : "OFF"}
-                </span>
-              )}
-              {item.to === "/requests" && newLeads > 0 && (
-                // Keyed by count so it pops when a new request arrives.
-                <span key={newLeads} className="sws-badge sws-nav-badge is-count sws-pop">
-                  {newLeads}<span className="sws-sr-only"> new</span>
                 </span>
               )}
             </NavLink>
@@ -344,7 +310,7 @@ function Layout() {
         <main id="main" tabIndex={-1} className="sws-main" style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
           {/* Keyed by path so each route fades in (.sws-route); query changes don't refade. */}
           <div key={location.pathname} className="sws-route">
-            <Outlet key={mode} context={{ role, mode, siteConfig, leadsState, theme, previewTheme }} />
+            <Outlet key={mode} context={{ role, mode, siteConfig, theme, previewTheme }} />
           </div>
         </main>
       </div>

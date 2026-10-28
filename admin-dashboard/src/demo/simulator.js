@@ -120,54 +120,26 @@ function buildWeek() {
   return week;
 }
 
-// Fake quote requests for demo/leads. Every email is @example.com: none of these are real people.
-const FAKE_LEADS = [
-  { name: "Priya Raman", organization: "Westbrook University", facilityType: "university", message: "We have 14 surface lots and a permit system that nobody trusts. Could we pilot two lots next semester?" },
-  { name: "Marcus Bell", organization: "Riverside Arena", facilityType: "stadium", message: "Interested in event mode and gate routing for about 3,000 spaces." },
-  { name: "Elena Ortiz", organization: "St. Agnes Medical Center", facilityType: "hospital", message: "Accessible spaces near the ER entrance are always taken. What would a quote look like for one garage level?" },
-  { name: "Tom Becker", organization: "Harbor Point Mall", facilityType: "shopping", message: "" },
-  { name: "Aisha Khan", organization: "City of Fairview, Parking Services", facilityType: "city", message: "Looking at metered street parking downtown, roughly 400 spaces across six blocks." },
-  { name: "Jordan Lee", organization: "", facilityType: "airport", message: "Do you support economy lots with shuttle stops?" },
-  { name: "Sam Whitfield", organization: "Northgate College", facilityType: "university", message: "Visitor parking only, about 120 spaces." },
-];
-
-function fakeLead(i, createdAt, status) {
-  const f = FAKE_LEADS[i % FAKE_LEADS.length];
-  const lead = { name: f.name, email: f.name.toLowerCase().replace(/[^a-z]+/g, ".") + "@example.com", facilityType: f.facilityType, status, createdAt };
-  if (f.organization) lead.organization = f.organization;
-  if (f.message) lead.message = f.message;
-  return lead;
-}
-
-// A mix of statuses over the last two weeks, newest still "new".
-function buildLeads() {
-  const leads = {};
-  const now = Date.now();
-  const ages = [0.3, 2, 5, 26, 50, 120, 300]; // hours ago
-  const statuses = ["new", "new", "new", "contacted", "contacted", "closed", "closed"];
-  ages.forEach((h, i) => { leads["lead" + String(i).padStart(2, "0")] = fakeLead(i, now - Math.round(h * 3600000), statuses[i]); });
-  return leads;
-}
-
 export async function resetDemoData() {
   await stopSimulation();
   const { lots, units } = buildDemoData();
+  // Lots are written field by field rather than replaced, so each keeps the customer
+  // (siteId) the company console assigned it. Other lots are removed, except ones the
+  // console added for a customer (they have a siteId and aren't the simulator's).
+  // Quote requests (demo/leads) belong to the console now, so a reset leaves them alone.
+  const current = (await get(ref(database, simPath("lots")))).val() || {};
+  const lotUpdates = {};
+  Object.entries(current).forEach(([id, lot]) => { if (!lots[id] && !lot?.siteId) lotUpdates[simPath(`lots/${id}`)] = null; });
+  Object.entries(lots).forEach(([id, lot]) => {
+    Object.entries(lot).forEach(([key, value]) => { lotUpdates[simPath(`lots/${id}/${key}`)] = value; });
+  });
   await writeSim({
-    [simPath("lots")]: lots,
+    ...lotUpdates,
     [simPath("units")]: units,
     [simPath("history")]: { week: buildWeek() },
     [simPath("latency")]: buildLatency(Object.keys(units)),
-    [simPath("leads")]: buildLeads(),
   });
-  return `Loaded ${Object.keys(units).length} simulated curbs across ${Object.keys(lots).length} lots, plus a week of history, latency samples and fake quote requests.`;
-}
-
-// One new fake quote request, as if someone just sent the website form.
-export async function addFakeLead() {
-  const key = push(ref(database, simPath("leads"))).key;
-  const lead = fakeLead(Math.floor(Math.random() * FAKE_LEADS.length), Date.now(), "new");
-  await writeSim({ [simPath(`leads/${key}`)]: lead });
-  return `New quote request from ${lead.name}. See Requests.`;
+  return `Loaded ${Object.keys(units).length} simulated curbs across ${Object.keys(lots).length} lots, plus a week of history and latency samples.`;
 }
 
 function applyChanges(units, changes) {

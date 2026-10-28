@@ -1,0 +1,19 @@
+{
+  "hosting": {
+    "site": "smartcurb-console",
+    "public": "dist-console",
+    "predeploy": ["node scripts/check-build.mjs dist-console console"],
+    "ignore": [
+      "firebase.json",
+      "firebase.*.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  }
+}

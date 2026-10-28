@@ -16,7 +16,14 @@ function signInError(code = "") {
   return "Couldn't sign in. Try again in a moment.";
 }
 
-function Login() {
+// The company console reuses this page with its own home, wording and no sign-up link.
+function Login({
+  home = "/overview",
+  hint = "Use the work email your manager invited.",
+  noAccess: noAccessNotice = { title: "No access yet", text: "Your account isn't on the invite list. Ask a manager to invite you, then create your account." },
+  signup = true,
+  sub,
+}) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -26,7 +33,7 @@ function Login() {
   const navigate = useNavigate();
   const location = useLocation();
   const noAccess = params.get("noaccess") === "1";
-  const next = location.state?.from && location.state.from !== "/" ? location.state.from : "/overview";
+  const next = location.state?.from && location.state.from !== "/" ? location.state.from : home;
 
   // Already signed in (and not just bounced for lack of access): go straight in.
   useEffect(() => {
@@ -69,15 +76,15 @@ function Login() {
   };
 
   return (
-    <AuthShell>
+    <AuthShell sub={sub}>
       <form onSubmit={handleSignIn} className="sws-auth-form sws-enter" style={{ width: 380, display: "flex", flexDirection: "column", gap: "var(--sp-4)" }} noValidate>
         <div>
           <h2 style={{ fontFamily: mono, fontSize: 24, margin: "0 0 6px" }}>Sign in</h2>
-          <div style={{ fontSize: 13.5, color: c.dim }}>Use the work email your manager invited.</div>
+          <div style={{ fontSize: 13.5, color: c.dim }}>{hint}</div>
         </div>
 
         {noAccess && (
-          <Notice tone="warn" title="No access yet">Your account isn't on the invite list. Ask a manager to invite you, then create your account.</Notice>
+          <Notice tone="warn" title={noAccessNotice.title}>{noAccessNotice.text}</Notice>
         )}
         {error && <Notice tone="busy" role="alert">{error}</Notice>}
         {info && <Notice tone="ok" role="status">{info}</Notice>}
@@ -99,10 +106,12 @@ function Login() {
           {busy ? "Signing in…" : "Sign in"}
         </Button>
 
-        <div style={{ fontSize: "var(--fs-body)", color: c.dim, textAlign: "center", marginTop: "var(--sp-1)" }}>
-          Been invited?{" "}
-          <Link to="/signup" className="sws-btn sws-btn-link" style={{ fontSize: "var(--fs-body)" }}>Create your account</Link>
-        </div>
+        {signup && (
+          <div style={{ fontSize: "var(--fs-body)", color: c.dim, textAlign: "center", marginTop: "var(--sp-1)" }}>
+            Been invited?{" "}
+            <Link to="/signup" className="sws-btn sws-btn-link" style={{ fontSize: "var(--fs-body)" }}>Create your account</Link>
+          </div>
+        )}
       </form>
     </AuthShell>
   );
