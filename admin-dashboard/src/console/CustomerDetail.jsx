@@ -4,9 +4,10 @@ import { useNow, formatExact } from "../units";
 import Icon from "../components/Icon";
 import { PageHeader, Card, EmptyState, Button, Field, Select, Notice, StatusText } from "../components/ui";
 import {
-  SITE_STATUSES, assignLot, deleteSite, lotName, setSiteStatus, siteToForm, summarize, typeLabel, unassignLot, updateSite,
+  EMPTY_LOT_FORM, SITE_STATUSES, assignLot, createLot, deleteSite, lotName, lotToForm, setSiteStatus, siteToForm, summarize, typeLabel,
+  unassignLot, updateLot, updateSite,
 } from "./data";
-import { LoadError, LoadingCard, LotBlock, SiteForm, SiteStatusBadge } from "./parts";
+import { LoadError, LoadingCard, LotBlock, LotForm, SiteForm, SiteStatusBadge } from "./parts";
 
 const permissionText = (err) => (err.code === "PERMISSION_DENIED" || /permission/i.test(err.message) ? "The database refused the change." : err.message);
 
@@ -71,7 +72,7 @@ function AssignLot({ siteId, freeLots, lots }) {
       {freeLots.length ? (
         <span className="sws-field-hint">Only lots without a customer are listed.</span>
       ) : (
-        <div className="sws-note">Every lot already belongs to a customer. Unassign one from another customer first, or wait for new lots to report in.</div>
+        <div className="sws-note">Every lot already belongs to a customer. Add a new lot above, or unassign one from another customer first.</div>
       )}
       <StatusText msg={msg} />
     </div>
@@ -91,6 +92,82 @@ function UnassignButton({ lotId, name }) {
       {err && <span className="cn-err" role="status"><Icon name="alert" size={13} />{err}</span>}
       <Button size="sm" onClick={run} busy={busy} disabled={busy} aria-label={`Unassign ${name}`}>Unassign</Button>
     </span>
+  );
+}
+
+// A short line for the lot head: its size and, if set, where it is.
+function lotDetail(lot) {
+  const parts = [];
+  if (typeof lot?.totalSpots === "number") parts.push(`${lot.totalSpots.toLocaleString()} ${lot.totalSpots === 1 ? "spot" : "spots"}`);
+  if (typeof lot?.latitude === "number" && typeof lot?.longitude === "number") parts.push(`${lot.latitude}, ${lot.longitude}`);
+  return parts.join(" · ");
+}
+
+// One of the customer's lots, with Edit (name, size, location) and Unassign.
+function LotItem({ lotId, lot, stats, curbs, now }) {
+  const [editing, setEditing] = useState(false);
+  const name = lot?.name || lotId;
+  return (
+    <LotBlock
+      name={name}
+      detail={lotDetail(lot)}
+      stats={stats}
+      curbs={curbs}
+      now={now}
+      action={
+        <span className="cn-lot-actions">
+          {!editing && <Button size="sm" onClick={() => setEditing(true)} aria-label={`Edit ${name}`}>Edit</Button>}
+          <UnassignButton lotId={lotId} name={name} />
+        </span>
+      }
+    >
+      {editing && (
+        <div className="cn-lot-edit">
+          <LotForm
+            idPrefix={`edit-lot-${lotId}`}
+            initial={lotToForm(lot || {})}
+            submitLabel="Save lot"
+            busyLabel="Saving…"
+            onSubmit={async (form) => { await updateLot(lotId, form); setEditing(false); }}
+            onCancel={() => setEditing(false)}
+          />
+        </div>
+      )}
+    </LotBlock>
+  );
+}
+
+// A new lot for this customer, shown on demand under the lot list.
+function AddLot({ siteId, lots }) {
+  const [open, setOpen] = useState(false);
+  const [msg, setMsg] = useState(null);
+  if (!open) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-start" }}>
+        <Button icon="lots" onClick={() => { setOpen(true); setMsg(null); }}>Add lot</Button>
+        <StatusText msg={msg} />
+      </div>
+    );
+  }
+  return (
+    <div className="cn-lot">
+      <div className="cn-lot-head"><h3 className="cn-lot-name">New lot</h3></div>
+      <div className="cn-lot-edit" style={{ borderBottom: 0 }}>
+        <LotForm
+          idPrefix="new-lot"
+          initial={EMPTY_LOT_FORM}
+          lots={lots}
+          submitLabel="Add lot"
+          busyLabel="Adding…"
+          onSubmit={async (form) => {
+            const id = await createLot(siteId, form);
+            setMsg({ ok: true, text: `Added ${form.name.trim()} (ID ${id}).` });
+            setOpen(false);
+          }}
+          onCancel={() => setOpen(false)}
+        />
+      </div>
+    </div>
   );
 }
 
@@ -204,24 +281,18 @@ function CustomerDetail() {
           )}
         </Card>
 
-        <Card title="Lots and curbs" subtitle="Only the lot's customer is changed here; the lot and its curbs stay as the hardware reports them." delay={120}>
+        <Card title="Lots and curbs" subtitle="Add a lot, edit its name, size and location, or move lots between customers. Open spots and curbs come from the hardware." delay={120}>
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             {st.lots.length === 0 ? (
-              <Notice tone="info">No lots yet. Assign one below.</Notice>
+              <Notice tone="info">No lots yet. Add one, or assign an existing lot below.</Notice>
             ) : (
               <div>
                 {st.lots.map((lotId) => (
-                  <LotBlock
-                    key={lotId}
-                    name={lotName(lots, lotId)}
-                    stats={lotStats[lotId]}
-                    curbs={lotUnits[lotId] || []}
-                    now={now}
-                    action={<UnassignButton lotId={lotId} name={lotName(lots, lotId)} />}
-                  />
+                  <LotItem key={lotId} lotId={lotId} lot={lots[lotId]} stats={lotStats[lotId]} curbs={lotUnits[lotId] || []} now={now} />
                 ))}
               </div>
             )}
+            <AddLot siteId={id} lots={lots} />
             <AssignLot siteId={id} freeLots={unassignedLots} lots={lots} />
           </div>
         </Card>

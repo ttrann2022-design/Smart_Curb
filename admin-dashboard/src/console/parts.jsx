@@ -2,7 +2,7 @@ import { useState } from "react";
 import { DEFAULT_ALERTS, formatAgo, formatExact, hasBattery } from "../units";
 import Icon from "../components/Icon";
 import { Button, Card, Input, Notice, Select, Skeleton, StatusText } from "../components/ui";
-import { SITE_LIMITS, SITE_STATUSES, SITE_TYPES, isOnline, siteErrors, statusLabel } from "./data";
+import { LOT_LIMITS, SITE_LIMITS, SITE_STATUSES, SITE_TYPES, isOnline, lotErrors, lotIdFromName, siteErrors, statusLabel } from "./data";
 
 // Platform admins can't read settings/alerts (staff only), so the default threshold applies.
 const LOW_BATTERY = DEFAULT_ALERTS.lowBattery;
@@ -121,6 +121,65 @@ export function SiteForm({ idPrefix, initial, submitLabel, busyLabel, onSubmit, 
   );
 }
 
+// Add and edit lot form. `lots` is given when adding, to show and check the ID
+// made from the name; editing never changes the ID.
+export function LotForm({ idPrefix, initial, lots, submitLabel, busyLabel, onSubmit, onCancel }) {
+  const [form, setForm] = useState(initial);
+  const [errors, setErrors] = useState({});
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const set = (key) => (e) => {
+    setForm((f) => ({ ...f, [key]: e.target.value }));
+    if (errors[key]) setErrors((er) => ({ ...er, [key]: undefined }));
+    setMsg(null);
+  };
+
+  const submit = async (e) => {
+    e.preventDefault();
+    const found = lotErrors(form, lots);
+    setErrors(found);
+    const first = Object.keys(found)[0];
+    if (first) {
+      document.getElementById(`${idPrefix}-${first}`)?.focus();
+      return;
+    }
+    setBusy(true);
+    setMsg(null);
+    try {
+      const result = await onSubmit(form);
+      if (result) setMsg({ ok: true, text: result });
+    } catch (err) {
+      setMsg({ ok: false, text: err.code === "PERMISSION_DENIED" || /permission/i.test(err.message) ? (lots ? "The database refused the lot. Another lot may already use that ID, or this account is no longer a platform admin." : "The database refused the save. Check the fields, or that this account is still a platform admin.") : "Couldn't save: " + err.message });
+    }
+    setBusy(false);
+  };
+
+  const id = (key) => `${idPrefix}-${key}`;
+  const lotId = lotIdFromName(form.name.trim());
+  const nameHint = lots ? (lotId ? `Lot ID: ${lotId}. Made from the name; it can't be changed later.` : "The lot's ID is made from the letters and numbers in its name.") : `Up to ${LOT_LIMITS.name} characters.`;
+  return (
+    <form className="cn-form" onSubmit={submit} noValidate>
+      <FormField id={id("name")} label="Name" error={errors.name} hint={nameHint}>
+        {(a) => <Input {...a} maxLength={LOT_LIMITS.name} value={form.name} onChange={set("name")} autoComplete="off" />}
+      </FormField>
+      <FormField id={id("totalSpots")} label="Total spots" error={errors.totalSpots} hint={lots ? "All of them start open, until the curbs report." : "Open spots keep coming from the curbs."}>
+        {(a) => <Input {...a} inputMode="numeric" value={form.totalSpots} onChange={set("totalSpots")} autoComplete="off" />}
+      </FormField>
+      <FormField id={id("latitude")} label="Latitude" optional error={errors.latitude} hint="-90 to 90, for example 40.7128.">
+        {(a) => <Input {...a} inputMode="decimal" value={form.latitude} onChange={set("latitude")} autoComplete="off" spellCheck={false} />}
+      </FormField>
+      <FormField id={id("longitude")} label="Longitude" optional error={errors.longitude} hint="-180 to 180, for example -74.006.">
+        {(a) => <Input {...a} inputMode="decimal" value={form.longitude} onChange={set("longitude")} autoComplete="off" spellCheck={false} />}
+      </FormField>
+      <div className="cn-form-actions">
+        <Button type="submit" variant="primary" busy={busy} disabled={busy}>{busy ? busyLabel : submitLabel}</Button>
+        {onCancel && <Button onClick={onCancel} disabled={busy}>Cancel</Button>}
+        <StatusText msg={msg} />
+      </div>
+    </form>
+  );
+}
+
 // Online/offline, battery and last seen for each curb in a lot.
 export function CurbRows({ curbs, now }) {
   if (!curbs.length) return <div className="cn-lot-empty">No curbs report into this lot yet.</div>;
@@ -157,19 +216,22 @@ export function CurbRows({ curbs, now }) {
   );
 }
 
-// One lot: name, online count, an optional action, then its curbs.
-export function LotBlock({ name, stats, curbs, now, action, headingLevel = 3 }) {
+// One lot: name, online count, an optional action, anything passed as children
+// (the edit form), then its curbs.
+export function LotBlock({ name, stats, curbs, now, action, detail, children, headingLevel = 3 }) {
   const H = `h${headingLevel}`;
   return (
     <div className="cn-lot">
       <div className="cn-lot-head">
         <H className="cn-lot-name">{name}</H>
         <span className="cn-lot-meta">
+          {detail ? `${detail} · ` : ""}
           {stats.curbs ? `${stats.online} of ${stats.curbs} curbs online` : "No curbs"}
           {stats.lastSeen ? ` · last seen ${formatAgo(stats.lastSeen, now)}` : ""}
         </span>
         {action}
       </div>
+      {children}
       <CurbRows curbs={curbs} now={now} />
     </div>
   );

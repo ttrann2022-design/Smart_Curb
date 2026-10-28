@@ -29,6 +29,7 @@ const CONSOLE_PAGE_MARKERS = [
   "Lots without a customer",
   "Reload demo customers",
   "Assign a lot",
+  "Open spots keep coming from the curbs",
 ];
 
 const [dir, expected] = process.argv.slice(2);

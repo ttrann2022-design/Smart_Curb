@@ -107,7 +107,69 @@ export const updateSite = (id, form) => update(ref(database, dataPath(`sites/${k
 export const setSiteStatus = (id, status) => set(ref(database, dataPath(`sites/${key(id)}/status`)), status);
 export const deleteSite = (id) => remove(ref(database, dataPath(`sites/${key(id)}`)));
 
-// Lots only ever get siteId written: the rest of a lot belongs to the hardware and the dashboard.
+// ---------- Lots (lots/<id>) ----------
+
+// As in database.rules.json. Platform admins create a lot and later change only
+// name, totalSpots, latitude and longitude; openSpots and units belong to the hardware.
+export const LOT_LIMITS = { name: 80, minSpots: 1, maxSpots: 5000 };
+export const EMPTY_LOT_FORM = { name: "", totalSpots: "", latitude: "", longitude: "" };
+
+const asText = (v) => (typeof v === "number" ? String(v) : "");
+export const lotToForm = (lot) => ({
+  name: lot.name || "", totalSpots: asText(lot.totalSpots), latitude: asText(lot.latitude), longitude: asText(lot.longitude),
+});
+
+// "North Garage 2" -> "northgarage2". Empty when the name has no letters or numbers.
+export const lotIdFromName = (name) => name.toLowerCase().replace(/[^a-z0-9]+/g, "");
+
+const number = (text) => (/^[-+]?(\d+\.?\d*|\.\d+)$/.test(text.trim()) ? Number(text.trim()) : NaN);
+
+// The rules' checks, in the form's words. `lots` is given for a new lot, to refuse an ID that's taken.
+export function lotErrors(form, lots) {
+  const errors = {};
+  const name = form.name.trim();
+  if (!name) errors.name = "Enter the lot's name.";
+  else if (name.length > LOT_LIMITS.name) errors.name = `Keep the name to ${LOT_LIMITS.name} characters.`;
+  else if (lots) {
+    const id = lotIdFromName(name);
+    if (!id) errors.name = "Use at least one letter or number: the lot's ID is made from them.";
+    else if (lots[id]) errors.name = `A lot with the ID "${id}" already exists. Choose a different name.`;
+  }
+  const spots = form.totalSpots.trim();
+  if (!/^\d+$/.test(spots) || Number(spots) < LOT_LIMITS.minSpots || Number(spots) > LOT_LIMITS.maxSpots) {
+    errors.totalSpots = `Enter a whole number from ${LOT_LIMITS.minSpots} to ${LOT_LIMITS.maxSpots.toLocaleString()}.`;
+  }
+  const lat = form.latitude.trim();
+  const lng = form.longitude.trim();
+  if (lat && !(number(lat) >= -90 && number(lat) <= 90)) errors.latitude = "Enter a latitude from -90 to 90, or leave it empty.";
+  if (lng && !(number(lng) >= -180 && number(lng) <= 180)) errors.longitude = "Enter a longitude from -180 to 180, or leave it empty.";
+  if (!errors.latitude && !errors.longitude && !lat !== !lng) errors[lat ? "longitude" : "latitude"] = "Enter both latitude and longitude, or leave both empty.";
+  return errors;
+}
+
+// Form -> the four fields platform admins may write. An empty location is left
+// out of a new lot and removed (null) from an existing one.
+function lotFields(form, emptyAs) {
+  const fields = { name: form.name.trim(), totalSpots: Number(form.totalSpots.trim()) };
+  for (const k of ["latitude", "longitude"]) {
+    if (form[k].trim()) fields[k] = number(form[k]);
+    else if (emptyAs !== undefined) fields[k] = emptyAs;
+  }
+  return fields;
+}
+
+// A new lot for a customer: every spot open until the hardware reports. The rules
+// refuse it if the ID is already taken, even by a lot this page hasn't loaded.
+export async function createLot(siteId, form) {
+  const id = key(lotIdFromName(form.name.trim()));
+  const fields = lotFields(form);
+  await set(ref(database, dataPath(`lots/${id}`)), { ...fields, openSpots: fields.totalSpots, siteId: key(siteId) });
+  return id;
+}
+
+export const updateLot = (lotId, form) => update(ref(database, dataPath(`lots/${key(lotId)}`)), lotFields(form, null));
+
+// Assigning only ever writes siteId: the rest of a lot belongs to the hardware and the dashboard.
 export const assignLot = (lotId, siteId) => set(ref(database, dataPath(`lots/${key(lotId)}/siteId`)), key(siteId));
 export const unassignLot = (lotId) => remove(ref(database, dataPath(`lots/${key(lotId)}/siteId`)));
 
