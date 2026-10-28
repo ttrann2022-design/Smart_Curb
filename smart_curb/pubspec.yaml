@@ -2,7 +2,7 @@ name: smart_curb
 description: "A new Flutter project."
 publish_to: 'none'
 
-version: 1.0.0+1
+version: 1.0.9+2
 
 environment:
   sdk: ^3.13.4
@@ -52,4 +52,6 @@ flutter:
     - assets/campus_walkways.json
     # Walking network around Broward Mall (generated from OpenStreetMap)
     - assets/broward_walkways.json
+    # App config: secrets.json (git-ignored) holds the Gemini API key
+    - assets/config/
 

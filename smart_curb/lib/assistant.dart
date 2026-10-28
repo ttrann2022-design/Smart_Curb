@@ -15,8 +15,10 @@ import 'dart:math' as math;
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 
+import 'gemini_chat.dart';
 import 'main.dart';
 
 // ==========================================
@@ -341,7 +343,7 @@ class FirebaseAssistantData implements AssistantData {
 /// Understands a message and answers it. Keeps a little context: after
 /// "where should I park?" it knows a bare building name is the answer.
 class SmartCurbAssistant {
-  SmartCurbAssistant(this.data, {List<Place>? places})
+  SmartCurbAssistant(this.data, {List<Place>? places, this.ai})
       : places = places ?? Place.all {
     _index = _BuildingIndex(this.places);
   }
@@ -349,6 +351,10 @@ class SmartCurbAssistant {
   final AssistantData data;
   final List<Place> places;
   late final _BuildingIndex _index;
+
+  /// The language model for what the rules below don't understand (null
+  /// or without a key: the rules answer everything, as before).
+  final GeminiChat? ai;
 
   /// Asked which building; the next message may just be its name.
   bool _awaitingBuilding = false;
@@ -401,6 +407,34 @@ class SmartCurbAssistant {
     final wasAwaiting = _awaitingBuilding;
     _awaitingBuilding = false;
 
+    // Who answers:
+    // 1. Safety (accidents, emergencies, crisis): always the app's own
+    //    careful words, offline too.
+    // 2. The language model, for everything else. It talks freely, and
+    //    hands what the app does (live spots, forms, the user's cars,
+    //    places and profile) to the rules below as a plain request.
+    // 3. The rules on their own, silently, when the model can't answer
+    //    (at its limit, offline, or no key).
+    final answer = _safetyAnswer(m) ??
+        await _askAi(message) ??
+        await _answerWithMood(m, wasAwaiting);
+    _remember(message, answer.text);
+    return answer;
+  }
+
+  /// The safety answer for [m], if it's about an emergency.
+  ChatReply? _safetyAnswer(_Message m) {
+    for (final f in _safety) {
+      if (f.when(m)) {
+        _steps = const [];
+        return f.reply;
+      }
+    }
+    return null;
+  }
+
+  /// The rules' answer to [m], said the way it was asked.
+  Future<ChatReply> _answerWithMood(_Message m, bool wasAwaiting) {
     return _guard(() async {
       final answer = await _answer(m, wasAwaiting);
       // "Hi, where do I park for ED-47?": answer it, with a hello.
@@ -504,6 +538,8 @@ class SmartCurbAssistant {
   };
 
   Future<ChatReply> _answer(_Message m, bool wasAwaiting) async {
+    _fellBack = false;
+    _cantDo = null;
     // ---- safety first: accidents, emergencies, danger ----
     // Before anything else, so "I had an accident in Lot 14" never gets a
     // parking answer.
@@ -551,7 +587,10 @@ class SmartCurbAssistant {
       );
     }
     // "I can't find parking anywhere, ugh": sympathy, then straight to it.
-    if ((m.has(_frustratedWords) || m.anyPhrase(_frustratedPhrases)) &&
+    // (About parking: "I'm stressed about my exam" isn't.)
+    if (((m.has(_frustratedWords) &&
+                (m.any(_parkWords) || m.has(_spotQuestion))) ||
+            m.anyPhrase(_frustratedPhrases)) &&
         _index.find(m).unique == null) {
       _awaitingBuilding = true;
       return ChatReply(
@@ -716,8 +755,11 @@ class SmartCurbAssistant {
 
     // ---- how to use the app, and questions about it ----
     if (faq != null) {
-      if (faq.cantDo case final cant? when _asksMeToDo(m)) {
-        return _cantDoIt(cant, faq.reply, howTo: faq.cantDoHowTo);
+      if (faq.cantDo case final cant?) {
+        _cantDo = (what: cant, howTo: faq.cantDoHowTo);
+        if (_asksMeToDo(m)) {
+          return _cantDoIt(cant, faq.reply, howTo: faq.cantDoHowTo);
+        }
       }
       return faq.asksPlace ? _pickPlace(faq.reply) : faq.reply;
     }
@@ -797,9 +839,8 @@ class SmartCurbAssistant {
         'To log out, tap the log-out icon at the top left of the main '
         "screen. You'll go back to the login page.",
       );
-      return _asksMeToDo(m)
-          ? _cantDoIt('log you out from the chat', howTo)
-          : howTo;
+      _cantDo = (what: 'log you out from the chat', howTo: true);
+      return _asksMeToDo(m) ? _cantDoIt(_cantDo!.what, howTo) : howTo;
     }
     if (m.any(_passwordWords)) {
       const howTo = ChatReply(
@@ -808,12 +849,12 @@ class SmartCurbAssistant {
         'contact support and we can help you reset it.',
         [ChatAction.ask('Contact support')],
       );
-      return _asksMeToDo(m)
-          ? _cantDoIt(
-              'see, change or reset passwords. For your security, I never '
-              'touch them',
-              howTo)
-          : howTo;
+      _cantDo = (
+        what: 'see, change or reset passwords. For your security, I never '
+            'touch them',
+        howTo: true,
+      );
+      return _asksMeToDo(m) ? _cantDoIt(_cantDo!.what, howTo) : howTo;
     }
     if (m.has({'login', 'signin'}) || m.anyPhrase(_loginPhrases)) {
       final email = data.email;
@@ -825,9 +866,11 @@ class SmartCurbAssistant {
                 'the log-out icon at the top left of the main screen, then '
                 'log in with the other one.',
       );
-      return _asksMeToDo(m)
-          ? _cantDoIt('sign you in or switch accounts from the chat', howTo)
-          : howTo;
+      _cantDo = (
+        what: 'sign you in or switch accounts from the chat',
+        howTo: true,
+      );
+      return _asksMeToDo(m) ? _cantDoIt(_cantDo!.what, howTo) : howTo;
     }
     if (m.any(_profileWords) || m.anyPhrase(_profilePhrases)) {
       return _profile(m);
@@ -864,6 +907,10 @@ class SmartCurbAssistant {
       if (_carsNamed(m, cars).isNotEmpty) return _vehicles(m);
     }
 
+    // Life and hobbies ("I'm sad", "seen any good anime?"): a human answer
+    // even when the language model is resting.
+    if (_topicReply(m) case final r?) return r;
+
     // "Can I ask another question?", "quick question", "wait": go ahead.
     if (m.anyPhrase(_askAwayPhrases) || m.has({'question', 'questions'})) {
       return ChatReply(
@@ -882,7 +929,9 @@ class SmartCurbAssistant {
       );
     }
 
-    // Not understood: said differently each time it happens.
+    // Not understood: said differently each time it happens (and the
+    // language model gets a go at it, see [reply]).
+    _fellBack = true;
     return ChatReply(
       _pick('sorry', [
         "Sorry, I don't understand that. Could you say it another way? Or "
@@ -896,6 +945,162 @@ class SmartCurbAssistant {
       ]),
       menu,
     );
+  }
+
+  // ---- the language model, for what the rules don't understand ----
+
+  /// The last message got "Sorry, I don't understand that".
+  bool _fellBack = false;
+
+  /// The last answer explained something the chat itself can't do for the
+  /// user (register, reset a password...): when the model hands over "How do
+  /// I register?" for "can you register me?", the answer still starts with
+  /// an honest "No, sorry, I can't".
+  ({String what, bool howTo})? _cantDo;
+
+  /// The conversation so far, for the model's context (personal details
+  /// hidden, see [_private]).
+  final List<AiTurn> _history = [];
+
+  void _remember(String userText, String botText) {
+    _history
+      ..add(AiTurn(true, _private(userText)))
+      ..add(AiTurn(false, _private(botText)));
+    if (_history.length > 12) _history.removeRange(0, _history.length - 12);
+  }
+
+  /// [text] without the user's name, emails, phone numbers or plates, so
+  /// none of it is sent to the model.
+  String _private(String text) {
+    var t = text
+        .replaceAll(RegExp(r'[\w.+-]+@[\w-]+\.[\w.]+'), '[email]')
+        .replaceAll(RegExp(r'\+?\d[\d\s().-]{6,}\d'), '[number]')
+        .replaceAll(RegExp(r'\bplate (is )?[A-Z0-9-]{3,10}\b'), 'plate [hidden]');
+    if (_name case final n? when n.length >= 2) {
+      t = t.replaceAll(RegExp('\\b${RegExp.escape(n)}\\b'), '[name]');
+    }
+    return t;
+  }
+
+  /// The model's answer to [message], or null to keep the rules' reply.
+  /// When it recognizes an app request the rules missed ("can u put my
+  /// new ride in"), the rules run that request ("Add a vehicle"), so forms
+  /// and buttons work as usual.
+  Future<ChatReply?> _askAi(String message) async {
+    final model = ai;
+    // (ask() waits for the key to load, and answers null without one.)
+    if (model == null) return null;
+    final answer = await model.ask(
+      system: _aiInstructions(),
+      history: _history,
+      message: _private(message),
+    );
+    if (answer == null) return null;
+    if (answer.action case final action?) {
+      final viaRules = await _answerWithMood(_Message(action), false);
+      if (!_fellBack) {
+        final cant = _cantDo;
+        if (cant != null && _asksMeToDo(_Message(message))) {
+          return _cantDoIt(cant.what, viaRules, howTo: cant.howTo);
+        }
+        return _withLead(answer.reply, viaRules);
+      }
+      // The rules didn't get the request: the model's own words below.
+    }
+    // Nothing, or just their own words echoed back: the rules answer.
+    if (answer.reply.isEmpty ||
+        _Message(answer.reply).text == _Message(message).text) {
+      return null;
+    }
+    // A chat, not "which building?": the next message is just the next
+    // thing they say.
+    _awaitingBuilding = false;
+    _steps = const [];
+    return ChatReply(answer.reply);
+  }
+
+  /// The app's answer [r] with the model's short [lead] in front ("Oh no,
+  /// rough day! Heading to ED-47? Your best bet is..."), dropping the app's
+  /// own "Sure!" so it isn't said twice.
+  static ChatReply _withLead(String lead, ChatReply r) {
+    final l = lead.trim();
+    if (l.isEmpty || l.length > 160 || r.clearsChat) return r;
+    final body = r.text.replaceFirst(RegExp(r'^[^.!?\n]{1,45}! '), '');
+    return _retext(r, '$l $body');
+  }
+
+  /// Requests the model hands to the app (the rules), by topic. The app
+  /// answers these with live data, the user's own details, forms and
+  /// buttons, which the model can't see.
+  static const _aiActions = '''
+Parking: "Where should I park for <building name or code>?" | "Where should I park?" | "Open spots right now" | "Which lot has the most space?" | "Is lot <number> full?" | "Is curb <C-number> open?" | "How far is lot <number> from <building>?" | "Which lots have Smart Curbs?" | "How many curbs are there?" | "What buildings are there?" | "How many lots are there?"
+Vehicles: "My vehicles" | "Add a vehicle" | "Change a vehicle" | "Change my <make or model>" | "Delete a vehicle" | "Delete my <make or model>" | "What's my license plate?"
+Places: "My saved places" | "Add <FAU or Broward Mall>" | "Remove <FAU or Broward Mall>" | "Remove a place" | "Open the <FAU or Broward Mall> map" | "Where is <FAU or Broward Mall>?"
+Profile: "My profile" | "Change my contact information" | "Change my phone number" | "Change my address" | "What's my phone number?" | "What's my name?" | "What's my address?" | "Which account am I signed in with?"
+Using the app: "How do I choose a building?" | "How do I use the app?" | "How do I stop navigation?" | "What is focus mode?" | "How do I switch to 3D?" | "How do I reset the map view?" | "What is developer mode?" | "My GPS isn't working" | "The map is blank" | "What do the colors mean?" | "What do the lines on the map mean?" | "How does Smart Curb work?" | "What happens if my lot fills up?" | "What happens after I park?"
+Account and settings: "How do I register another account?" | "How do I log out?" | "I forgot my password" | "How do I change my email?" | "How do I delete my account?" | "How do I turn off notifications?" | "Where are the settings?" | "What version is the app?" | "Is my data private?"
+Rules and money: "Can I reserve a spot?" | "Is parking free?" | "Where can visitors park?" | "Is there accessible parking?" | "Is there EV charging?" | "I got a parking ticket"
+Other: "Contact support" | "Start over"
+Greetings: when the user only says hello ("hi", "good morning"), set action to their greeting (action "good morning") and reply "" (the app greets them by name).''';
+
+  /// What the model needs to know to answer as Smart Curb AI Agent.
+  String _aiInstructions() => '''
+You are Smart Curb AI Agent, the assistant inside the Smart Curb parking app, and a genuinely friendly companion to chat with.
+
+HOW YOU TALK
+- Like a warm, easygoing friend texting back: natural, casual, kind, a little playful. Contractions are good ("you're", "that's"). Plain text, no markdown, no lists unless they ask for steps, no emojis.
+- Usually 1-4 sentences. A bit longer only when they ask you to explain something.
+- People will talk about their life and their day, vent, celebrate, or just want company. Listen first: react to what they actually said ("Oh no, a 9am exam after a late night is rough!"), show you care, and often ask a light follow-up question to keep the conversation going ("How did it go?", "What are you watching these days?").
+- Match their mood: excited with good news, gentle when they're down, chill when they're joking. Remember what they told you earlier in this chat and bring it back naturally.
+- You can share light opinions and favorites like a friend would ("Honestly, Spirited Away is one of my all-time favorites"), while being honest that you're an AI if they ask.
+- You're happy to talk about anything: movies, TV, anime and manga, music, games, sports, books, food, science, space, history, tech, school, work, relationships, hobbies. Know your stuff and get into it with them.
+- Don't push parking into every reply. Only bring it up when it fits (they're heading somewhere, mention driving, or ask).
+- If someone seems really down, be kind and supportive. If they mention wanting to hurt themselves, gently encourage them to reach out right away to someone they trust or call or text 988 (the Suicide & Crisis Lifeline in the US).
+
+ABOUT SMART CURB (version $kAppVersion)
+- Smart Curbs are solar-powered devices that replace the concrete wheel stop at the front of a parking space. Each one senses whether its space is taken and reports it live.
+- The app works at ${places.map((p) => '${p.fullName} (${p.address})').join(' and ')}. Live curb counts are at FAU; at the mall it points to the closest lot.
+- It picks the best lot (or exact open curb) for the building you're going to by real walking distance, gives turn-by-turn driving directions, switches lots if yours fills up on the way, then shows a walking path to the door.
+- Home tab: saved places ("Add more locations"); tap one to open its map. On the map, search for a building or tap it. Vehicle tab: your cars. Profile tab: contact info. ⋮ menu (top right): Settings (notifications, Contact Us) and About App. Log out: icon at the top left.
+- Map colors: green space = open, red = taken, gray = curb offline. Lot labels: green under 70% full, amber 70-90%, red 90%+, gray = no sensors.
+- Not available yet: changing password or email in the app, spot alerts or texts, voice directions, reservations, payments or permits, a light theme, other places.
+- The app is free, has no ads, and was built by Team Smart Curb, an FAU Engineering senior design team. Support: $kSupportEmail.
+
+RULES
+- Never invent facts: no made-up hours, prices, phone numbers, rules or features. If you don't know, say so kindly and suggest $kSupportEmail.
+- Never ask for passwords or personal details. You can't see the user's account; the app does that through actions.
+- Emergencies, accidents or danger: tell them to call $kEmergencyNumber (on FAU's campus, $kCampusPolice at $kCampusPolicePhone).
+- You have broad general knowledge. Answer general questions properly, with real suggestions and real explanations, never a refusal.
+- About yourself: you're Smart Curb AI Agent. Your conversation comes from Google's Gemini AI models, and the Smart Curb app itself handles parking, live spots and the user's cars, places and profile.
+- You can't look things up live. For things that change ("best movie right now", news, scores, weather), say you can't check what's current, then still name 2-3 specific picks from what you know (well-known or recent favorites, by title) and suggest where to check for the latest.
+- It's ${_now()} for the user right now.
+
+WORKING WITH THE APP
+You understand the user; the app does the work. You can't see live spot counts or the user's cars, places, profile or account, and you can't open maps or forms, but the app can. So:
+- Whenever the user wants something the app does, or asks about their own things, live parking, or how to use Smart Curb (see APP REQUESTS), set "action" to the closest request, filled in with their details (building, lot, car, place), even if they said it in slang, with typos, or in the middle of a chat. If they were just asked "which building?" and answer with a building, that's "Where should I park for <it>?".
+- When you set an action, "reply" is only a short, warm lead-in that fits the moment ("Oh no, rough day! Let's get you parked."), with no facts or answers of your own, or "" (the app adds the real answer). Never guess lots, counts, distances, steps or the user's details.
+- Life news often means an app action. Examples: "I sold my Civic" -> "Delete my Civic" (the app asks them to confirm); "just got a new car" -> "Add a vehicle"; "I moved" -> "Change my address"; "got a new number" -> "Change my phone number"; "running late to the library" -> "Where should I park for the library?"; "can you sign me up / reset my password / change my email" -> the matching how-to request (the app explains what the chat can't do).
+- Otherwise set "action" to null and answer in "reply" yourself.
+
+APP REQUESTS
+$_aiActions
+
+Answer only with JSON: {"reply": "...", "action": null or a request}''';
+
+  /// "Wednesday, October 28, 2026, 9:40 PM", for the model (which can't tell).
+  static String _now() {
+    const days = [
+      'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday',
+      'Sunday',
+    ];
+    const months = [
+      'January', 'February', 'March', 'April', 'May', 'June', 'July',
+      'August', 'September', 'October', 'November', 'December',
+    ];
+    final n = DateTime.now();
+    final hour = n.hour % 12 == 0 ? 12 : n.hour % 12;
+    return '${days[n.weekday - 1]}, ${months[n.month - 1]} ${n.day}, ${n.year}, '
+        '$hour:${n.minute.toString().padLeft(2, '0')} ${n.hour < 12 ? 'AM' : 'PM'}';
   }
 
   // ---- sounding like a person ----
@@ -992,12 +1197,24 @@ class SmartCurbAssistant {
       };
       final shown = r.isNaN
           ? "something even I can't work out (no dividing by zero!)"
-          : (r == r.roundToDouble() ? r.toInt().toString() : r.toStringAsFixed(2));
+          : (r == r.roundToDouble() && r.abs() < 1e15
+              // 2000000 -> 2,000,000
+              ? r.toInt().toString().replaceAllMapped(
+                  RegExp(r'(\d)(?=(\d{3})+$)'), (g) => '${g[1]},')
+              : r.toStringAsFixed(2));
       return ChatReply(
         "That's $shown! Numbers like how many spots are open are more my "
         'thing, though.',
         const [ChatAction.ask('Open spots right now')],
       );
+    }
+    // "What is your brain power come from?", "are you powered by Gemini?"
+    if (m.anyPhrase(['powered by', 'your brain', 'brain power', 'what model',
+      'which model', 'what ai are you', 'which ai', 'language model',
+      'what are you built on', 'what runs you', 'how do you think',
+      'how are you so smart', 'what are you made of', 'how do you work',
+      'are you chatgpt', 'are you gemini'])) {
+      return _poweredBy();
     }
     if (!m.short) return null;
     if (m.anyPhrase(['start over', 'clear the chat', 'clear chat',
@@ -1112,12 +1329,8 @@ class SmartCurbAssistant {
       );
     }
     if (m.has({'chatgpt', 'gpt', 'siri', 'alexa', 'openai', 'gemini',
-      'claude', 'cortana', 'copilot'})) {
-      return const ChatReply(
-        "Nope, I'm Smart Curb AI Agent, made just for this app to help you "
-        'park and get around. Parking is my specialty!',
-        menu,
-      );
+      'claude', 'cortana', 'copilot', 'gemma', 'llm'})) {
+      return _poweredBy();
     }
     if (m.anyPhrase(['do you sleep', 'are you always', 'are you awake',
       'do you ever sleep', 'are you open'])) {
@@ -1179,6 +1392,118 @@ class SmartCurbAssistant {
     }
     return null;
   }
+
+  // ---- the backup's answers for life and hobbies ----
+
+  /// Feelings, then topics, each with a few wordings ([_pick]). Only exact
+  /// words count, so "show me" isn't a TV show.
+  static const List<({String key, Set<String> words, List<String> say})>
+      _feelings = [
+    (
+      key: 'sad',
+      words: {'sad', 'down', 'depressed', 'lonely', 'upset', 'crying', 'cry',
+        'heartbroken', 'miserable', 'hopeless', 'alone'},
+      say: [
+        "I'm really sorry you're feeling this way. That's hard, and it's okay "
+            "to not be okay. I'm here to listen, and talking to a friend or "
+            'someone you trust can help a lot too. If it ever feels like too '
+            'much, you can call or text 988 anytime, day or night.',
+        "That sounds really tough, and I'm sorry. Be gentle with yourself "
+            "today. If you'd like to talk to someone, a friend, family member "
+            'or 988 (call or text, 24/7) is always there.',
+      ],
+    ),
+    (
+      key: 'stressed',
+      words: {'stressed', 'stress', 'anxious', 'anxiety', 'nervous',
+        'overwhelmed', 'worried', 'panicking', 'scared'},
+      say: [
+        "That sounds like a lot. Take a slow, deep breath, you've got this. "
+            "One thing at a time, and if parking is one of the worries, let "
+            'me take that off your plate.',
+        "I hear you, that's a lot to carry. Try to take a short break and "
+            "breathe. You're doing better than you think!",
+      ],
+    ),
+    (
+      key: 'happy',
+      words: {'happy', 'excited', 'passed', 'graduated', 'promoted', 'engaged',
+        'hired', 'won', 'yay', 'woohoo', 'celebrating', 'proud'},
+      say: [
+        "That's awesome, congrats! I love hearing good news. You earned it!",
+        'Yay, that made my day! Congratulations, enjoy the moment!',
+      ],
+    ),
+  ];
+
+  static const List<({String key, String topic, Set<String> words})> _topics = [
+    (key: 'screen', topic: 'movies and shows', words: {'movie', 'movies',
+      'film', 'films', 'netflix', 'hulu', 'anime', 'manga', 'manhwa',
+      'cartoon', 'tv', 'series', 'youtube', 'tiktok', 'episode', 'season'}),
+    (key: 'music', topic: 'music', words: {'music', 'song', 'songs', 'album',
+      'band', 'singer', 'concert', 'playlist', 'spotify', 'rapper', 'kpop'}),
+    (key: 'games', topic: 'games', words: {'game', 'games', 'gaming',
+      'videogame', 'xbox', 'playstation', 'ps5', 'nintendo', 'switch',
+      'minecraft', 'fortnite', 'valorant', 'roblox'}),
+    (key: 'sports', topic: 'sports', words: {'sport', 'sports', 'football',
+      'basketball', 'soccer', 'baseball', 'nba', 'nfl', 'tennis', 'hockey',
+      'gym', 'workout'}),
+    (key: 'school', topic: 'school', words: {'homework', 'exam', 'exams',
+      'quiz', 'essay', 'professor', 'semester', 'grades', 'gpa', 'study',
+      'studying', 'midterm', 'midterms', 'finals', 'assignment', 'lecture'}),
+    (key: 'science', topic: 'science and big questions', words: {'science',
+      'physics', 'chemistry', 'biology', 'math', 'calculus', 'history',
+      'planet', 'planets', 'universe', 'galaxy', 'dinosaur', 'dinosaurs',
+      'philosophy', 'psychology'}),
+    (key: 'work', topic: 'work', words: {'job', 'shift', 'boss', 'coworker',
+      'interview', 'career', 'internship', 'salary', 'resume'}),
+    (key: 'people', topic: 'the people in your life', words: {'girlfriend',
+      'boyfriend', 'crush', 'family', 'mom', 'dad', 'roommate', 'brother',
+      'sister', 'wife', 'husband', 'relationship', 'dating'}),
+    (key: 'pets', topic: 'pets', words: {'dog', 'dogs', 'cat', 'cats', 'pet',
+      'pets', 'puppy', 'kitten'}),
+    (key: 'trips', topic: 'trips and weekend plans', words: {'travel',
+      'trip', 'vacation', 'weekend', 'beach', 'holiday', 'flight'}),
+    (key: 'tech', topic: 'tech', words: {'coding', 'programming', 'python',
+      'javascript', 'java', 'computer', 'laptop', 'iphone', 'android',
+      'chatgpt', 'robot', 'robots'}),
+  ];
+
+  /// A friendly reply about feelings or a topic, when nothing else fits.
+  ChatReply? _topicReply(_Message m) {
+    for (final f in _feelings) {
+      if (m.has(f.words)) return ChatReply(_pick(f.key, f.say), _moreHelp);
+    }
+    for (final t in _topics) {
+      if (!m.has(t.words)) continue;
+      final resting = (ai?.enabled ?? false)
+          ? 'My full chat brain is taking a short break, so I can\'t go deep '
+              'on that right now. Try me again in a little while!'
+          : "I'm mostly a parking expert, so I can't go deep on that one.";
+      return ChatReply(
+        '${_pick('topic', [
+          'Ooh, ${t.topic}! I love that you brought it up.',
+          'I could talk about ${t.topic} all day!',
+          'Now that sounds fun to chat about.',
+        ])} $resting In the meantime, I can still help with parking:',
+        _moreHelp,
+      );
+    }
+    return null;
+  }
+
+  /// Where its answers come from, honestly.
+  ChatReply _poweredBy() => ChatReply(
+        (ai?.enabled ?? false)
+            ? "Good question! I'm Smart Curb AI Agent. My everyday chat comes "
+                "from Google's Gemini AI models, and the Smart Curb app itself "
+                'handles the parking side: live spots from the curbs, routes, '
+                'and your cars, places and profile.'
+            : "I'm Smart Curb AI Agent, built into the Smart Curb app. Right "
+                "now I'm answering from the app's own knowledge about parking, "
+                'the map and your account.',
+        const [ChatAction.ask('What can you do?')],
+      );
 
   static const _laughs = {
     'lol', 'haha', 'hahaha', 'hah', 'lmao', 'lmfao', 'hehe', 'rofl', 'xd',
@@ -2573,14 +2898,17 @@ class SmartCurbAssistant {
   static const _navigationPhrases = [
     'how do i get', 'how to get', 'focus mode', 'turn by turn',
   ];
-  static const _howItWorksWords = {'sensor', 'sensors', 'led', 'solar', 'about'};
+  // ("about" alone is too common: "tell me about a good movie".)
+  static const _howItWorksWords = {'sensor', 'sensors', 'led', 'solar'};
   static const _howItWorksPhrases = [
     'how does it work', 'how does this work', 'how does smart curb',
     'what is smart curb', 'what is this app', 'how it works', 'what does this app',
     'what is a smart curb', 'what are smart curbs', 'what is a curb',
     'what does a smart curb do', 'what is smartcurb', 'what do the curbs do',
     'what are the curbs', 'what do the led', 'what does the led',
-    'led lights', 'led light', 'led panel', 'solar',
+    'led lights', 'led light', 'led panel', 'solar', 'about smart curb',
+    'about smart curbs', 'about the curbs', 'about the app', 'about this app',
+    'about smartcurb', 'about you guys',
     'what is this',
   ];
   static const _supportWords = {
@@ -2930,9 +3258,28 @@ class SmartCurbAssistant {
   static final List<_Faq> _safety = [
     _Faq(
       (m) =>
-          m.has({'hurt', 'injured', 'injury', 'injuries', 'bleeding',
-            'ambulance', 'emergency', 'unconscious', 'fainted', 'dying',
-            'paramedic', 'paramedics'}) ||
+          m.has({'suicide', 'suicidal', 'selfharm'}) ||
+          m.anyPhrase(['kill myself', 'end my life', 'hurt myself',
+            'want to die', 'wanna die', 'self harm', 'take my life',
+            'dont want to live', 'do not want to live', 'better off dead',
+            'no reason to live', 'end it all', 'cut myself']),
+      const ChatReply(
+        "I'm really sorry you're feeling this way, and I'm glad you told me. "
+        "You don't have to go through this alone. Please call or text 988 "
+        '(the Suicide & Crisis Lifeline, free and open 24/7) to talk with '
+        'someone right now, or reach out to someone you trust. If you\'re in '
+        'immediate danger, call $kEmergencyNumber. FAU students can also '
+        'reach Counseling and Psychological Services (CAPS).',
+      ),
+    ),
+    _Faq(
+      (m) =>
+          m.has({'injured', 'injury', 'injuries', 'bleeding', 'ambulance',
+            'emergency', 'unconscious', 'fainted', 'dying', 'paramedic',
+            'paramedics'}) ||
+          // Hurt, but not "my feelings got hurt".
+          (m.has({'hurt'}) &&
+              !m.has({'feelings', 'feeling', 'heart', 'heartbroken', 'pride'})) ||
           m.anyPhrase(['call 911', 'need help now', 'medical help',
             'heart attack', 'cant breathe', 'not breathing', 'need a doctor']),
       const ChatReply(
@@ -2972,6 +3319,15 @@ class SmartCurbAssistant {
     _Faq(
       (m) =>
           m.has({'accident', 'accidents', 'collision', 'rearended'}) ||
+          // "I hit a dog / a cyclist with my car", "I ran over something".
+          (m.has({'hit', 'struck', 'bumped'}) &&
+              (m.any(_vehicleWords) ||
+                  m.has({'dog', 'cat', 'animal', 'deer', 'pedestrian',
+                    'person', 'someone', 'somebody', 'bike', 'bicycle',
+                    'cyclist', 'biker', 'kid', 'child', 'man', 'woman',
+                    'student', 'pole', 'tree', 'wall', 'gate', 'sign'}))) ||
+          m.anyPhrase(['ran over a', 'ran over an', 'ran over my',
+            'ran over someone', 'ran over something', 'ran over the']) ||
           m.anyPhrase(['car crash', 'crashed my car', 'crashed into',
             'i crashed', 'hit my car', 'hit a car', 'hit another car',
             'hit someone', 'hit a person', 'hit a pole', 'hit a wall',
@@ -3157,6 +3513,8 @@ class SmartCurbAssistant {
         "• Your location is used on your phone for your arrow and "
         "directions, and isn't saved to your account.\n"
         '• There are no payments and no ads, so no card details anywhere.\n'
+        "• Chat questions I can't answer myself may go to Google's Gemini "
+        'AI, with your name, email and phone number hidden first.\n'
         'One important tip: please don\'t type while driving. Focus mode '
         'guides you without typing.',
         [ChatAction.ask('Is my data private?')],
@@ -3321,7 +3679,9 @@ class SmartCurbAssistant {
         "There's no separate privacy policy page in the app yet. In short: "
         'your location is only used on your phone for directions, and what '
         "Smart Curb stores is what you enter (your profile, cars and saved "
-        'places), tied to your login. For anything more, ask the team at '
+        "places), tied to your login. Chat questions I can't answer myself "
+        "may go to Google's Gemini AI, with your personal details hidden. "
+        'For anything more, ask the team at '
         '$kSupportEmail.',
         [ChatAction.ask('Is this app safe to use?')],
       ),
@@ -3981,7 +4341,9 @@ class SmartCurbAssistant {
         "you; Smart Curb doesn't save it to your account. What's stored is "
         'what you enter yourself: your profile, your vehicles and your saved '
         'places, tied to your login. The curbs only report whether each spot '
-        'is taken or open.',
+        "is taken or open. Chat questions I can't answer myself may go to "
+        "Google's Gemini AI (with your name, email and phone number hidden), "
+        'so please never share passwords in the chat.',
         [ChatAction.ask('Contact support')],
       ),
     ),
@@ -4589,7 +4951,10 @@ class _BuildingIndex {
         // Support Services building (its full name still finds it).
         if (seen) {
           matched++;
-          score += (SmartCurbAssistant.known.contains(w) ? 0.5 : 1) / _df[w]!;
+          // (Words are singular here: "campus" is "campu".)
+          final known = SmartCurbAssistant.known.contains(w) ||
+              SmartCurbAssistant.known.contains('${w}s');
+          score += (known ? 0.5 : 1) / _df[w]!;
         }
       }
       if (score > 0) {
@@ -4629,8 +4994,11 @@ class ChatMessage {
 /// The conversation, owned by the main screen so it's still there when the
 /// chat is opened again.
 class ChatSession {
-  ChatSession({AssistantData? data})
-      : assistant = SmartCurbAssistant(data ?? FirebaseAssistantData());
+  ChatSession({AssistantData? data, GeminiChat? ai})
+      : assistant = SmartCurbAssistant(
+          data ?? FirebaseAssistantData(),
+          ai: ai ?? GeminiChat(),
+        );
 
   final SmartCurbAssistant assistant;
   final List<ChatMessage> messages = [];
@@ -4921,7 +5289,15 @@ class _AssistantChatPageState extends State<AssistantChatPage> {
                     const LiveDot(),
                     const SizedBox(width: 6),
                     AnimatedText(
-                      _typing ? 'typing…' : 'Online',
+                      _typing
+                          ? 'typing…'
+                          // Debug builds show whether the AI key loaded
+                          // (it needs --dart-define-from-file=secrets.json).
+                          : kDebugMode
+                              ? ((_session.assistant.ai?.enabled ?? false)
+                                  ? 'Online · Gemini on'
+                                  : 'Online · no AI key')
+                              : 'Online',
                       style: const TextStyle(fontSize: 11.5, color: kTextMuted),
                     ),
                   ],
