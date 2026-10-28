@@ -1,5 +1,5 @@
 import Sign from "./pages/Sign";
-import Assistant from "./pages/Assistant";
+import { lazy, Suspense } from "react";
 import Analytics from "./pages/Analytics";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Login from "./pages/Login";
@@ -16,6 +16,10 @@ import Settings from "./pages/Settings";
 import Setup from "./pages/Setup";
 import Module from "./pages/Module";
 
+// The Assistant carries its phrase lists and examples, so it loads only when opened.
+const Assistant = lazy(() => import("./pages/Assistant"));
+const assistantLoading = <div role="status" className="sws-page-body" style={{ color: "var(--dim)", fontSize: 13 }}>Loading the assistant…</div>;
+
 function App() {
   return (
     <BrowserRouter>
@@ -28,7 +32,7 @@ function App() {
           <Route path="/overview" element={<Overview />} />
           <Route path="/lots" element={<LotDetail />} />
           <Route path="/units" element={<Units />} />
-          <Route path="/assistant" element={<Assistant />} />
+          <Route path="/assistant" element={<Suspense fallback={assistantLoading}><Assistant /></Suspense>} />
           <Route path="/analytics" element={<Analytics />} />
           <Route path="/users" element={<Users />} />
           <Route path="/simulation" element={<DemoControls />} />
