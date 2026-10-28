@@ -918,49 +918,6 @@ button.lp-stall { background: none; border: 0; padding: 0; margin: 0; font: inhe
   .su-foot > .sws-btn-primary { margin-left: auto; }
 }
 
-/* ---------- Requests (src/pages/Requests.jsx) ---------- */
-/* New-request count in the sidebar: brand, unlike the quiet ON/OFF badge. */
-.sws-nav-badge.is-count { color: var(--brand); background: var(--brand-bg); box-shadow: inset 0 0 0 1px var(--brand-line); font-variant-numeric: tabular-nums; }
-
-.rq-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-3); }
-.rq-item {
-  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--sp-4); align-items: start;
-  padding: 16px 18px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
-}
-.rq-item:has(.rq-badge.is-new) { border-left: 2px solid var(--brand); }
-.rq-main { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.rq-head { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
-.rq-name { font-family: var(--mono); font-size: var(--fs-section); font-weight: 600; margin: 0; overflow-wrap: anywhere; }
-.rq-badge.is-contacted { background: var(--card); color: var(--text); box-shadow: inset 0 0 0 1px var(--line-strong); }
-.rq-badge.is-closed { background: var(--card); color: var(--dim); }
-.rq-meta { display: flex; flex-wrap: wrap; gap: 4px 0; font-size: 12.5px; color: var(--dim); }
-.rq-meta > span + span::before { content: "·"; margin: 0 7px; color: var(--faint); }
-.rq-email { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; overflow-wrap: anywhere; }
-.rq-email svg { flex-shrink: 0; }
-.rq-msg { margin: 4px 0 0; font-size: var(--fs-body); line-height: 1.55; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
-.rq-msg.is-empty { color: var(--faint); }
-
-/* Status: native radios as a segmented control (same look as the Live / Simulation switch). */
-.rq-seg { display: flex; gap: 3px; padding: 3px; margin: 0; min-width: 0; border-radius: 7px; border: 1px solid var(--line); background: var(--bg); }
-.rq-seg[aria-busy="true"] { opacity: 0.6; }
-.rq-seg-opt {
-  height: 30px; padding: 0 12px; border-radius: 5px; display: inline-flex; align-items: center; justify-content: center;
-  font-size: 12.5px; font-weight: 600; color: var(--nav-text); cursor: pointer; white-space: nowrap;
-  transition: background-color var(--dur-fast), color var(--dur-fast), box-shadow var(--dur-fast);
-}
-.rq-seg-opt:hover { color: var(--text); }
-.rq-seg-opt:has(input:checked) { background: var(--card); color: var(--text); box-shadow: inset 0 0 0 1px var(--line-strong); cursor: default; }
-.rq-seg-opt.is-new:has(input:checked) { background: var(--brand-bg); color: var(--brand); box-shadow: inset 0 0 0 1px var(--brand-line); }
-.rq-seg-opt.is-closed:has(input:checked) { color: var(--dim); }
-.rq-seg-opt:has(input:focus-visible) { outline: 2px solid var(--text); outline-offset: 2px; }
-.rq-seg[aria-busy="true"] .rq-seg-opt { cursor: progress; }
-
-@media (max-width: 900px) {
-  .rq-item { grid-template-columns: minmax(0, 1fr); padding: 14px; }
-  .rq-seg { align-self: stretch; }
-  .rq-seg-opt { flex: 1; }
-}
-
 /* ---------- Landing page (src/pages/Landing.jsx) ---------- */
 /* Off-white type on near-black; lime only for actions and the brand mark. */
 .ld { min-height: 100dvh; background: var(--bg); color: var(--text); }

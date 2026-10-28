@@ -1,19 +1,20 @@
-import { useEffect, useState } from "react";
-import { ref, onValue, push, set, update, serverTimestamp } from "firebase/database";
+import { ref, push, set, update, serverTimestamp } from "firebase/database";
 import { database } from "./firebase";
 import { SIM_ROOT, dataPath, getDataMode } from "./dataMode";
 
 // Quote requests from the website:
-//   leads/<autoId> = { name, email, organization, facilityType, message, createdAt, status }
-// Anyone can create one (the public form is signed out); only managers read,
-// change status or delete (see database.rules.json). In Simulation they live
-// at demo/leads and hold fake data only.
+//   leads/<autoId> = { name, email, organization, facilityType, message, createdAt, status, siteId? }
+// Anyone can create one (the public form is signed out); only platform admins,
+// in the company console, read them, change status or delete (see database.rules.json).
+// In Simulation they live at demo/leads and hold fake data only.
 export const LEADS_PATH = "leads";
 
 export const LEAD_STATUSES = [
   { id: "new", label: "New" },
   { id: "contacted", label: "Contacted" },
   { id: "closed", label: "Closed" },
+  // Converted to a customer (src/console/data.js convertLead). Final, and never picked by hand.
+  { id: "won", label: "Won" },
 ];
 
 // Longest allowed length of each field, matching the rules (email, organization
@@ -54,25 +55,4 @@ export function setLeadStatus(id, status) {
     return Promise.reject(new Error(`Refusing to write outside the simulation: ${full}`));
   }
   return update(ref(database, full), { status });
-}
-
-// Leads for the current mode, newest first. Only subscribes when enabled
-// (managers), since the database refuses everyone else.
-export function useLeads(mode, enabled = true) {
-  const [state, setState] = useState({ mode: null, leads: [], error: false });
-  useEffect(() => {
-    if (!enabled) return undefined;
-    return onValue(
-      ref(database, dataPath(LEADS_PATH)),
-      (s) => {
-        const leads = Object.entries(s.val() || {})
-          .map(([id, l]) => ({ id, ...l }))
-          .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-        setState({ mode, leads, error: false });
-      },
-      () => setState({ mode, leads: [], error: true }),
-    );
-  }, [mode, enabled]);
-  const loaded = enabled && state.mode === mode;
-  return { loaded, leads: loaded ? state.leads : [], error: loaded && state.error };
 }

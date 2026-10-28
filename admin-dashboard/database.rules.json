@@ -93,14 +93,15 @@
     },
 
     // Quote requests from the website. Anyone, even signed out, can CREATE one
-    // fully valid lead at a new key. Only managers read them, change status or
-    // delete. Nobody can overwrite a lead or edit its fields after it's created.
+    // fully valid lead at a new key. Only platform admins (the company console)
+    // read them, change status or delete; customer managers can't.
+    // Nobody can overwrite a lead or edit its fields after it's created.
     "leads": {
-      ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'manager'",
+      ".read": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true",
       "$leadId": {
-        // Create: only where nothing exists yet. Delete: managers only.
+        // Create: only where nothing exists yet. Delete: platform admins only.
         // Status changes go through the status rule below.
-        ".write": "(!data.exists() && newData.exists()) || (data.exists() && !newData.exists() && auth != null && root.child('users').child(auth.uid).child('role').val() === 'manager')",
+        ".write": "(!data.exists() && newData.exists()) || (data.exists() && !newData.exists() && auth != null && root.child('platformAdmins').child(auth.uid).val() === true)",
         ".validate": "newData.hasChildren(['name', 'email', 'facilityType', 'status', 'createdAt'])",
         "name": { ".validate": "!data.exists() && newData.isString() && newData.val().length >= 1 && newData.val().length <= 80" },
         "email": { ".validate": "!data.exists() && newData.isString() && newData.val().length < 120 && newData.val().matches(/^[^@ ]+@[^@ ]+[.][^@ ]+$/)" },
@@ -109,17 +110,65 @@
         "message": { ".validate": "!data.exists() && newData.isString() && newData.val().length < 1000" },
         "createdAt": { ".validate": "!data.exists() && newData.isNumber() && newData.val() === now" },
         "status": {
-          ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'manager' && data.exists()",
-          // A new lead starts as "new"; managers then move it between the three.
-          ".validate": "newData.isString() && (data.exists() ? newData.val().matches(/^(new|contacted|closed)$/) : newData.val() === 'new')"
+          ".write": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true && data.exists()",
+          // A new lead starts as "new"; platform admins then move it between new,
+          // contacted and closed. "won" means converted to a customer: it needs the
+          // siteId below, and it's final.
+          ".validate": "newData.isString() && (data.exists() ? ((data.val() === 'won' ? newData.val() === 'won' : newData.val().matches(/^(new|contacted|closed|won)$/)) && (newData.val() !== 'won' || newData.parent().child('siteId').exists())) : newData.val() === 'new')"
         },
+        // The customer a lead was converted into. Set once, in the same write that
+        // creates sites/<siteId> with fromLeadId pointing back here and sets status "won".
+        "siteId": {
+          ".write": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true && data.parent().exists() && !data.exists()",
+          ".validate": "newData.isString() && newData.val().matches(/^[A-Za-z0-9_-]+$/) && newData.parent().child('status').val() === 'won' && newData.parent().parent().parent().child('sites').child(newData.val()).child('fromLeadId').val() === $leadId"
+        },
+        "$other": { ".validate": false }
+      }
+    },
+
+    // Vendor accounts for the company console: platformAdmins/<uid> = true.
+    // Set only in the Firebase console; no client can write it. Each signed-in
+    // user can read their own entry, so the console can check its access.
+    "platformAdmins": {
+      "$uid": {
+        ".read": "auth != null && $uid === auth.uid"
+      }
+    },
+
+    // Customer deployments, managed in the company console. Platform admins only.
+    "sites": {
+      ".read": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true",
+      "$siteId": {
+        ".write": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true",
+        ".validate": "newData.hasChildren(['name', 'type', 'status', 'createdAt'])",
+        "name": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 80" },
+        "type": { ".validate": "newData.isString() && newData.val().matches(/^(campus|mall|garage|hotel|other)$/)" },
+        "status": { ".validate": "newData.isString() && newData.val().matches(/^(prospect|active|paused)$/)" },
+        "contactName": { ".validate": "newData.isString() && newData.val().length <= 80" },
+        "contactEmail": { ".validate": "newData.isString() && newData.val().length <= 120 && newData.val().matches(/^[^@ ]+@[^@ ]+[.][^@ ]+$/)" },
+        "notes": { ".validate": "newData.isString() && newData.val().length <= 500" },
+        // The quote request the site came from. Set only by converting that lead: in the
+        // same write the lead gets siteId = this site, and it can't already be "won",
+        // so one lead never becomes two customers. Unchanged values always pass.
+        "fromLeadId": { ".validate": "newData.isString() && newData.val().matches(/^[A-Za-z0-9_-]+$/) && (newData.val() === data.val() || (root.child('leads').child(newData.val()).child('status').val() !== 'won' && newData.parent().parent().parent().child('leads').child(newData.val()).child('siteId').val() === $siteId))" },
+        // Server time on create, then fixed.
+        "createdAt": { ".validate": "newData.isNumber() && (data.exists() ? newData.val() === data.val() : newData.val() === now)" },
         "$other": { ".validate": false }
       }
     },
 
     // Public read: the lot entrance sign runs signed-out on a TV.
     "lots": {
-      ".read": true
+      ".read": true,
+      "$lotId": {
+        // Which customer site a lot belongs to. Platform admins only, on a lot
+        // that already exists, and only to a site that exists once the write lands
+        // (so a site can be created and given lots in one write), or removed.
+        "siteId": {
+          ".write": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true && data.parent().exists()",
+          ".validate": "newData.isString() && newData.val().matches(/^[A-Za-z0-9_-]+$/) && newData.parent().parent().parent().child('sites').child(newData.val()).exists()"
+        }
+      }
     },
 
     "units": {
@@ -208,11 +257,13 @@
 
     // Simulation and demo data. Public read (demo sign, driver app);
     // only dashboard staff can write. Real curbs never live here.
+    // Read is granted per child, not on demo/ itself, so demo/sites and
+    // demo/platformAdmins stay private like their live versions.
     "demo": {
-      ".read": true,
       // Simulated site settings follow the same rules as config/site, so Setup
       // behaves the same in Simulation: only managers write, same validation.
       "config": {
+        ".read": true,
         "site": {
           ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'manager'",
           "siteName": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 80" },
@@ -232,8 +283,68 @@
           "$other": { ".validate": false }
         }
       },
-      // Everything else under demo/ (units, lots, history, latency, simLock): any staff account.
+      // Fake quote requests for the company console's Simulation mode. Platform
+      // admins only, like leads/. They're fake, so the console seeds them with past
+      // dates and any status, and can replace or delete them; the shape is still
+      // checked, and converting follows the same won/siteId rules as leads/.
+      "leads": {
+        ".read": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true",
+        "$leadId": {
+          ".write": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true",
+          ".validate": "newData.hasChildren(['name', 'email', 'facilityType', 'status', 'createdAt'])",
+          "name": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 80" },
+          "email": { ".validate": "newData.isString() && newData.val().length < 120 && newData.val().matches(/^[^@ ]+@[^@ ]+[.][^@ ]+$/)" },
+          "organization": { ".validate": "newData.isString() && newData.val().length < 120" },
+          "facilityType": { ".validate": "newData.isString() && newData.val().matches(/^(university|stadium|airport|hospital|shopping|city)$/)" },
+          "message": { ".validate": "newData.isString() && newData.val().length < 1000" },
+          "createdAt": { ".validate": "newData.isNumber() && newData.val() <= now" },
+          "status": { ".validate": "newData.isString() && newData.val().matches(/^(new|contacted|closed|won)$/) && (newData.val() !== 'won' || newData.parent().child('siteId').exists()) && (data.val() !== 'won' || newData.val() === 'won')" },
+          "siteId": { ".validate": "newData.isString() && newData.val().matches(/^[A-Za-z0-9_-]+$/) && (newData.val() === data.val() || (newData.parent().child('status').val() === 'won' && newData.parent().parent().parent().child('sites').child(newData.val()).child('fromLeadId').val() === $leadId))" },
+          "$other": { ".validate": false }
+        }
+      },
+      // Simulated lots: public read, staff write, as before. siteId follows the live
+      // rule: only platform admins set it, and only to an existing demo/sites entry.
+      // Staff writes cascade from demo/lots, so the platform-admin check sits in
+      // .validate too. Staff can still drop siteId (Simulation's reset rewrites demo/lots).
+      "lots": {
+        ".read": true,
+        ".write": "auth != null && root.child('users').child(auth.uid).exists()",
+        "$lotId": {
+          "siteId": {
+            ".write": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true && data.parent().exists()",
+            ".validate": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true && newData.isString() && newData.val().matches(/^[A-Za-z0-9_-]+$/) && newData.parent().parent().parent().child('sites').child(newData.val()).exists()"
+          }
+        }
+      },
+      // Simulated customer sites: same rules as sites/. Platform admin status always
+      // comes from the live platformAdmins/, so one entry covers both modes.
+      "sites": {
+        ".read": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true",
+        "$siteId": {
+          ".write": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true",
+          ".validate": "newData.hasChildren(['name', 'type', 'status', 'createdAt'])",
+          "name": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 80" },
+          "type": { ".validate": "newData.isString() && newData.val().matches(/^(campus|mall|garage|hotel|other)$/)" },
+          "status": { ".validate": "newData.isString() && newData.val().matches(/^(prospect|active|paused)$/)" },
+          "contactName": { ".validate": "newData.isString() && newData.val().length <= 80" },
+          "contactEmail": { ".validate": "newData.isString() && newData.val().length <= 120 && newData.val().matches(/^[^@ ]+@[^@ ]+[.][^@ ]+$/)" },
+          "notes": { ".validate": "newData.isString() && newData.val().length <= 500" },
+          "fromLeadId": { ".validate": "newData.isString() && newData.val().matches(/^[A-Za-z0-9_-]+$/) && (newData.val() === data.val() || (root.child('demo').child('leads').child(newData.val()).child('status').val() !== 'won' && newData.parent().parent().parent().child('leads').child(newData.val()).child('siteId').val() === $siteId))" },
+          "createdAt": { ".validate": "newData.isNumber() && (data.exists() ? newData.val() === data.val() : newData.val() === now)" },
+          "$other": { ".validate": false }
+        }
+      },
+      // Mirrors platformAdmins/ for parity: read your own entry, no client writes.
+      // It grants nothing; access to demo/sites is checked against the live list.
+      "platformAdmins": {
+        "$uid": {
+          ".read": "auth != null && $uid === auth.uid"
+        }
+      },
+      // Everything else under demo/ (units, history, latency, simLock): any staff account.
       "$other": {
+        ".read": true,
         ".write": "auth != null && root.child('users').child(auth.uid).exists()"
       }
     }

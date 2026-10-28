@@ -13,7 +13,7 @@
       // Keep the key and theme list in step with src/themes.js.
       (function () {
         try {
-          if (!/^\/(overview|lots|units|assistant|analytics|users|requests|simulation|demo|settings|setup|modules)(\/|$)/.test(location.pathname)) return;
+          if (!/^\/(overview|lots|units|assistant|analytics|users|simulation|demo|settings|setup|modules)(\/|$)/.test(location.pathname)) return;
           var t = localStorage.getItem("sws-theme");
           if (/^(lime|paper|midnight|ember|mint|violet)$/.test(t)) document.documentElement.setAttribute("data-theme", t);
         } catch (e) { /* storage blocked: the default look until the database answers */ }

@@ -2,7 +2,7 @@ import { c, mono } from "../theme";
 import logo from "../assets/smartcurb-logo.jpg";
 
 // Shared two-pane layout for Sign in and Create account.
-function AuthShell({ children }) {
+function AuthShell({ children, sub = "ADMIN CONSOLE" }) {
   return (
     <div className="sws-login" style={{ display: "flex", minHeight: "100dvh" }}>
       <div
@@ -17,7 +17,7 @@ function AuthShell({ children }) {
           <img src={logo} alt="Smart Curb logo" width={132} height={132} style={{ width: 132, height: 132, borderRadius: 14, objectFit: "cover" }} />
           <div>
             <div style={{ fontFamily: mono, fontSize: 14, fontWeight: 600, letterSpacing: 0.3 }}>SMART WHEEL STOP</div>
-            <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: 1.4, color: c.dim }}>ADMIN CONSOLE</div>
+            <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: 1.4, color: c.dim }}>{sub}</div>
           </div>
         </div>
         <div>

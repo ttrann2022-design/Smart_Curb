@@ -15,7 +15,6 @@ import NotFound from "./pages/NotFound";
 import Settings from "./pages/Settings";
 import Setup from "./pages/Setup";
 import Module from "./pages/Module";
-import Requests from "./pages/Requests";
 
 function App() {
   return (
@@ -36,7 +35,6 @@ function App() {
           <Route path="/demo" element={<Navigate to="/simulation" replace />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/setup" element={<Setup />} />
-          <Route path="/requests" element={<Requests />} />
           <Route path="/modules/:id" element={<Module />} />
         </Route>
         <Route path="*" element={<NotFound />} />
