@@ -22,6 +22,15 @@ const DASHBOARD_MARKERS = [
   "A dashboard built around the curbs",
 ];
 
+// Text from the console's own pages (Requests, Customers, Deployments, Home).
+// None of it may reach a customer bundle; quote requests live only in the console.
+const CONSOLE_PAGE_MARKERS = [
+  "Convert to customer",
+  "Lots without a customer",
+  "Reload demo customers",
+  "Assign a lot",
+];
+
 const [dir, expected] = process.argv.slice(2);
 
 function fail(msg) {
@@ -69,8 +78,12 @@ if (expected === "console") {
   if (!bundle.includes(CONSOLE_MARKER)) fail(`${dir}/ doesn't contain the console marker "${CONSOLE_MARKER}".`);
   const leaked = DASHBOARD_MARKERS.filter((m) => bundle.includes(m));
   if (leaked.length) fail(`the console bundle contains customer dashboard code: ${leaked.map((m) => `"${m}"`).join(", ")}.`);
+  const absent = CONSOLE_PAGE_MARKERS.filter((m) => !bundle.includes(m));
+  if (absent.length) fail(`the console bundle is missing its own pages' text: ${absent.map((m) => `"${m}"`).join(", ")}. If you changed that text, update CONSOLE_PAGE_MARKERS in scripts/check-build.mjs.`);
 } else {
   if (bundle.includes(CONSOLE_MARKER)) fail(`the ${expected} bundle contains company console code ("${CONSOLE_MARKER}").`);
+  const leaked = CONSOLE_PAGE_MARKERS.filter((m) => bundle.includes(m));
+  if (leaked.length) fail(`the ${expected} bundle contains company console pages: ${leaked.map((m) => `"${m}"`).join(", ")}.`);
   const missing = DASHBOARD_MARKERS.filter((m) => !bundle.includes(m));
   if (missing.length) fail(`the ${expected} bundle is missing dashboard text it should have: ${missing.map((m) => `"${m}"`).join(", ")}. If you changed that text, update DASHBOARD_MARKERS in scripts/check-build.mjs.`);
 }

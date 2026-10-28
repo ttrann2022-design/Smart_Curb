@@ -1,0 +1,173 @@
+/* ---------- Company console (src/console/) ----------
+   Only the console imports this file, so none of it reaches the customer bundle.
+   Same tokens, spacing and motion as index.css; cn-* for console layouts. */
+
+/* Field errors and the textarea, as on the website's quote form. */
+.cn-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.cn-optional { font-weight: 500; color: var(--dim); }
+.cn-err { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--busy-text); }
+.cn-err svg { flex-shrink: 0; }
+.cn-textarea { height: auto; padding: 10px 12px; line-height: 1.5; resize: vertical; min-height: 96px; }
+.cn-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-4); }
+.cn-form .is-wide { grid-column: 1 / -1; }
+.cn-form-actions { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
+
+/* Home: five counts, each a link to its page. */
+.cn-tiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; }
+.cn-tile-link { display: block; color: inherit; text-decoration: none; border-radius: var(--radius); }
+.cn-tile-link .sws-tile-stat { height: 100%; transition: border-color var(--dur-fast); }
+.cn-tile-link:hover .sws-tile-stat { border-color: var(--line-strong); }
+.cn-tile-link:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+
+/* Customer status badges. */
+.cn-status.is-prospect { background: var(--card); color: var(--text); box-shadow: inset 0 0 0 1px var(--line-strong); }
+.cn-status.is-active { background: var(--open-bg); color: var(--open-text); }
+.cn-status.is-paused { background: var(--warn-bg); color: var(--warn-text); }
+
+/* Lists of rows: customers, newest requests, curbs. Grid rows that fold into
+   cards when their container is narrow (phones, or a narrow card). */
+.cn-list { container-type: inline-size; }
+.cn-row {
+  display: grid; align-items: center; column-gap: var(--sp-4); row-gap: 4px;
+  padding: var(--sp-3); border-radius: var(--radius); font-size: var(--fs-body); min-width: 0;
+}
+.cn-body .cn-row { border-top: 1px solid var(--line); border-radius: 0; }
+.cn-body .cn-row:first-child { border-top: none; }
+a.cn-row, .cn-row.is-link { color: inherit; text-decoration: none; transition: background-color var(--dur-fast); }
+a.cn-row:hover, .cn-row.is-link:hover { background: var(--soft-tint); }
+a.cn-row:focus-visible { outline: 2px solid var(--text); outline-offset: -2px; }
+/* A link inside a row that covers the whole row (the row stays a table row for screen readers). */
+.cn-row.is-link { position: relative; }
+.cn-row-link { color: inherit; text-decoration: none; }
+.cn-row-link::after { content: ""; position: absolute; inset: 0; border-radius: inherit; }
+.cn-row-link:focus-visible { outline: none; }
+.cn-row.is-link:has(.cn-row-link:focus-visible) { outline: 2px solid var(--text); outline-offset: -2px; }
+.cn-c { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cn-name { font-weight: 600; }
+.cn-dim { color: var(--dim); }
+.cn-warn { color: var(--attention); }
+.cn-num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+/* Customers: name | type | status | lots | curbs | online | last seen */
+.cn-cust { grid-template-columns: minmax(160px, 1.6fr) 90px 100px 60px 60px 120px 110px; grid-template-areas: "name type status lots curbs online seen"; }
+.cn-cust > :nth-child(1) { grid-area: name; }
+.cn-cust > :nth-child(2) { grid-area: type; }
+.cn-cust > :nth-child(3) { grid-area: status; }
+.cn-cust > :nth-child(4) { grid-area: lots; }
+.cn-cust > :nth-child(5) { grid-area: curbs; }
+.cn-cust > :nth-child(6) { grid-area: online; }
+.cn-cust > :nth-child(7) { grid-area: seen; }
+.cn-key { display: none; color: var(--dim); }
+@container (max-width: 720px) {
+  .cn-cust { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name status" "type online" "lots seen" "curbs curbs"; padding: var(--sp-3) var(--sp-2); }
+  .cn-cust.cn-head { display: none; }
+  .cn-cust > :nth-child(3), .cn-cust > :nth-child(6), .cn-cust > :nth-child(7) { justify-self: end; }
+  .cn-cust > :nth-child(5) { display: none; }
+  .cn-key { display: inline; }
+  .cn-cust .cn-c { font-size: 12px; }
+  .cn-cust .cn-name { font-size: var(--fs-body); }
+}
+
+/* Curbs in a lot: id | status | battery | last seen */
+.cn-curb { grid-template-columns: minmax(80px, 1fr) 100px 130px 120px; padding: 8px var(--sp-3); }
+.cn-curb .cn-id { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-weight: 600; }
+.cn-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--free); }
+.cn-dot.is-off { background: var(--offline-mark); }
+.cn-batt { display: flex; align-items: center; gap: var(--sp-2); }
+.cn-bar { width: 48px; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; flex-shrink: 0; }
+.cn-bar > span { display: block; height: 100%; background: var(--nav-text); }
+.cn-bar.is-low > span { background: var(--attention); }
+@container (max-width: 520px) {
+  .cn-curb { grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "id status status" "batt batt seen"; padding: 8px var(--sp-2); }
+  .cn-curb > :nth-child(1) { grid-area: id; }
+  .cn-curb > :nth-child(2) { grid-area: status; justify-self: end; }
+  .cn-curb > :nth-child(3) { grid-area: batt; font-size: 12px; }
+  .cn-curb > :nth-child(4) { grid-area: seen; justify-self: end; font-size: 12px; }
+  .cn-curb.cn-head { display: none; }
+}
+
+/* A lot inside a customer or deployment card. */
+.cn-lot { border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); overflow: hidden; }
+.cn-lot + .cn-lot { margin-top: var(--sp-3); }
+.cn-lot-head { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; padding: 10px var(--sp-3); background: var(--panel-2); border-bottom: 1px solid var(--line); }
+.cn-lot-name { font-family: var(--mono); font-weight: 600; font-size: var(--fs-section); margin: 0; }
+.cn-lot-meta { font-size: 12.5px; color: var(--dim); }
+.cn-lot-head > :last-child:not(:first-child) { margin-left: auto; }
+.cn-lot-empty { padding: 12px var(--sp-3); font-size: 12.5px; color: var(--dim); }
+
+/* Phone top bar: Simulation stays labelled after the banner scrolls away. */
+.cn-sim-badge { margin-left: auto; margin-right: 10px; background: var(--sim-bg); color: var(--sim); box-shadow: inset 0 0 0 1px var(--sim-line); }
+
+/* Assign a lot: picker and button on one line, stacked on phones. */
+.cn-inline { display: flex; align-items: flex-end; gap: var(--sp-3); flex-wrap: wrap; }
+.cn-inline > .sws-field { flex: 1 1 220px; }
+.cn-inline + .sws-field-hint { margin-top: -2px; }
+
+/* Detail page header line: back link, then badges. */
+.cn-back { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; }
+.cn-badges { display: flex; gap: var(--sp-2); flex-wrap: wrap; align-items: center; }
+
+/* Requests: convert action under each request. */
+.rq-badge.is-won { background: var(--open-bg); color: var(--open-text); }
+.rq-item:has(.rq-badge.is-won) { border-left: 2px solid var(--open); }
+.rq-actions { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; margin-top: 6px; }
+/* Home's newest requests wrap instead of truncating when the card is narrow. */
+@container (max-width: 520px) {
+  .cn-req { grid-template-columns: minmax(0, 1fr) !important; row-gap: 6px !important; }
+  .cn-req > .cn-c { white-space: normal; }
+}
+
+@media (max-width: 1100px) {
+  .cn-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 900px) {
+  .cn-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .cn-form { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 520px) {
+  .cn-tiles .sws-tile-value { font-size: 24px; }
+}
+
+/* ---------- Requests (src/console/Requests.jsx) ---------- */
+/* New-request count in the sidebar: brand, unlike the quiet ON/OFF badge. */
+.sws-nav-badge.is-count { color: var(--brand); background: var(--brand-bg); box-shadow: inset 0 0 0 1px var(--brand-line); font-variant-numeric: tabular-nums; }
+
+.rq-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-3); }
+.rq-item {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--sp-4); align-items: start;
+  padding: 16px 18px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+}
+.rq-item:has(.rq-badge.is-new) { border-left: 2px solid var(--brand); }
+.rq-main { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.rq-head { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+.rq-name { font-family: var(--mono); font-size: var(--fs-section); font-weight: 600; margin: 0; overflow-wrap: anywhere; }
+.rq-badge.is-contacted { background: var(--card); color: var(--text); box-shadow: inset 0 0 0 1px var(--line-strong); }
+.rq-badge.is-closed { background: var(--card); color: var(--dim); }
+.rq-meta { display: flex; flex-wrap: wrap; gap: 4px 0; font-size: 12.5px; color: var(--dim); }
+.rq-meta > span + span::before { content: "·"; margin: 0 7px; color: var(--faint); }
+.rq-email { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; overflow-wrap: anywhere; }
+.rq-email svg { flex-shrink: 0; }
+.rq-msg { margin: 4px 0 0; font-size: var(--fs-body); line-height: 1.55; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
+.rq-msg.is-empty { color: var(--faint); }
+
+/* Status: native radios as a segmented control (same look as the Live / Simulation switch). */
+.rq-seg { display: flex; gap: 3px; padding: 3px; margin: 0; min-width: 0; border-radius: 7px; border: 1px solid var(--line); background: var(--bg); }
+.rq-seg[aria-busy="true"] { opacity: 0.6; }
+.rq-seg-opt {
+  height: 30px; padding: 0 12px; border-radius: 5px; display: inline-flex; align-items: center; justify-content: center;
+  font-size: 12.5px; font-weight: 600; color: var(--nav-text); cursor: pointer; white-space: nowrap;
+  transition: background-color var(--dur-fast), color var(--dur-fast), box-shadow var(--dur-fast);
+}
+.rq-seg-opt:hover { color: var(--text); }
+.rq-seg-opt:has(input:checked) { background: var(--card); color: var(--text); box-shadow: inset 0 0 0 1px var(--line-strong); cursor: default; }
+.rq-seg-opt.is-new:has(input:checked) { background: var(--brand-bg); color: var(--brand); box-shadow: inset 0 0 0 1px var(--brand-line); }
+.rq-seg-opt.is-closed:has(input:checked) { color: var(--dim); }
+.rq-seg-opt:has(input:focus-visible) { outline: 2px solid var(--text); outline-offset: 2px; }
+.rq-seg[aria-busy="true"] .rq-seg-opt { cursor: progress; }
+
+@media (max-width: 900px) {
+  .rq-item { grid-template-columns: minmax(0, 1fr); padding: 14px; }
+  .rq-seg { align-self: stretch; }
+  .rq-seg-opt { flex: 1; }
+}
+

@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import '../themes.css'
 import '../index.css'
+import './console.css'
 import { CONSOLE_MARKER } from './constants.js'
 import ConsoleApp from './ConsoleApp.jsx'
 
