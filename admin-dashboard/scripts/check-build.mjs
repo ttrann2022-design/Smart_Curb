@@ -12,11 +12,11 @@ import { CONSOLE_MARKER } from "../src/console/constants.js";
 
 const BUILD_CMD = { real: "npm run build", demo: "npm run build:demo", console: "npm run build:console" };
 
-// Text that only the customer dashboard's own pages contain (Layout, Requests,
+// Text that only the customer dashboard's own pages contain (Layout, Lots,
 // Simulation, Landing). None of it may reach the console bundle.
 const DASHBOARD_MARKERS = [
   "Open lot sign",
-  "Quote requests from the website, newest first",
+  "Pick a lot, then a curb to see its status",
   "Load fresh simulated data",
   "Tell us about your parking",
   "A dashboard built around the curbs",

@@ -7,7 +7,6 @@ import { c, mono } from "../theme";
 import { DEMO_BUILD, useDataMode } from "../dataMode";
 import { MODULES, enabledModules, useSiteConfig } from "../site";
 import { applyTheme, clearTheme, normalizeTheme } from "../themes";
-import { useLeads } from "../leads";
 import { stopSimulation, watchSimulation } from "../demo/simulator";
 import DataModeSwitch from "./DataModeSwitch";
 import SimBanner from "./SimBanner";
@@ -22,7 +21,6 @@ const navItems = [
   { label: "Assistant", to: "/assistant", icon: "assistant" },
   { label: "Analytics", to: "/analytics", icon: "analytics" },
   { label: "Users & roles", to: "/users", icon: "users" },
-  { label: "Requests", to: "/requests", icon: "inbox", managerOnly: true },
   { label: "Simulation", to: "/simulation", icon: "simulation", simOnly: true },
   { label: "Settings", to: "/settings", icon: "settings" },
 ];
@@ -57,9 +55,6 @@ function Layout() {
   const theme = themeOverride ?? (siteConfig.loaded ? normalizeTheme(siteConfig.site?.theme) : null);
   useEffect(() => { if (theme) applyTheme(theme); }, [theme]);
   useEffect(() => clearTheme, []);
-  // Quote requests: managers only (the database refuses everyone else).
-  const leadsState = useLeads(mode, role === "manager");
-  const newLeads = leadsState.leads.filter((l) => l.status === "new").length;
 
   useEffect(() => {
     let stopRole = () => {};
@@ -194,7 +189,7 @@ function Layout() {
         </header>
         {mode === "sim" && <SimBanner />}
         <main id="main" tabIndex={-1} className="su-main">
-          <Outlet key={mode} context={{ role, mode, siteConfig, leadsState, theme, previewTheme }} />
+          <Outlet key={mode} context={{ role, mode, siteConfig, theme, previewTheme }} />
         </main>
       </div>
     );
@@ -238,12 +233,6 @@ function Layout() {
               {item.simOnly && (
                 <span className={`sws-badge sws-nav-badge${simActive ? " on" : ""}`} title={simActive ? "Simulation is running" : "Simulation is stopped"}>
                   {simActive ? "ON" : "OFF"}
-                </span>
-              )}
-              {item.to === "/requests" && newLeads > 0 && (
-                // Keyed by count so it pops when a new request arrives.
-                <span key={newLeads} className="sws-badge sws-nav-badge is-count sws-pop">
-                  {newLeads}<span className="sws-sr-only"> new</span>
                 </span>
               )}
             </NavLink>
@@ -321,7 +310,7 @@ function Layout() {
         <main id="main" tabIndex={-1} className="sws-main" style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
           {/* Keyed by path so each route fades in (.sws-route); query changes don't refade. */}
           <div key={location.pathname} className="sws-route">
-            <Outlet key={mode} context={{ role, mode, siteConfig, leadsState, theme, previewTheme }} />
+            <Outlet key={mode} context={{ role, mode, siteConfig, theme, previewTheme }} />
           </div>
         </main>
       </div>
