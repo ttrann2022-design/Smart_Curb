@@ -750,6 +750,10 @@ test("live and simulated sites stay apart", async () => {
 
 // ---------- Company console: lots/<id>/siteId ----------
 
+// What the console writes for a new lot, and a lot as the hardware keeps it.
+const NEW_LOT = { name: "North Garage", totalSpots: 120, openSpots: 120, siteId: "site1", latitude: 40.7128, longitude: -74.006 };
+const HW_LOT = { name: "Lot 14", totalSpots: 10, openSpots: 3, units: { "C-001": true, "C-002": true } };
+
 for (const root of ["", "demo/"]) {
   const lotPath = `${root}lots/lot14`;
 
@@ -787,13 +791,118 @@ for (const root of ["", "demo/"]) {
     assert.equal((await call("GET", `${lotPath}/siteId`, OWNER)).body, "site1");
   });
 
-  test(`a platform admin can't touch the rest of a ${root}lot`, async () => {
-    if (root) await call("PUT", "demo/lots", OWNER, { lot14: { name: "Lot 14" } });
-    denied(await call("PATCH", lotPath, AS.platformAdmin, { name: "Mine" }));
-    denied(await call("PUT", lotPath, AS.platformAdmin, { name: "Lot 14", siteId: "site1" }));
-    denied(await call("PUT", `${root}lots/lot50`, AS.platformAdmin, { name: "New lot" }));
+  test(`a platform admin can't touch other fields of a ${root}lot, replace or delete it`, async () => {
+    await call("PUT", lotPath, OWNER, HW_LOT);
+    for (const fields of [{ openSpots: 5 }, { units: { "C-002": true } }, { colour: "red" }]) denied(await call("PATCH", lotPath, AS.platformAdmin, fields));
+    for (const field of ["name", "totalSpots", "openSpots", "units"]) denied(await call("DELETE", `${lotPath}/${field}`, AS.platformAdmin));
+    denied(await call("PUT", lotPath, AS.platformAdmin, { ...NEW_LOT, name: "Lot 14" }));
+    denied(await call("DELETE", lotPath, AS.platformAdmin));
+    denied(await call("DELETE", `${root}lots`, AS.platformAdmin));
+    assert.deepEqual((await call("GET", lotPath, OWNER)).body, HW_LOT);
   });
 }
+
+// ---------- Company console: creating and editing lots ----------
+
+for (const root of ["", "demo/"]) {
+  const lotPath = `${root}lots/lot14`;
+  const newPath = `${root}lots/northgarage`;
+
+  test(`a platform admin can create a ${root}lot for an existing customer, with or without a location`, async () => {
+    allowed(await call("PUT", newPath, AS.platformAdmin, NEW_LOT));
+    assert.deepEqual((await call("GET", newPath, null)).body, NEW_LOT);
+    const { latitude: _a, longitude: _b, ...noLocation } = NEW_LOT;
+    allowed(await call("PUT", `${root}lots/lot2`, AS.platformAdmin, { ...noLocation, name: "Lot 2" }));
+  });
+
+  test(`a new ${root}lot's values are checked`, async () => {
+    const bad = [
+      { latitude: 200 }, { latitude: -90.5 }, { longitude: 181 }, { longitude: "10" },
+      { totalSpots: 0, openSpots: 0 }, { totalSpots: 1.5, openSpots: 1.5 }, { totalSpots: "10", openSpots: "10" }, { totalSpots: 5001, openSpots: 5001 },
+      { openSpots: 7 }, { name: "" }, { name: "x".repeat(81) }, { name: 5 },
+      { siteId: "ghost" }, { siteId: "" }, { siteId: "site1/name" },
+      { units: { "C-001": true } }, { notes: "extra" },
+    ];
+    for (const change of bad) denied(await call("PUT", newPath, AS.platformAdmin, { ...NEW_LOT, ...change }));
+    for (const field of ["name", "totalSpots", "openSpots", "siteId"]) {
+      const { [field]: _gone, ...missing } = NEW_LOT;
+      denied(await call("PUT", newPath, AS.platformAdmin, missing));
+    }
+    // The ID is lowercase letters and numbers only.
+    for (const id of ["North", "north-garage", "north_garage"]) denied(await call("PUT", `${root}lots/${id}`, AS.platformAdmin, NEW_LOT));
+    allowed(await call("PUT", newPath, AS.platformAdmin, { ...NEW_LOT, totalSpots: 5000, openSpots: 5000, latitude: -90, longitude: 180 }));
+  });
+
+  test(`a platform admin can't create a ${root}lot over an existing one`, async () => {
+    await call("PUT", lotPath, OWNER, HW_LOT);
+    denied(await call("PUT", lotPath, AS.platformAdmin, NEW_LOT));
+    denied(await call("PATCH", "", AS.platformAdmin, { [lotPath]: NEW_LOT }));
+    assert.deepEqual((await call("GET", lotPath, OWNER)).body, HW_LOT);
+  });
+
+  test(`a customer and its first ${root}lot can be created in one write`, async () => {
+    allowed(await call("PATCH", "", AS.platformAdmin, {
+      [`${root}sites/new1`]: { ...DEMO_CUSTOMER, createdAt: SERVER_TIME },
+      [newPath]: { ...NEW_LOT, siteId: "new1" },
+    }));
+    assert.equal((await call("GET", `${newPath}/siteId`, OWNER)).body, "new1");
+  });
+
+  test(`a platform admin edits a ${root}lot's name, totalSpots and location, and nothing else changes`, async () => {
+    await call("PUT", lotPath, OWNER, HW_LOT);
+    allowed(await call("PATCH", lotPath, AS.platformAdmin, { name: "Lot 14 East", totalSpots: 12, latitude: 1.5, longitude: -2.25 }));
+    assert.deepEqual((await call("GET", lotPath, OWNER)).body, { ...HW_LOT, name: "Lot 14 East", totalSpots: 12, latitude: 1.5, longitude: -2.25 });
+    // The location is optional, so it can be cleared.
+    allowed(await call("PATCH", lotPath, AS.platformAdmin, { latitude: null, longitude: null }));
+    assert.deepEqual((await call("GET", lotPath, OWNER)).body, { ...HW_LOT, name: "Lot 14 East", totalSpots: 12 });
+  });
+
+  test(`a ${root}lot's edited values are checked`, async () => {
+    await call("PUT", lotPath, OWNER, HW_LOT);
+    for (const fields of [{ latitude: 200 }, { longitude: -181 }, { totalSpots: 0 }, { totalSpots: 1.5 }, { totalSpots: "12" }, { name: "" }, { name: "x".repeat(81) }]) {
+      denied(await call("PATCH", lotPath, AS.platformAdmin, fields));
+    }
+    // A lot that doesn't exist can't be edited into existence.
+    denied(await call("PATCH", `${root}lots/lot99`, AS.platformAdmin, { name: "Ghost" }));
+    assert.deepEqual((await call("GET", lotPath, OWNER)).body, HW_LOT);
+  });
+}
+
+test("customer roles, drivers and signed-out users can't create or edit live lots", async () => {
+  await call("PUT", "lots/lot14", OWNER, HW_LOT);
+  for (const who of NOT_ADMIN) {
+    denied(await call("PUT", "lots/northgarage", AS[who], NEW_LOT));
+    denied(await call("PATCH", "lots/lot14", AS[who], { name: "Changed", totalSpots: 12 }));
+    denied(await call("PATCH", "lots/lot14", AS[who], { latitude: 1 }));
+  }
+  assert.deepEqual((await call("GET", "lots/lot14", OWNER)).body, HW_LOT);
+  assert.equal((await call("GET", "lots/northgarage", OWNER)).body, null);
+});
+
+test("drivers and signed-out users can't create or edit Simulation lots", async () => {
+  await call("PUT", "demo/lots/lot14", OWNER, HW_LOT);
+  for (const who of ["driver", "signedOut"]) {
+    denied(await call("PUT", "demo/lots/northgarage", AS[who], NEW_LOT));
+    denied(await call("PATCH", "demo/lots/lot14", AS[who], { name: "Changed" }));
+  }
+});
+
+test("staff still write Simulation lots freely, as the simulator does", async () => {
+  await call("PUT", "demo/lots/lot14", OWNER, HW_LOT);
+  for (const who of STAFF) {
+    allowed(await call("PATCH", "demo/lots/lot14", AS[who], { openSpots: 0, totalSpots: 0, units: {} }));
+    allowed(await call("PUT", "demo/lots/lot15", AS[who], { name: "Lot 15", units: { "C-003": true } }));
+    allowed(await call("DELETE", "demo/lots/lot15", AS[who]));
+  }
+});
+
+test("everyone who read lots before still reads console-made lots (sign, driver app, staff)", async () => {
+  allowed(await call("PUT", "lots/northgarage", AS.platformAdmin, NEW_LOT));
+  allowed(await call("PUT", "demo/lots/northgarage", AS.platformAdmin, NEW_LOT));
+  for (const who of ["platformAdmin", ...NOT_ADMIN]) {
+    for (const path of ["lots", "lots/northgarage", "demo/lots", "demo/lots/northgarage"]) allowed(await call("GET", path, AS[who]));
+  }
+});
 
 test("live lots keep their rules: public read, no client writes", async () => {
   for (const who of ["platformAdmin", ...NOT_ADMIN]) allowed(await call("GET", "lots", AS[who]));
