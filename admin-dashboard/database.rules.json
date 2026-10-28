@@ -93,14 +93,15 @@
     },
 
     // Quote requests from the website. Anyone, even signed out, can CREATE one
-    // fully valid lead at a new key. Only managers read them, change status or
-    // delete. Nobody can overwrite a lead or edit its fields after it's created.
+    // fully valid lead at a new key. Only platform admins (the company console)
+    // read them, change status or delete; customer managers can't.
+    // Nobody can overwrite a lead or edit its fields after it's created.
     "leads": {
-      ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'manager'",
+      ".read": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true",
       "$leadId": {
-        // Create: only where nothing exists yet. Delete: managers only.
+        // Create: only where nothing exists yet. Delete: platform admins only.
         // Status changes go through the status rule below.
-        ".write": "(!data.exists() && newData.exists()) || (data.exists() && !newData.exists() && auth != null && root.child('users').child(auth.uid).child('role').val() === 'manager')",
+        ".write": "(!data.exists() && newData.exists()) || (data.exists() && !newData.exists() && auth != null && root.child('platformAdmins').child(auth.uid).val() === true)",
         ".validate": "newData.hasChildren(['name', 'email', 'facilityType', 'status', 'createdAt'])",
         "name": { ".validate": "!data.exists() && newData.isString() && newData.val().length >= 1 && newData.val().length <= 80" },
         "email": { ".validate": "!data.exists() && newData.isString() && newData.val().length < 120 && newData.val().matches(/^[^@ ]+@[^@ ]+[.][^@ ]+$/)" },
@@ -109,17 +110,54 @@
         "message": { ".validate": "!data.exists() && newData.isString() && newData.val().length < 1000" },
         "createdAt": { ".validate": "!data.exists() && newData.isNumber() && newData.val() === now" },
         "status": {
-          ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'manager' && data.exists()",
-          // A new lead starts as "new"; managers then move it between the three.
+          ".write": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true && data.exists()",
+          // A new lead starts as "new"; platform admins then move it between the three.
           ".validate": "newData.isString() && (data.exists() ? newData.val().matches(/^(new|contacted|closed)$/) : newData.val() === 'new')"
         },
         "$other": { ".validate": false }
       }
     },
 
+    // Vendor accounts for the company console: platformAdmins/<uid> = true.
+    // Set only in the Firebase console; no client can write it. Each signed-in
+    // user can read their own entry, so the console can check its access.
+    "platformAdmins": {
+      "$uid": {
+        ".read": "auth != null && $uid === auth.uid"
+      }
+    },
+
+    // Customer deployments, managed in the company console. Platform admins only.
+    "sites": {
+      ".read": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true",
+      "$siteId": {
+        ".write": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true",
+        ".validate": "newData.hasChildren(['name', 'type', 'status', 'createdAt'])",
+        "name": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 80" },
+        "type": { ".validate": "newData.isString() && newData.val().matches(/^(campus|mall|garage|hotel|other)$/)" },
+        "status": { ".validate": "newData.isString() && newData.val().matches(/^(prospect|active|paused)$/)" },
+        "contactName": { ".validate": "newData.isString() && newData.val().length <= 80" },
+        "contactEmail": { ".validate": "newData.isString() && newData.val().length <= 120 && newData.val().matches(/^[^@ ]+@[^@ ]+[.][^@ ]+$/)" },
+        "notes": { ".validate": "newData.isString() && newData.val().length <= 500" },
+        // The quote request the site came from. Must be a real lead when set or changed.
+        "fromLeadId": { ".validate": "newData.isString() && newData.val().matches(/^[A-Za-z0-9_-]+$/) && (newData.val() === data.val() || root.child('leads').child(newData.val()).exists())" },
+        // Server time on create, then fixed.
+        "createdAt": { ".validate": "newData.isNumber() && (data.exists() ? newData.val() === data.val() : newData.val() === now)" },
+        "$other": { ".validate": false }
+      }
+    },
+
     // Public read: the lot entrance sign runs signed-out on a TV.
     "lots": {
-      ".read": true
+      ".read": true,
+      "$lotId": {
+        // Which customer site a lot belongs to. Platform admins only, on a lot
+        // that already exists, and only to an existing site (or removed).
+        "siteId": {
+          ".write": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true && data.parent().exists()",
+          ".validate": "newData.isString() && newData.val().matches(/^[A-Za-z0-9_-]+$/) && root.child('sites').child(newData.val()).exists()"
+        }
+      }
     },
 
     "units": {
@@ -208,11 +246,13 @@
 
     // Simulation and demo data. Public read (demo sign, driver app);
     // only dashboard staff can write. Real curbs never live here.
+    // Read is granted per child, not on demo/ itself, so demo/sites and
+    // demo/platformAdmins stay private like their live versions.
     "demo": {
-      ".read": true,
       // Simulated site settings follow the same rules as config/site, so Setup
       // behaves the same in Simulation: only managers write, same validation.
       "config": {
+        ".read": true,
         "site": {
           ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'manager'",
           "siteName": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 80" },
@@ -232,8 +272,60 @@
           "$other": { ".validate": false }
         }
       },
-      // Everything else under demo/ (units, lots, history, latency, simLock): any staff account.
+      // Fake quote requests from the simulator: public read, staff write, as before.
+      // Platform admins aren't staff, so they get their own status rule for the console.
+      "leads": {
+        ".read": true,
+        ".write": "auth != null && root.child('users').child(auth.uid).exists()",
+        "$leadId": {
+          "status": {
+            ".write": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true && data.exists()",
+            ".validate": "newData.isString() && newData.val().matches(/^(new|contacted|closed)$/)"
+          }
+        }
+      },
+      // Simulated lots: public read, staff write, as before. siteId follows the live
+      // rule: only platform admins set it, and only to an existing demo/sites entry.
+      // Staff writes cascade from demo/lots, so the platform-admin check sits in
+      // .validate too. Staff can still drop siteId (Simulation's reset rewrites demo/lots).
+      "lots": {
+        ".read": true,
+        ".write": "auth != null && root.child('users').child(auth.uid).exists()",
+        "$lotId": {
+          "siteId": {
+            ".write": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true && data.parent().exists()",
+            ".validate": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true && newData.isString() && newData.val().matches(/^[A-Za-z0-9_-]+$/) && root.child('demo').child('sites').child(newData.val()).exists()"
+          }
+        }
+      },
+      // Simulated customer sites: same rules as sites/. Platform admin status always
+      // comes from the live platformAdmins/, so one entry covers both modes.
+      "sites": {
+        ".read": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true",
+        "$siteId": {
+          ".write": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true",
+          ".validate": "newData.hasChildren(['name', 'type', 'status', 'createdAt'])",
+          "name": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 80" },
+          "type": { ".validate": "newData.isString() && newData.val().matches(/^(campus|mall|garage|hotel|other)$/)" },
+          "status": { ".validate": "newData.isString() && newData.val().matches(/^(prospect|active|paused)$/)" },
+          "contactName": { ".validate": "newData.isString() && newData.val().length <= 80" },
+          "contactEmail": { ".validate": "newData.isString() && newData.val().length <= 120 && newData.val().matches(/^[^@ ]+@[^@ ]+[.][^@ ]+$/)" },
+          "notes": { ".validate": "newData.isString() && newData.val().length <= 500" },
+          "fromLeadId": { ".validate": "newData.isString() && newData.val().matches(/^[A-Za-z0-9_-]+$/) && (newData.val() === data.val() || root.child('demo').child('leads').child(newData.val()).exists())" },
+          "createdAt": { ".validate": "newData.isNumber() && (data.exists() ? newData.val() === data.val() : newData.val() === now)" },
+          "$other": { ".validate": false }
+        }
+      },
+      // Mirrors platformAdmins/ for parity: read your own entry, no client writes.
+      // It grants nothing; access to demo/sites is checked against the live list.
+      "platformAdmins": {
+        "$uid": {
+          ".read": "auth != null && $uid === auth.uid"
+        }
+      },
+      // Everything else under demo/ (units, history, latency, simLock): any staff account.
       "$other": {
+        ".read": true,
         ".write": "auth != null && root.child('users').child(auth.uid).exists()"
       }
     }
