@@ -124,11 +124,12 @@ export async function resetDemoData() {
   await stopSimulation();
   const { lots, units } = buildDemoData();
   // Lots are written field by field rather than replaced, so each keeps the customer
-  // (siteId) the company console assigned it. Lots outside the fresh set are removed.
+  // (siteId) the company console assigned it. Other lots are removed, except ones the
+  // console added for a customer (they have a siteId and aren't the simulator's).
   // Quote requests (demo/leads) belong to the console now, so a reset leaves them alone.
   const current = (await get(ref(database, simPath("lots")))).val() || {};
   const lotUpdates = {};
-  Object.keys(current).forEach((id) => { if (!lots[id]) lotUpdates[simPath(`lots/${id}`)] = null; });
+  Object.entries(current).forEach(([id, lot]) => { if (!lots[id] && !lot?.siteId) lotUpdates[simPath(`lots/${id}`)] = null; });
   Object.entries(lots).forEach(([id, lot]) => {
     Object.entries(lot).forEach(([key, value]) => { lotUpdates[simPath(`lots/${id}/${key}`)] = value; });
   });
