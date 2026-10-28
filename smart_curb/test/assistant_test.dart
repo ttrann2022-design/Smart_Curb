@@ -705,4 +705,319 @@ void main() {
       }
     });
   });
+
+  group('questions about the app itself', () {
+    test('progress, safety, version and everything around it', () async {
+      final cases = {
+        'what is the current progress of the app now?': 'still growing',
+        'is the app finished?': 'Not in the app yet',
+        'is it in beta': 'Working now',
+        'what are the limitations': 'Not in the app yet',
+        'is this app safe to use?': 'Smart Curb is safe to use',
+        'is this a scam': 'safe to use',
+        'can I trust this app': 'safe to use',
+        'what is the current version of the app?': kAppVersion,
+        "what's new": 'Recent updates',
+        'what features does the app have': "Here's what Smart Curb does",
+        'what does this app do': "Here's what Smart Curb does",
+        'when will you add voice directions': "don't have release dates",
+        'what is coming next': "don't have release dates",
+        'how often is the app updated': "don't have release dates",
+        'does it work on iphone': 'iPhones',
+        'can I use it on my computer': 'web browser',
+        'what is the app built with': 'Flutter',
+        'is it open source': kSupportEmail,
+        'is this an official FAU app': 'FAU Engineering senior design team',
+        'why was smart curb made': 'end circling',
+        'why use this instead of google maps': 'open parking spot',
+        'how is it different from waze': 'open parking spot',
+        'how many people use the app': "don't have user numbers",
+        'does the app have ads': 'no ads',
+        'is there a privacy policy': 'privacy policy page',
+        'what permissions does the app need': 'location',
+        'does the app use my camera': "doesn't use your camera",
+        'how do I rate the app': 'means a lot',
+        'what is the app called': 'Smart Curb',
+        'who is the team': 'Team Smart Curb',
+        'does it work in other countries': 'Smart Curb works at',
+      };
+      for (final e in cases.entries) {
+        final r = await bot(FakeData(saved: ['fau_boca'])).reply(e.key);
+        expect(r.text, contains(e.value), reason: e.key);
+      }
+    });
+
+    test('...without taking over look-alike questions', () async {
+      final b = FakeData(me: {'firstName': 'Sam', 'lastName': 'Owl'});
+      expect((await bot(b).reply('status of lot 14')).text, contains('Lot 14 has'));
+      expect((await bot(b).reply('complete my profile')).form, isNotNull);
+      expect((await bot(b).reply('how many devices are there')).text, contains('Smart Curbs'));
+      expect((await bot(b).reply('is it safe to park at night')).text, contains('well-lit'));
+      expect((await bot(b).reply('sign in with apple')).text, contains('email and a password'));
+      expect((await bot(b).reply('can you add a feature')).text, contains('Feature ideas'));
+      expect((await bot(b).reply('where should I park for the police building')).text,
+          contains('CO-69'));
+    });
+  });
+
+  group('going on with the conversation', () {
+    test('"can I ask another question?" gets an invitation, not "sorry"', () async {
+      for (final q in [
+        'also can I have another question?',
+        'I have a question',
+        'can I ask you something',
+        'quick question',
+        'one more thing',
+        'can you help me with something',
+      ]) {
+        final r = await bot().reply(q);
+        expect(r.text, isNot(startsWith(_sorry)), reason: q);
+        expect(r.text, anyOf(contains('Ask away'), contains("I'm all ears"),
+            contains('Go for it')), reason: q);
+      }
+      expect((await bot().reply('hold on')).text, contains('take your time'));
+      // A real question with "question" in it still gets answered.
+      expect((await bot().reply('I have a question, where do I park for ED-47'))
+          .text, contains('ED-47'));
+    });
+  });
+
+  group('safety first', () {
+    test('accidents, emergencies and trouble on the road', () async {
+      final cases = {
+        'I had a car accident': 'are you okay',
+        'I got into an accident in lot 14': 'are you okay',
+        'someone hit my car': 'Exchange names, phone numbers, insurance',
+        'I scratched someone car': 'leave a note',
+        'what should I do after an accident': 'Take photos',
+        'I hit a smart curb': "Don't worry about the curb",
+        'I backed into a curb by accident': "Don't worry about the curb",
+        'someone is hurt': 'Please call $kEmergencyNumber right now',
+        'I need an ambulance': 'Please call $kEmergencyNumber right now',
+        'can you call 911': 'Please call $kEmergencyNumber right now',
+        'can you call the police': "I can't make calls myself",
+        'my car got stolen': 'report it to the police',
+        'someone broke into my car': 'report it to the police',
+        'my car was towed': 'towing company',
+        'I feel unsafe': 'Your safety comes first',
+        'someone is following me': 'Your safety comes first',
+        'is it dangerous to park at night': 'well-lit',
+        'my car wont start': 'roadside assistance',
+        'I have a flat tire': 'roadside assistance',
+        'I locked my keys in my car': 'lockout',
+        'someone is blocking my car': "don't try to squeeze out",
+        'someone took my spot': "let's find you another",
+        'I am driving right now': 'keep your eyes on the road',
+      };
+      for (final e in cases.entries) {
+        expect((await bot().reply(e.key)).text, contains(e.value), reason: e.key);
+      }
+      // The campus police number is given where it helps.
+      expect((await bot().reply('I had a car accident')).text,
+          contains(kCampusPolicePhone));
+    });
+
+    test('everyday wording is not mistaken for an emergency', () async {
+      final cases = {
+        'I ran into a problem': kSupportEmail,
+        'the app wont start': 'closing and reopening',
+        'the curb shows the wrong color': "curb's number",
+        'what if the lot fills up while driving': 'next best lot',
+        'where should I park for the police building': 'CO-69',
+      };
+      for (final e in cases.entries) {
+        expect((await bot().reply(e.key)).text, contains(e.value), reason: e.key);
+      }
+    });
+  });
+
+  group('asked to do something it cannot do', () {
+    test('registering an account: no, then how to do it yourself', () async {
+      for (final q in [
+        'is it possible to register another account through the AI chat box?',
+        'can you register an account for me',
+        'can the AI create an account for me',
+      ]) {
+        final r = await bot().reply(q);
+        expect(r.text, startsWith("No, sorry, I can't create or register an account"), reason: q);
+        expect(r.text, contains("here's how you can do it yourself"), reason: q);
+        expect(r.text, contains('Log out with the icon at the top left'), reason: q);
+        expect(r.text, contains("Don't have an account? Register"), reason: q);
+      }
+      // Asking how (not asking the assistant to do it) gets just the steps.
+      final how = await bot().reply('how do I register another account');
+      expect(how.text, isNot(contains('No, sorry')));
+      expect(how.text, contains('1. Log out'));
+    });
+
+    test('other things only the user (or the team) can do', () async {
+      final cases = {
+        'can you log me in': "No, sorry, I can't sign you in",
+        'can you log me out': "No, sorry, I can't log you out",
+        'can you reset my password': "No, sorry, I can't see, change or reset passwords",
+        'can you change my email': "No, sorry, I can't change your email",
+        'can you delete my account': "No, sorry, I can't delete your account",
+        'can you turn on notifications': "No, sorry, I can't change your settings",
+        'can you turn on 3d': "No, sorry, I can't switch the map to 3D",
+        'can you pay for my parking': "No, sorry, I can't pay for parking",
+        'can you park my car': "I can't drive or park your car",
+        'can you call me': "I can't make calls",
+        'can you text me when a spot opens': "I can't send texts or alerts",
+        'where did I park': "I can't remember where you parked",
+        'can you remind me to move my car': "I can't set reminders",
+        'can you reserve a spot for me': "can't be reserved",
+      };
+      for (final e in cases.entries) {
+        expect((await bot().reply(e.key)).text, contains(e.value), reason: e.key);
+      }
+    });
+
+    test('...while what it can do, it just does', () async {
+      expect((await bot().reply('can you add my car')).form, isNotNull);
+      expect((await bot().reply('is it possible to add a car through the chat')).form, isNotNull);
+      expect((await bot().reply('can you add broward mall')).text, contains('Done! I added'));
+    });
+  });
+
+  group('what customers ask', () {
+    final me = {
+      'firstName': 'Sam', 'lastName': 'Owl', 'phone': '561-555-1234',
+      'address1': '1 Owl Way', 'city': 'Boca Raton', 'state': 'FL',
+    };
+    FakeData data() => FakeData(
+          me: me,
+          cars: [{'manufacturer': 'Toyota', 'model': 'Camry', 'plate': 'OWL123'}],
+          saved: ['fau_boca'],
+        );
+
+    test('accounts', () async {
+      final cases = {
+        'can I have two accounts': 'register another account',
+        'how do I switch accounts': 'signed in as owl@fau.edu',
+        'what email am I using': 'signed in as owl@fau.edu',
+        'why do I need an account': 'needs an account',
+        'can I use the app without an account': 'needs an account',
+        'can I sign in with google': 'email and a password only',
+      };
+      for (final e in cases.entries) {
+        expect((await bot(data()).reply(e.key)).text, contains(e.value), reason: e.key);
+      }
+    });
+
+    test('parking', () async {
+      final cases = {
+        'is there parking at FAU': 'Florida Atlantic University has 47 parking lots',
+        'best lot for engineering': 'Which one do you mean',
+        'parking for the gym': 'Recreation & Fitness Center (RC-91)',
+        'how far is lot 14 from the library': 'From Lot 14 to S E Wimberly Library (LY-3)',
+        'which lots have smart curbs': 'FAU Lot 14: 3 curbs',
+        'is parking free': 'The Smart Curb app is free',
+        'where can visitors park': 'Visitor rules depend on the place',
+        'motorcycle parking': "don't track motorcycle",
+        'is curb C-077 open': 'C-077 in Lot 14 is open right now',
+        'is curb C-095 open': 'C-095 in Lot 14 is taken',
+        'is curb C-001 free': 'C-001 in Lot 14 is offline',
+        'is curb C-999 open': "couldn't find a curb called C-999",
+        "what's the closest lot to me": "by where you're going",
+        'can I park anywhere': 'parking rules',
+        'when does the lot fill up': "can't predict busy times",
+        'I got a parking ticket': "doesn't issue or handle parking tickets",
+        'I want a refund': 'nothing to refund',
+      };
+      for (final e in cases.entries) {
+        expect((await bot(data()).reply(e.key)).text, contains(e.value), reason: e.key);
+      }
+    });
+
+    test('the map', () async {
+      final cases = {
+        'the route is wrong': 'Routes follow real roads',
+        'why did it change my lot': 'next best lot',
+        'what is the blue line': 'bright green line is your driving route',
+        'what does the dotted line mean': 'walk to the door',
+        'how do I see my location on the map': "You're the arrow on the map",
+        'can I see the walking path': 'dotted green walking path',
+        'does it work at night': 'day and night',
+        'what happens when it rains': 'rain or shine',
+      };
+      for (final e in cases.entries) {
+        expect((await bot(data()).reply(e.key)).text, contains(e.value), reason: e.key);
+      }
+    });
+
+    test('places on Home', () async {
+      final cases = {
+        'my place disappeared': "Let's take a look!",
+        'how many places can I add': 'You can add every place',
+        'can I add my home address': 'your own address can',
+        'can you add miami campus': "doesn't work at Miami yet",
+        'what is on my home page': 'Florida Atlantic University: on your Home',
+        'is the mall open': "don't have opening hours",
+      };
+      for (final e in cases.entries) {
+        expect((await bot(data()).reply(e.key)).text, contains(e.value), reason: e.key);
+      }
+    });
+
+    test('vehicles and contact info', () async {
+      final cases = {
+        'what is my license plate': "Your Toyota Camry's plate is OWL123",
+        'how many cars can I add': 'As many as you like',
+        'can I set a default car': 'no default car',
+        'why do I need to add my car': 'optional',
+        'I sold my car': 'Delete your Toyota Camry',
+        'what is my phone number': 'Your phone number is 561-555-1234.',
+        'what is my name': 'Your name is Sam Owl.',
+        "what's my address": 'Your address is 1 Owl Way, Boca Raton, FL.',
+        'why do you need my address': 'part of your Smart Curb account',
+        'delete my contact info': "can't be removed",
+      };
+      for (final e in cases.entries) {
+        expect((await bot(data()).reply(e.key)).text, contains(e.value), reason: e.key);
+      }
+      expect((await bot(data()).reply('can I add a motorcycle')).form, isNotNull);
+      expect((await bot(data()).reply('I moved')).form!.focus, 'address1');
+    });
+
+    test('the curbs, support and everything else', () async {
+      final cases = {
+        'what is a smart curb': 'wheel stop',
+        'how does it detect cars': 'senses',
+        'what if a curb is broken': "curb's number",
+        'the curb shows the wrong color': "curb's number",
+        'is it solar powered': 'solar',
+        'do the curbs have batteries': 'solar-powered',
+        'how much does a smart curb cost': "aren't for sale",
+        'who installed the curbs': 'Team Smart Curb',
+        'the app is slow': 'closing and reopening',
+        'can you add a feature': 'Feature ideas',
+        'what time does the library close': "don't have opening hours",
+        'where is the bathroom': "can't find restrooms",
+        'where can I eat': "can't recommend places to eat",
+        'does the app drain my battery': 'battery',
+        'how do I delete the app': "doesn't delete your account",
+        'my friend wants the app': 'their own email',
+        'is my location shared': "doesn't save it",
+        'what does sensored mean': 'have a Smart Curb',
+        "I can't find my building": "building's code",
+        'how do I close the chat': 'back arrow',
+        'are you real': 'not a person',
+        'what is your name': 'Smart Curb AI',
+        'what is 2+2': "That's 4!",
+        'what is 10 / 4': "That's 2.50!",
+        'start over': 'Fresh start',
+        'never mind': 'No problem',
+        'huh': 'Sorry if that was confusing',
+        'you are wrong': 'I got it wrong',
+        'this is cool': 'thank you',
+      };
+      for (final e in cases.entries) {
+        expect((await bot(data()).reply(e.key)).text, contains(e.value), reason: e.key);
+      }
+      // A phone number isn't a sum.
+      expect((await bot(data()).reply('my phone is 561-555-1234')).text,
+          isNot(contains("That's")));
+      expect((await bot().reply('start over')).clearsChat, isTrue);
+    });
+  });
 }

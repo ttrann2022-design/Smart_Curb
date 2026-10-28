@@ -82,14 +82,25 @@ class ChatReply {
 
   const ChatReply(this.text, [this.actions = const []])
       : form = null,
-        followUp = null;
+        followUp = null,
+        clearsChat = false;
 
   const ChatReply.form(this.text, ChatForm this.form, [this.actions = const []])
-      : followUp = null;
+      : followUp = null,
+        clearsChat = false;
 
   const ChatReply.opening(this.text, ChatAction this.followUp,
       [this.actions = const []])
-      : form = null;
+      : form = null,
+        clearsChat = false;
+
+  /// "Start over": the conversation so far is cleared, then this is said.
+  const ChatReply.fresh(this.text, [this.actions = const []])
+      : form = null,
+        followUp = null,
+        clearsChat = true;
+
+  final bool clearsChat;
 }
 
 /// A field of a [ChatForm].
@@ -175,6 +186,12 @@ class ChatForm {
 const int kHomeTab = 0;
 const int kVehicleTab = 1;
 const int kProfileTab = 2;
+
+/// Who the assistant points people to when something goes wrong on the
+/// road. Please double-check these before release.
+const String kEmergencyNumber = '911';
+const String kCampusPolice = 'FAU Police';
+const String kCampusPolicePhone = '561-297-3500';
 
 // ==========================================
 // DATA
@@ -487,6 +504,16 @@ class SmartCurbAssistant {
   };
 
   Future<ChatReply> _answer(_Message m, bool wasAwaiting) async {
+    // ---- safety first: accidents, emergencies, danger ----
+    // Before anything else, so "I had an accident in Lot 14" never gets a
+    // parking answer.
+    for (final f in _safety) {
+      if (f.when(m)) {
+        _awaitingBuilding = false;
+        return f.reply;
+      }
+    }
+
     // ---- greetings and small talk ----
     if (m.isOnlyGreeting) return _greetBack(m);
     // Bye before thanks: "ok bye" / "thanks, bye" are goodbyes.
@@ -649,7 +676,21 @@ class SmartCurbAssistant {
       );
     }
 
-    if (m.anyPhrase(_timePhrases)) return _timeNow();
+    // "What time is it?" (not "what time does the library close?").
+    if (m.anyPhrase(_timePhrases) &&
+        !m.hasPhrase('what time does') &&
+        !m.has({'close', 'closes', 'closing', 'open', 'opens', 'hours'})) {
+      return _timeNow();
+    }
+    // "Is curb C-077 open?"
+    if (RegExp(r'\bc-?\d{3}\b').firstMatch(m.text) case final c?) {
+      if (await _curbStatus(c.group(0)!) case final r?) return r;
+    }
+    // "I moved": straight to the address in the contact form.
+    if (m.anyPhrase(['i moved', 'we moved', 'just moved', 'moved to',
+      'new address', 'have a new address', 'moving to'])) {
+      return _profile(_Message('change my address'));
+    }
 
     // ---- the places on Home: add, remove, open ----
     if (await _placeCommand(m) case final r?) return r;
@@ -658,6 +699,13 @@ class SmartCurbAssistant {
     final building = _index.find(m);
     final faq = _faqFor(m);
     if (building.unique case final hit?) {
+      // "How far is Lot 14 from the library?": that lot's walk.
+      final lotNamed = _findLot(m);
+      if (lotNamed != null &&
+          lotNamed.place == hit.place &&
+          hit.place.lotPositions.containsKey(lotNamed.id)) {
+        return _lotToBuilding(hit.place, lotNamed.id, lotNamed.label, hit.building);
+      }
       final park = await _parkFor(hit.place, hit.building);
       // "Accessible parking near the library": both answers.
       if (faq != null && faq.withBuilding) {
@@ -668,6 +716,9 @@ class SmartCurbAssistant {
 
     // ---- how to use the app, and questions about it ----
     if (faq != null) {
+      if (faq.cantDo case final cant? when _asksMeToDo(m)) {
+        return _cantDoIt(cant, faq.reply, howTo: faq.cantDoHowTo);
+      }
       return faq.asksPlace ? _pickPlace(faq.reply) : faq.reply;
     }
     if (m.anyPhrase(_wherePlacesPhrases)) return _wherePlaces();
@@ -680,8 +731,10 @@ class SmartCurbAssistant {
     if (m.anyPhrase(_allLotsPhrases)) return _allLots();
     if (m.anyPhrase(_allBuildingsPhrases)) return _allBuildings();
     // "Which lot is closest" depends on where you're going: asked below.
+    // ...and "best lot for engineering" asks which engineering building.
     if ((m.has({'emptiest'}) || m.anyPhrase(_emptiestPhrases)) &&
-        !m.has({'closest', 'nearest', 'close', 'near', 'nearby'})) {
+        !m.has({'closest', 'nearest', 'close', 'near', 'nearby'}) &&
+        building.candidates.isEmpty) {
       return _emptiestLot();
     }
 
@@ -710,6 +763,19 @@ class SmartCurbAssistant {
         );
       }
       _awaitingBuilding = true;
+      // "Is there parking at FAU?"
+      if (_placeNamed(m) case final p?) {
+        return ChatReply(
+          'Yes! ${p.fullName} has ${p.lotPositions.length} parking lots'
+          '${p.liveParking ? ', and some have live Smart Curbs' : ''}. '
+          "Where are you headed there? Tell me the building and I'll find "
+          'the best spot.',
+          [
+            for (final b in p.buildings.take(4))
+              ChatAction.ask(b.code, 'Park near ${b.name}'),
+          ],
+        );
+      }
       return ChatReply(
         _pick('whichbuilding', [
           'Sure, I can help with that! Which building are you heading to? '
@@ -726,23 +792,32 @@ class SmartCurbAssistant {
     if (m.any(_vehicleWords)) return _vehicles(m);
     if (m.any(_placeWords) || m.anyPhrase(_placePhrases)) return _places(m);
     if (m.any(_logoutWords) || m.anyPhrase(_logoutPhrases)) {
-      return const ChatReply(
+      const howTo = ChatReply(
         'Sure! '
         'To log out, tap the log-out icon at the top left of the main '
         "screen. You'll go back to the login page.",
       );
+      return _asksMeToDo(m)
+          ? _cantDoIt('log you out from the chat', howTo)
+          : howTo;
     }
     if (m.any(_passwordWords)) {
-      return const ChatReply(
+      const howTo = ChatReply(
         'Sorry about that! '
         "Password changes aren't in the app yet. If you can't sign in, "
         'contact support and we can help you reset it.',
         [ChatAction.ask('Contact support')],
       );
+      return _asksMeToDo(m)
+          ? _cantDoIt(
+              'see, change or reset passwords. For your security, I never '
+              'touch them',
+              howTo)
+          : howTo;
     }
     if (m.has({'login', 'signin'}) || m.anyPhrase(_loginPhrases)) {
       final email = data.email;
-      return ChatReply(
+      final howTo = ChatReply(
         email == null
             ? "You're not signed in right now. Log in from the login screen "
                 'with your email and password.'
@@ -750,6 +825,9 @@ class SmartCurbAssistant {
                 'the log-out icon at the top left of the main screen, then '
                 'log in with the other one.',
       );
+      return _asksMeToDo(m)
+          ? _cantDoIt('sign you in or switch accounts from the chat', howTo)
+          : howTo;
     }
     if (m.any(_profileWords) || m.anyPhrase(_profilePhrases)) {
       return _profile(m);
@@ -784,6 +862,24 @@ class SmartCurbAssistant {
     if (m.any(_removeWords) || m.has(_editWords) || m.tokens.length <= 3) {
       final cars = await data.vehicles();
       if (_carsNamed(m, cars).isNotEmpty) return _vehicles(m);
+    }
+
+    // "Can I ask another question?", "quick question", "wait": go ahead.
+    if (m.anyPhrase(_askAwayPhrases) || m.has({'question', 'questions'})) {
+      return ChatReply(
+        _pick('askaway', [
+          "Of course! Ask away, what would you like to know?",
+          "Sure thing, I'm all ears! What's your question?",
+          'Go for it! What can I help you with?',
+        ]),
+        menu,
+      );
+    }
+    if (m.tokens.length <= 4 && m.anyPhrase(_holdOnPhrases)) {
+      return const ChatReply(
+        "Sure, take your time! I'll be right here.",
+        _moreHelp,
+      );
     }
 
     // Not understood: said differently each time it happens.
@@ -878,7 +974,88 @@ class SmartCurbAssistant {
   /// Everyday chat that isn't about the app ("lol", "sorry", "are you
   /// there?"); null when [m] is something else.
   Future<ChatReply?> _smallTalk(_Message m) async {
+    // "What's 2+2?"
+    final sum = RegExp(r'(-?\d+(?:\.\d+)?)\s*([+\-*x×/÷])\s*(-?\d+(?:\.\d+)?)')
+        .firstMatch(m.raw.toLowerCase());
+    // Not a phone number (561-555-1234), a lot or a curb.
+    if (sum != null &&
+        m.tokens.length <= 6 &&
+        !m.has({'lot', 'garage', 'phone', 'number', 'curb', 'plate'}) &&
+        !RegExp(r'\d+\s*-\s*\d+\s*-\s*\d+').hasMatch(m.raw)) {
+      final a = double.parse(sum.group(1)!);
+      final b = double.parse(sum.group(3)!);
+      final r = switch (sum.group(2)) {
+        '+' => a + b,
+        '-' => a - b,
+        '/' || '÷' => b == 0 ? double.nan : a / b,
+        _ => a * b,
+      };
+      final shown = r.isNaN
+          ? "something even I can't work out (no dividing by zero!)"
+          : (r == r.roundToDouble() ? r.toInt().toString() : r.toStringAsFixed(2));
+      return ChatReply(
+        "That's $shown! Numbers like how many spots are open are more my "
+        'thing, though.',
+        const [ChatAction.ask('Open spots right now')],
+      );
+    }
     if (!m.short) return null;
+    if (m.anyPhrase(['start over', 'clear the chat', 'clear chat',
+      'restart', 'reset the chat', 'new chat', 'start again', 'clear this',
+      'delete the chat', 'clear history', 'reset chat'])) {
+      _awaitingBuilding = false;
+      return const ChatReply.fresh(
+        "Fresh start! I'm Smart Curb AI Agent. What can I help you with?",
+        menu,
+      );
+    }
+    if (m.anyPhrase(['never mind', 'nevermind', 'nvm', 'forget it',
+      'forget about it', 'no worries', 'its ok', 'it is ok', 'all good'])) {
+      _awaitingBuilding = false;
+      return const ChatReply(
+        "No problem! I'm here whenever you need me.",
+        _moreHelp,
+      );
+    }
+    if (m.anyPhrase(['you are wrong', 'youre wrong', 'not what i asked',
+      'wrong answer', 'thats wrong', 'that is wrong', 'not helpful',
+      'didnt help', 'doesnt help', 'you misunderstood', 'not what i meant',
+      'that is not right', 'thats not right', 'that is not what'])) {
+      return const ChatReply(
+        "Sorry about that, I got it wrong! Could you ask again in different "
+        'words? Short questions work best, like "park near the library" or '
+        '"change my phone number". Or pick one of these:',
+        menu,
+      );
+    }
+    if (m.tokens.length <= 2 &&
+        m.tokens.every({'what', 'huh', 'hmm', 'hm', 'idk', 'confused',
+          'wdym', 'eh', 'umm', 'um', 'uh', 'excuse', 'me', 'pardon'}.contains)) {
+      return const ChatReply(
+        "Sorry if that was confusing! No worries, here's what I can help "
+        'with. Just tap one:',
+        menu,
+      );
+    }
+    if (m.anyPhrase(['are you real', 'are you human', 'are you a person',
+      'are you a bot', 'are you a robot', 'are you ai', 'are you an ai',
+      'is this a bot', 'is this a real person', 'am i talking to a bot',
+      'am i talking to a person', 'is this ai'])) {
+      return const ChatReply(
+        "I'm a virtual assistant, an AI agent made for Smart Curb, not a "
+        "person. But I'm really here to help! If you'd ever like a person, "
+        'the team is at $kSupportEmail.',
+        menu,
+      );
+    }
+    if (m.anyPhrase(['your name', 'who are you', 'what are you called',
+      'what should i call you'])) {
+      return const ChatReply(
+        "I'm Smart Curb AI Agent, your parking buddy! You can just call me "
+        'Smart Curb AI. What can I help you with?',
+        menu,
+      );
+    }
     if (m.anyPhrase(['you are welcome', 'youre welcome', 'no problem', 'np'])) {
       return const ChatReply('Aw, thanks! What else can I do for you?', _moreHelp);
     }
@@ -1031,6 +1208,43 @@ class SmartCurbAssistant {
     'doing well', 'doing good', 'doing great', 'not bad', 'pretty good',
     'all good', 'im alright', 'i am good', 'i am fine', 'i am great',
   ];
+
+  /// [m] asks the assistant itself to do something ("can you register an
+  /// account for me?", "is it possible to ... through the chat?"), not how
+  /// to do it ("how do I register?", "can you tell me how...").
+  static bool _asksMeToDo(_Message m) {
+    if (m.has({'how', 'explain', 'teach', 'steps', 'instructions'}) ||
+        m.anyPhrase(['tell me', 'show me how', 'walk me', 'where do i',
+          'where can i', 'where is'])) {
+      return false;
+    }
+    return m.anyPhrase(_requestPhrases);
+  }
+
+  static const _requestPhrases = [
+    'can you', 'could you', 'would you', 'will you', 'can u', 'could u',
+    'are you able', 'able to', 'is it possible', 'possible to', 'for me',
+    'on my behalf', 'through the chat', 'through chat', 'in the chat',
+    'via chat', 'via the chat', 'from the chat', 'through you', 'through ai',
+    'through the ai', 'with the chat', 'with you', 'can the ai', 'can ai',
+    'can this chat', 'can the chat', 'can the bot', 'please do', 'do it',
+    'i want you to', 'i need you to',
+  ];
+
+  /// "No, sorry, I can't [what]", then [howTo] (its own friendly opener
+  /// dropped, since it now follows the "no").
+  static ChatReply _cantDoIt(String what, ChatReply answer,
+      {bool howTo = true}) {
+    final rest =
+        answer.text.replaceFirst(RegExp(r"^[^.!?\n]{1,45}[!.] "), '');
+    return ChatReply(
+      howTo
+          ? "No, sorry, I can't $what. But here's how you can do it "
+              'yourself:\n$rest'
+          : "No, sorry, I can't $what. $rest",
+      answer.actions,
+    );
+  }
 
   /// The first app question [m] asks (see [_faqs]), if any.
   _Faq? _faqFor(_Message m) {
@@ -1239,6 +1453,60 @@ class SmartCurbAssistant {
             "away. Tap Navigate there and I'll take you right to it.",
       ]),
       actions,
+    );
+  }
+
+  /// One curb's live status ("c-077" or "c077"), or null if no place has it.
+  Future<ChatReply?> _curbStatus(String typed) async {
+    final id = 'C-${typed.replaceAll(RegExp(r'[^0-9]'), '')}';
+    for (final place in places.where((p) => p.liveParking)) {
+      final lots = await data.lots(place);
+      for (final l in lots.values) {
+        for (final u in (l['units'] as List?) ?? const []) {
+          if ((u as Map)['id'] != id) continue;
+          final where = '$id in ${l['name']}';
+          final String text;
+          if (u['online'] != true) {
+            text = "Sorry, $where is offline right now, so I can't tell if "
+                'its spot is free.';
+          } else if (u['occupied'] == true) {
+            text = "Sorry, $where is taken right now. Want me to find you "
+                'another spot?';
+          } else {
+            text = 'Good news! $where is open right now. Hurry before '
+                'someone takes it!';
+          }
+          return ChatReply(text, const [
+            ChatAction.ask('Where should I park?'),
+            ChatAction.ask('Open spots right now'),
+          ]);
+        }
+      }
+    }
+    return ChatReply(
+      "Hmm, I couldn't find a curb called $id. Curb numbers look like "
+      'C-077 and are shown on the map next to each space.',
+      const [ChatAction.ask('Which lots have Smart Curbs?')],
+    );
+  }
+
+  /// The walk from one lot to [building], along the real walking paths.
+  ChatReply _lotToBuilding(
+      Place place, String lotId, String label, PlaceBuilding building) {
+    final from = place.lotPositions[lotId]!;
+    final path = place.pathfinder.findPath(from, building.position);
+    final meters = path.length >= 2
+        ? Geo.pathLength(path)
+        : Geo.meters(from, building.position);
+    return ChatReply(
+      'From $label to ${building.name}, it\'s about a '
+      '${formatDistance(meters)} walk along the paths. Want the best spot '
+      'for it instead? Tap below and I\'ll find it.',
+      [
+        ChatAction.ask('Best spot for ${building.code}',
+            'Where should I park for ${building.code}?'),
+        ChatAction.ask('Is $label full?'),
+      ],
     );
   }
 
@@ -1502,11 +1770,22 @@ class SmartCurbAssistant {
       ]);
 
   Future<ChatReply> _vehicles(_Message m) async {
-    final removing = m.any(_removeWords);
+    // "I sold my car" means it should go.
+    final removing = m.any(_removeWords) ||
+        m.has({'sold', 'totaled', 'scrapped', 'traded'}) ||
+        m.anyPhrase(['got rid of', 'no longer have', 'dont have it anymore',
+          'dont own']);
     final changing = !removing && m.has(_editWords);
     final adding = !removing &&
         !changing &&
         (m.any(_addWords) || m.has({'another', 'second', 'register'}));
+    if (adding && m.hasPhrase('how many')) {
+      return const ChatReply(
+        'As many as you like! There\'s no limit on vehicles. Want to add '
+        'one now?',
+        [ChatAction.ask('Add a vehicle'), ChatAction.ask('My vehicles')],
+      );
+    }
     if (adding) return _addCar();
 
     final cars = await data.vehicles();
@@ -1527,6 +1806,7 @@ class SmartCurbAssistant {
           return _confirmDeleteAllCars(cars);
         }
         if (named.length == 1) return _confirmDeleteCar(named.single);
+        if (cars.length == 1) return _confirmDeleteCar(cars.single);
         return _pickCar('Which vehicle do you want to delete?',
             named.isEmpty ? cars : named, _confirmDeleteCar);
       }
@@ -1536,6 +1816,31 @@ class SmartCurbAssistant {
           named.isEmpty ? cars : named, _changeCar);
     }
 
+    // "What's my license plate?": just the plates.
+    if (m.has({'plate', 'plates', 'license'}) && cars.isNotEmpty) {
+      final withPlates = [for (final c in cars) if (_v(c, 'plate').isNotEmpty) c];
+      if (withPlates.isNotEmpty) {
+        String title(Map<String, dynamic> c) {
+          final t = [_v(c, 'manufacturer'), _v(c, 'model')]
+              .where((s) => s.isNotEmpty)
+              .join(' ');
+          return t.isEmpty ? 'car' : t;
+        }
+
+        return ChatReply(
+          withPlates.length == 1
+              ? "Your ${title(withPlates.single)}'s plate is "
+                  '${_v(withPlates.single, 'plate')}.'
+              : 'Your plates:\n${[
+                  for (final c in withPlates) '• ${title(c)}: ${_v(c, 'plate')}',
+                ].join('\n')}',
+          const [
+            ChatAction.ask('Change a vehicle'),
+            ChatAction.ask('My vehicles'),
+          ],
+        );
+      }
+    }
     if (cars.isEmpty) {
       return ChatReply(
         "You haven't added a vehicle yet. Want to add one now?",
@@ -1572,7 +1877,7 @@ class SmartCurbAssistant {
 
   /// Every place, which are on the user's Home, and a chip for each: open
   /// the ones they have, add the others.
-  Future<ChatReply> _places(_Message m) async {
+  Future<ChatReply> _places(_Message m, {String lead = ''}) async {
     final saved = await data.savedPlaceIds();
     final mine = [for (final p in places) if (saved.contains(p.id)) p];
     final lines = [
@@ -1581,7 +1886,7 @@ class SmartCurbAssistant {
             ' (${p.address})',
     ];
     return ChatReply(
-      '${mine.isEmpty ? "You haven't added any places yet. " : ''}'
+      '$lead${mine.isEmpty ? "You haven't added any places yet. " : ''}'
       'Smart Curb works at ${places.length} places right now:\n'
       '${lines.join('\n')}\n'
       '${mine.length == places.length ? "You've added them all. " : ''}'
@@ -1641,9 +1946,63 @@ class SmartCurbAssistant {
     final all = m.has({'all', 'every', 'everything', 'both'});
 
     if (m.any(_parkWords) && !removing && !adding) return null;
+    // "How many places can I add?", "my place disappeared!"
+    if (m.hasPhrase('how many') && !removing) {
+      return _places(m, lead: 'You can add every place Smart Curb works at. ');
+    }
+    if (m.has({'disappeared', 'gone', 'missing', 'vanished', 'lost'}) &&
+        !removing) {
+      return _places(m, lead: "Let's take a look! ");
+    }
     if (removing) return _removePlaceFlow(place, all: all);
+    if (adding && place == null) {
+      // "Add my home address": not a Smart Curb place.
+      if (m.anyPhrase(['home address', 'my address', 'my house',
+        'my work', 'my office', 'my job', 'my apartment', 'my dorm'])) {
+        return const ChatReply(
+          'I can only add places Smart Curb works at (FAU and Broward Mall '
+          "for now), so your own address can't be one. You can save your "
+          'home address in your contact info, though!',
+          [
+            ChatAction.ask('Change my contact information'),
+            ChatAction.ask('My saved places'),
+          ],
+        );
+      }
+      // "Add the Miami campus": a place Smart Curb doesn't know.
+      final unknown = [
+        for (final t in m.tokens)
+          if (t.length >= 3 &&
+              !known.contains(t) &&
+              !_commonWords.contains(t) &&
+              !RegExp(r'^\d+$').hasMatch(t))
+            t,
+      ];
+      if (unknown.isNotEmpty) {
+        final name = unknown
+            .map((w) => '${w[0].toUpperCase()}${w.substring(1)}')
+            .join(' ');
+        final saved = await data.savedPlaceIds();
+        final missing = [for (final p in places) if (!saved.contains(p.id)) p];
+        return ChatReply(
+          "Sorry, Smart Curb doesn't work at $name yet. Right now it works "
+          'at ${places.map((p) => p.fullName).join(' and ')}'
+          '${missing.isEmpty ? ", and you've already added them all." : '. Want to add one of those?'}',
+          [
+            for (final p in missing)
+              ChatAction.run('Add ${p.nickname}', () => _addPlace(p)),
+            const ChatAction.ask('My saved places'),
+          ],
+        );
+      }
+    }
     if (adding) return _addPlaceFlow(place, all: all);
     if (place == null) return null;
+    // "Is the mall open?" is about opening hours, not opening its map.
+    if (m.has({'hours', 'closes', 'closing'}) ||
+        RegExp(r'\b(is|are) (the |it )?[a-z ]*open\b').hasMatch(m.text)) {
+      return null;
+    }
     // "Take me to the library at FAU": that's about the library.
     final rest = _Message(
         m.tokens.where((t) => !_aliases(place).contains(t)).join(' '));
@@ -1685,6 +2044,22 @@ class SmartCurbAssistant {
     }
     return null;
   }
+
+  /// Everyday words around a request ("can you add the ... for me please"),
+  /// so the rest can be checked against the places Smart Curb knows.
+  static const _commonWords = {
+    'can', 'could', 'would', 'will', 'you', 'please', 'want', 'like', 'the',
+    'for', 'and', 'into', 'with', 'that', 'this', 'there', 'here', 'also',
+    'just', 'one', 'more', 'some', 'any', 'let', 'lets', 'how', 'what',
+    'where', 'which', 'help', 'pls', 'plz', 'hey', 'hello', 'need', 'too',
+    'list', 'page', 'homepage', 'home', 'screen', 'app', 'thanks', 'thank',
+    'okay', 'now', 'again', 'back', 'accidentally', 'accidently', 'mistake',
+    'my', 'our', 'your', 'its', 'are', 'was', 'have', 'has', 'had', 'did',
+    'does', 'get', 'put', 'pin', 'wanna', 'should', 'all', 'both',
+    'other', 'another', 'favorite', 'favourite', 'favorites', 'favourites',
+    'deleted', 'removed', 'smart', 'curb', 'ai', 'chat', 'bot', 'agent',
+    'possible', 'able', 'through',
+  };
 
   static const _restoreWords = {
     'again', 'back', 'restore', 'undo', 'accidentally', 'accidently',
@@ -1926,8 +2301,24 @@ class SmartCurbAssistant {
   Future<ChatReply> _profile(_Message m) async {
     final p = await data.profile();
     if (!_filledIn(p)) return _askToFillProfile();
+    if (m.any(_removeWords)) {
+      return ChatReply(
+        "Your contact info can't be removed, since parts of it are required "
+        'for your account, but you can change any of it. Want to update it '
+        'now?',
+        [
+          ChatAction.run('Yes, update it', () async => ChatReply.form(
+                'Change anything below and press Enter (or Save) to update '
+                'it.',
+                _contactForm(p),
+              )),
+          ChatAction.run('No, keep it', () async => _nothingChanged),
+        ],
+      );
+    }
     final wants = m.any(_editWords) ||
         m.any(_addWords) ||
+        m.has({'complete', 'finish'}) ||
         m.anyPhrase(['fill in', 'fill out', 'set up']);
     if (wants) {
       return ChatReply.form(
@@ -1945,6 +2336,33 @@ class SmartCurbAssistant {
       [_v(p, 'state'), _v(p, 'zipCode')].where((s) => s.isNotEmpty).join(' '),
       _v(p, 'country'),
     ].where((s) => s.isNotEmpty).join(', ');
+    // "What's my phone number?": just that, not the whole profile.
+    final asked = <String, String>{
+      if (m.has({'address', 'live', 'city', 'zip'}) && address.isNotEmpty)
+        'address1': 'Your address is $address.',
+      if (m.has({'phone', 'number', 'cell', 'mobile'}) && phone.isNotEmpty)
+        'phone': 'Your phone number is ${formatPhone(phone)}.',
+      if (m.has({'name'}))
+        'name': 'Your name is ${_fullName(p)}.',
+      if (m.has({'email', 'mail'}) && email != null)
+        'email': 'Your email is $email. It\'s also your login.',
+      if (m.has({'gender'}) && _v(p, 'gender').isNotEmpty)
+        'gender': 'You entered your gender as ${_v(p, 'gender')}.',
+    };
+    if (asked.length == 1) {
+      final field = asked.keys.single;
+      return ChatReply(
+        asked.values.single,
+        [
+          if (field != 'email')
+            ChatAction.run('Change it', () async => ChatReply.form(
+                  'Sure! Change it below and press Enter (or Save).',
+                  _contactForm(p, focus: field == 'name' ? 'firstName' : field),
+                )),
+          const ChatAction.ask('My profile'),
+        ],
+      );
+    }
     return ChatReply(
       'Here is your contact information:\n'
       '• Name: ${_fullName(p)}\n'
@@ -2088,7 +2506,12 @@ class SmartCurbAssistant {
     'who made you', 'who built you', 'who created you', 'who made this',
     'who built this', 'who made the app', 'who created this', 'who owns',
     'who developed', 'who designed', 'who is behind', 'who are the developers',
-    'who built the app', 'who made smart curb',
+    'who built the app', 'who made smart curb', 'who installed',
+    'who built the curbs', 'who made the curbs', 'who makes the curbs',
+    'who runs', 'who owns smart curb', 'who is the team', 'who are the team',
+    'team members', 'who works on', 'meet the team', 'who is on the team',
+    'your team', 'the developers', 'your developers', 'who is behind',
+    'who are you guys',
   ];
   static const _joke = {'joke', 'funny', 'laugh'};
   static const _parkWords = {
@@ -2115,13 +2538,17 @@ class SmartCurbAssistant {
   static const _browardWords = ['broward', 'mall', 'westfield', 'plantation'];
   static const _vehicleWords = {
     'vehicle', 'vehicles', 'car', 'cars', 'truck', 'plate', 'plates',
-    'license', 'auto', 'suv', 'van',
+    'license', 'auto', 'suv', 'van', 'motorcycle', 'motorcycles', 'motorbike',
+    'scooter', 'moped',
   };
   static const _placeWords = {
     'place', 'places', 'location', 'locations', 'campus', 'campuses', 'saved',
     'site', 'sites',
   };
-  static const _placePhrases = ['my places', 'where can i use', 'which places'];
+  static const _placePhrases = [
+    'my places', 'where can i use', 'which places', 'home page', 'homepage',
+    'my home', 'on home', 'home screen',
+  ];
   static const _profileWords = {
     'profile', 'account', 'name', 'phone', 'address', 'email', 'details',
     'info', 'information', 'personal',
@@ -2131,7 +2558,9 @@ class SmartCurbAssistant {
   static const _removeWords = {'delete', 'remove', 'erase', 'unsave'};
   static const _editWords = {'edit', 'change', 'update', 'fix', 'modify'};
   static const _logoutWords = {'logout', 'signout'};
-  static const _logoutPhrases = ['log out', 'sign out', 'log off'];
+  static const _logoutPhrases = [
+    'log out', 'sign out', 'log off', 'log me out', 'sign me out',
+  ];
   static const _passwordWords = {'password', 'passcode', 'forgot', 'reset'};
   static const _colorWords = {
     'color', 'colors', 'colour', 'colours', 'green', 'red', 'gray', 'grey',
@@ -2148,6 +2577,10 @@ class SmartCurbAssistant {
   static const _howItWorksPhrases = [
     'how does it work', 'how does this work', 'how does smart curb',
     'what is smart curb', 'what is this app', 'how it works', 'what does this app',
+    'what is a smart curb', 'what are smart curbs', 'what is a curb',
+    'what does a smart curb do', 'what is smartcurb', 'what do the curbs do',
+    'what are the curbs', 'what do the led', 'what does the led',
+    'led lights', 'led light', 'led panel', 'solar',
     'what is this',
   ];
   static const _supportWords = {
@@ -2163,6 +2596,11 @@ class SmartCurbAssistant {
     'you are the best', 'youre the best', 'you rock', 'love you',
     'love this app', 'love the app', 'you are helpful', 'youre helpful',
     'very helpful', 'so helpful', 'you are cool', 'youre cool',
+    'this is cool', 'this is great', 'this is awesome', 'this is amazing',
+    'this is nice', 'so cool', 'very cool', 'love it', 'i like it',
+    'i like this', 'nice app', 'great app', 'cool app', 'awesome app',
+    'amazing app', 'nice work', 'good work', 'that was quick',
+    'that was fast', 'that helped', 'that helps', 'big help',
   ];
   static const _insults = {
     'stupid', 'dumb', 'useless', 'idiot', 'sucks', 'suck', 'terrible',
@@ -2203,11 +2641,16 @@ class SmartCurbAssistant {
     'where does smart curb work', 'where is smart curb available',
     'where is it available', 'which campuses', 'which schools', 'which malls',
     'supported places', 'supported locations', 'more campuses', 'more malls',
-    'more schools',
+    'more schools', 'other countries', 'other country', 'other states',
+    'outside florida', 'in my city', 'in my town',
   ];
   static const _curbCountPhrases = [
     'how many curbs', 'how many smart curbs', 'how many sensors',
     'number of curbs', 'number of sensors', 'how many units', 'how many devices',
+    'which lots have', 'where are the smart curbs', 'where are the curbs',
+    'where are smart curbs', 'lots with curbs', 'lots with smart curbs',
+    'lots with sensors', 'which lot has curbs', 'which lot has smart curbs',
+    'where is a smart curb', 'where can i find a smart curb',
   ];
   static const _emptiestPhrases = [
     'most space', 'most spaces', 'most spots', 'most open', 'most free',
@@ -2225,7 +2668,10 @@ class SmartCurbAssistant {
   ];
   static const _loginPhrases = [
     'log in', 'sign in', 'logged in', 'signed in', 'login as', 'who am i',
-    'which account',
+    'which account', 'log me in', 'sign me in', 'switch account',
+    'switch accounts', 'change account', 'change accounts', 'swap account',
+    'other account', 'what email', 'which email', 'email am i',
+    'email address am i', 'my login',
   ];
 
   // ---- app questions (see [_faqs]) ----
@@ -2269,13 +2715,14 @@ class SmartCurbAssistant {
   };
   static const _appTrouble = {
     'crash', 'crashed', 'crashes', 'crashing', 'frozen', 'freeze', 'freezes',
-    'freezing', 'glitch', 'glitchy', 'laggy', 'lagging',
+    'freezing', 'glitch', 'glitchy', 'laggy', 'lagging', 'slow', 'buggy',
+    'unresponsive',
   };
   static const _backPhrases = [
     'go back', 'get back', 'back to home', 'back home', 'exit the map',
     'leave the map', 'close the map', 'exit map', 'return home',
-    'return to home', 'main screen', 'home screen', 'home page', 'main menu',
-    'switch tabs', 'other tabs', 'change tabs',
+    'return to home', 'main screen', 'main menu', 'go to home',
+    'go to the home', 'switch tabs', 'other tabs', 'change tabs',
   ];
   /// Asking about open spots, not about the map itself.
   static const _spotQuestion = {
@@ -2321,12 +2768,19 @@ class SmartCurbAssistant {
     'follows me', 'map turn', 'map rotate', 'rotate the map',
   ];
   static const _rulesWords = {
-    'overnight', 'rules', 'rule', 'allowed', 'legal', 'illegal', 'visitor',
-    'visitors', 'guest', 'guests',
+    'overnight', 'rules', 'rule', 'allowed', 'legal', 'illegal',
   };
+
+  /// "Why do you need my address?", "do I have to add my car?"
+  static const _whyNeedPhrases = [
+    'why do you need', 'why do i need', 'why does it need',
+    'why do i have to', 'why should i', 'why do you want', 'why does the app',
+    'do i have to add', 'do i need to add', 'is it required',
+    'is it necessary', 'why is my', 'why add',
+  ];
   static const _rulesPhrases = [
     'time limit', 'how long can i park', 'park all day', 'can i park here',
-    'am i allowed', 'free to park',
+    'am i allowed', 'free to park', 'park anywhere', 'park wherever',
   ];
   static const _privacyWords = {
     'privacy', 'private', 'tracking', 'tracked', 'spy', 'spying', 'security',
@@ -2335,13 +2789,19 @@ class SmartCurbAssistant {
   static const _privacyPhrases = [
     'track me', 'track my', 'my data', 'share my', 'sell my', 'who can see',
     'see my location', 'store my', 'save my location', 'my information safe',
-    'my info safe',
+    'my info safe', 'location shared', 'share my location', 'shared with',
+    'who sees', 'is my location', 'location private', 'tracking me',
+    'track my location', 'is my data', 'data safe',
   ];
   static const _fillsUpPhrases = [
     'fills up', 'fill up', 'filled up', 'gets full', 'got full',
     'becomes full', 'someone takes', 'someone took', 'someone else',
     'gets taken', 'got taken', 'taken before', 'by the time i',
     'while driving', 'while im driving', 'while i drive',
+    // "Why did it change my lot?"
+    'change my lot', 'changed my lot', 'switched my lot', 'changed the lot',
+    'switched the lot', 'changed my spot', 'changed my curb', 'new lot',
+    'lot changed', 'different lot',
   ];
   static const _parkedPhrases = [
     'i parked', 'im parked', 'i am parked', 'ive parked', 'i have parked',
@@ -2387,7 +2847,6 @@ class SmartCurbAssistant {
   static const _costWords = {
     'permit', 'permits', 'decal', 'decals', 'pay', 'paying', 'payment',
     'payments', 'cost', 'costs', 'price', 'prices', 'pricing', 'fee', 'fees',
-    'ticket', 'tickets', 'citation', 'citations', 'tow', 'towed', 'towing',
     'money', 'subscription', 'paid', 'dollar', 'dollars', 'expensive',
     'cheap',
   };
@@ -2399,7 +2858,9 @@ class SmartCurbAssistant {
     'best time', 'busiest', 'busy time', 'busy times', 'least busy time',
     'rush hour', 'peak hour', 'peak hours', 'peak time', 'when is it busy',
     'when should i come', 'when should i go', 'what time should',
-    'when are lots', 'when is parking', 'predict',
+    'when are lots', 'when is parking', 'predict', 'when does the lot fill',
+    'when do lots fill', 'when does it fill', 'when does parking fill',
+    'when do the lots fill', 'what time does the lot', 'what time do lots',
   ];
   static const _internetWords = {
     'internet', 'wifi', 'signal', 'connection', 'connectivity',
@@ -2429,6 +2890,7 @@ class SmartCurbAssistant {
     'sign up', 'create an account', 'create account', 'create a new account',
     'make an account', 'new account', 'open an account',
     'register an account', 'another account', 'second account',
+    'two accounts', 'multiple accounts', 'more than one account',
     'need an account', 'need account', 'without an account',
     'without account',
   ];
@@ -2449,9 +2911,874 @@ class SmartCurbAssistant {
     'day mode',
   ];
 
+  /// "Can I ask another question?": the user wants to go on.
+  static const _askAwayPhrases = [
+    'another question', 'a question', 'one more question', 'more questions',
+    'quick question', 'can i ask', 'may i ask', 'could i ask', 'let me ask',
+    'i wanna ask', 'i want to ask', 'ask you something', 'ask something',
+    'ask you a', 'one more thing', 'another thing', 'something else',
+    'i was wondering', 'help me with something', 'help with something',
+    'can you answer',
+  ];
+  static const _holdOnPhrases = [
+    'wait', 'hold on', 'hang on', 'one sec', 'one second', 'just a sec',
+    'give me a sec', 'give me a minute', 'one minute', 'brb', 'be right back',
+  ];
+
+  /// Things going wrong on the road, checked before anything else. The
+  /// first match wins: someone being hurt comes first.
+  static final List<_Faq> _safety = [
+    _Faq(
+      (m) =>
+          m.has({'hurt', 'injured', 'injury', 'injuries', 'bleeding',
+            'ambulance', 'emergency', 'unconscious', 'fainted', 'dying',
+            'paramedic', 'paramedics'}) ||
+          m.anyPhrase(['call 911', 'need help now', 'medical help',
+            'heart attack', 'cant breathe', 'not breathing', 'need a doctor']),
+      const ChatReply(
+        'Please call $kEmergencyNumber right now. I can\'t call for help '
+        "myself, but $kEmergencyNumber can send someone to you fast. Stay "
+        'where you are if it\'s safe, and tell them which lot or building '
+        "you're near. I'm here if you need anything after.",
+      ),
+    ),
+    _Faq(
+      (m) => m.anyPhrase(['call the police', 'call police', 'call security',
+            'contact police', 'contact the police', 'call campus police',
+            'police number', 'police phone', 'number for police',
+            'reach the police', 'get the police']),
+      const ChatReply(
+        "I can't make calls myself, but here's who to call: for an "
+        'emergency, $kEmergencyNumber. On campus, $kCampusPolice at '
+        '$kCampusPolicePhone. At the mall, mall security can help too.',
+      ),
+    ),
+    _Faq(
+      (m) =>
+          m.has({'curb', 'curbs'}) &&
+          (m.has({'hit', 'drove', 'ran', 'bumped', 'scraped', 'damaged',
+                'broke', 'crashed', 'backed', 'smashed'}) ||
+              m.anyPhrase(['drove over', 'ran over', 'backed into'])) &&
+          !m.has({'shows', 'color', 'colour', 'wrong'}),
+      const ChatReply(
+        "Oh no, are you okay? If anyone is hurt, call $kEmergencyNumber "
+        "first. Don't worry about the curb: just let the team know at "
+        "$kSupportEmail which curb it was (its number, like C-077, is on "
+        'the map next to the space) and the lot, so they can check it. '
+        "Thanks for telling us!",
+        [ChatAction.ask('Contact support')],
+      ),
+    ),
+    _Faq(
+      (m) =>
+          m.has({'accident', 'accidents', 'collision', 'rearended'}) ||
+          m.anyPhrase(['car crash', 'crashed my car', 'crashed into',
+            'i crashed', 'hit my car', 'hit a car', 'hit another car',
+            'hit someone', 'hit a person', 'hit a pole', 'hit a wall',
+            'got hit', 'was hit', 'someone hit', 'hit and run', 'rear ended',
+            'ran into a car', 'ran into another car', 'ran into a pole',
+            'ran into someone', 'backed into', 'fender bender', 'totaled my car',
+            'got in a crash', 'was in a crash', 'scratched my car',
+            'dented my car', 'dent in my car', 'damaged my car',
+            'hit me', 'scratched someone', 'scratched a car',
+            'scratched another', 'hit a parked car', 'dinged',
+            'damaged someone', 'damaged a car']),
+      const ChatReply(
+        "I'm so sorry, that's scary! First, are you okay? If anyone is hurt "
+        'or there\'s danger, call $kEmergencyNumber right away.\n'
+        'If everyone is okay:\n'
+        '1. Move to a safe spot if you can and turn on your hazard lights.\n'
+        "2. Exchange names, phone numbers, insurance and plates with the "
+        'other driver. If the other car is parked and empty, leave a note '
+        'with your name and number.\n'
+        '3. Take photos of the cars, the plates and the area.\n'
+        '4. Report it to the police. On campus, call $kCampusPolice at '
+        '$kCampusPolicePhone.\n'
+        "Smart Curb can't file reports, but I'm here if you need help with "
+        'anything else.',
+      ),
+    ),
+    // "Is it safe to park at night?": tips, not an alarm.
+    _Faq(
+      // (Not "is it safe to use the app": that's about the app.)
+      (m) =>
+          m.anyPhrase(['is it safe', 'is it dangerous', 'safe to park',
+            'dangerous to park', 'safe at night', 'safe area',
+            'safe place to park', 'safest', 'is parking safe',
+            'is the lot safe', 'is the garage safe']) &&
+          !m.has({'use', 'app', 'download', 'install', 'data', 'account',
+            'information', 'info', 'privacy'}),
+      const ChatReply(
+        "Good question! I don't track safety, but here are some tips: park "
+        'in a well-lit, busy spot close to the door (I can find you the '
+        'closest one!), lock your car and keep valuables out of sight. If '
+        'you ever feel unsafe, call $kEmergencyNumber, or $kCampusPolice at '
+        '$kCampusPolicePhone on campus.',
+        [ChatAction.ask('Where should I park?')],
+      ),
+    ),
+    _Faq(
+      (m) =>
+          m.has({'unsafe', 'scared', 'threatened', 'harassed', 'attacked',
+            'assaulted', 'stalked', 'suspicious', 'danger', 'dangerous',
+            'robbed', 'mugged'}) ||
+          m.anyPhrase(['being followed', 'following me', 'not safe',
+            'feel unsafe', 'someone is chasing']),
+      const ChatReply(
+        "Your safety comes first. If you're in danger, call "
+        '$kEmergencyNumber now. On campus you can also call $kCampusPolice '
+        'at $kCampusPolicePhone. Head to a well-lit, busy place, stay in '
+        "your locked car if that's safer, and keep your phone with you. "
+        "I'm right here.",
+      ),
+    ),
+    _Faq(
+      (m) => m.anyPhrase(['took my spot', 'in my spot', 'stole my spot',
+            'parked in my spot', 'took my curb', 'took the spot',
+            'someone is in my', 'got my spot', 'took my parking']),
+      const ChatReply(
+        "Ugh, that's frustrating, sorry! Spots are first come, first "
+        "served, so I can't save one, but let's find you another right "
+        'away.',
+        [ChatAction.ask('Where should I park?'), ChatAction.ask('Open spots right now')],
+      ),
+    ),
+    _Faq(
+      (m) => m.has({'towed'}) || m.anyPhrase(['got towed', 'towed away',
+            'tow my car', 'towing company']),
+      const ChatReply(
+        "Oh no, sorry! The lot's signs list the towing company and its "
+        "number, so that's the fastest way to find your car. At FAU, Parking "
+        'and Transportation Services or $kCampusPolice '
+        '($kCampusPolicePhone) can tell you where it went.',
+        [ChatAction.ask("What's my license plate?")],
+      ),
+    ),
+    _Faq(
+      (m) =>
+          m.has({'stolen', 'theft', 'thief', 'burglary'}) ||
+          m.anyPhrase(['stole my', 'broke into my', 'break in', 'broken into',
+            'car is gone', 'car is missing', 'someone took my car',
+            'smashed my window', 'window smashed', 'window broken']),
+      const ChatReply(
+        "I'm so sorry! Please report it to the police right away: call "
+        '$kEmergencyNumber if it\'s happening now, or $kCampusPolice at '
+        '$kCampusPolicePhone on campus. Have your plate number ready. If '
+        "your car is gone, check first whether it was towed: the lot's "
+        'signs list who to call.',
+        [ChatAction.ask("What's my license plate?")],
+      ),
+    ),
+    _Faq(
+      // (Not "the app won't start": that's app trouble.)
+      (m) =>
+          !m.has({'app', 'map', 'chat', 'phone'}) &&
+          m.anyPhrase(['flat tire', 'flat tyre', 'dead battery',
+            'battery died', 'battery is dead', 'wont start', 'doesnt start',
+            'will not start', 'broke down', 'broken down', 'breaks down',
+            'out of gas', 'ran out of gas', 'overheating', 'overheated',
+            'locked my keys', 'keys locked', 'locked out of my car',
+            'lost my keys', 'jump start', 'jumpstart', 'need a jump',
+            'tow truck', 'need a tow', 'check engine', 'smoke coming']),
+      const ChatReply(
+        "Oh no, I'm sorry! First, stay safe: turn on your hazard lights, and "
+        "if you're in a driving lane, move out of traffic if you can. Then "
+        'call your roadside assistance (your insurance or a service like '
+        'AAA) for a jump, a tire change, a tow or a lockout. On campus, '
+        '$kCampusPolice ($kCampusPolicePhone) can point you to help too.',
+      ),
+    ),
+    _Faq(
+      (m) => m.anyPhrase(['blocked in', 'blocking my car', 'blocking me',
+            'someone blocked', 'cant get out', 'car is blocked',
+            'parked behind me', 'double parked']),
+      const ChatReply(
+        "Sorry, that's annoying! Please don't try to squeeze out. Check if "
+        'the driver is nearby, and if not, call for help: on campus, '
+        '$kCampusPolice at $kCampusPolicePhone; at the mall, mall security.',
+      ),
+    ),
+    _Faq(
+      (m) => m.anyPhrase(['im driving', 'i am driving', 'driving right now',
+            'driving now', 'im on the road', 'while i am driving now',
+            'texting and driving']),
+      const ChatReply(
+        'Please keep your eyes on the road! Focus mode on the map guides '
+        "you without typing. Ask me anything once you're safely parked. "
+        'Drive safe!',
+      ),
+    ),
+  ];
+
   /// Questions about using the app, first match wins: the more specific
   /// ones ("stop navigating") come before the broader ones ("the map").
   static final List<_Faq> _faqs = [
+    // ---- about the app itself ----
+    _Faq(
+      (m) =>
+          m.has({'progress', 'roadmap', 'beta', 'alpha', 'finished',
+            'unfinished', 'prototype'}) ||
+          m.anyPhrase(['app status', 'status of the app', 'app complete',
+            'app finished', 'in development', 'still in development',
+            'still being built', 'still working on', 'how far along',
+            'is it done', 'is the app done', 'state of the app',
+            'what works', 'whats missing', 'what is missing',
+            'what doesnt work', 'what can the app not do',
+            'whats not working', 'limitations']),
+      const ChatReply(
+        'Smart Curb is at version $kAppVersion and still growing! Here\'s '
+        'where it is:\n'
+        '✓ Working now: live Smart Curb counts at FAU, maps of FAU and '
+        'Westfield Broward Mall, the best lot (or exact curb) picked by real '
+        'walking distance, turn-by-turn driving and walking directions, '
+        'your cars, places and contact info, and me, the AI assistant.\n'
+        '• Not in the app yet: changing your password or email, spot alerts, '
+        'voice directions, reservations, a light theme, and more places.\n'
+        'Got an idea? The team reads every one at $kSupportEmail.',
+        [
+          ChatAction.ask("What's new?"),
+          ChatAction.ask('What can the app do?'),
+        ],
+      ),
+    ),
+    _Faq(
+      (m) =>
+          m.anyPhrase(['app safe', 'safe to use', 'is this app safe',
+            'is the app safe', 'is smart curb safe', 'is it secure',
+            'app secure', 'is it legit', 'is this legit', 'can i trust',
+            'trustworthy', 'is it a scam', 'is this a scam', 'safe app',
+            'secure app', 'safe to download', 'safe to install']) ||
+          m.has({'legit', 'scam', 'virus', 'malware', 'spyware', 'hacked'}),
+      const ChatReply(
+        'Yes! Smart Curb is safe to use:\n'
+        '• You sign in with your own email and password (through Google '
+        'Firebase), and your cars, places and contact info stay tied to '
+        'your account.\n'
+        "• Your location is used on your phone for your arrow and "
+        "directions, and isn't saved to your account.\n"
+        '• There are no payments and no ads, so no card details anywhere.\n'
+        'One important tip: please don\'t type while driving. Focus mode '
+        'guides you without typing.',
+        [ChatAction.ask('Is my data private?')],
+      ),
+    ),
+    _Faq(
+      (m) => m.anyPhrase(['whats new', 'what is new', 'what changed',
+            'changelog', 'change log', 'release notes', 'latest update',
+            'last update', 'recent update', 'new in this version',
+            'new update', 'what got updated', 'updates in']),
+      const ChatReply(
+        "You're on version $kAppVersion. Recent updates added me (the AI "
+        'assistant!), Westfield Broward Mall, every FAU parking lot on the '
+        'map, and smoother animations throughout the app.',
+        [ChatAction.ask('What can the app do?')],
+      ),
+    ),
+    _Faq(
+      (m) =>
+          m.anyPhrase(['what can the app do', 'what does the app do',
+            'what does this app do', 'what can this app do',
+            'app features', 'what features', 'features of the app',
+            'list of features', 'main features', 'what is the app for',
+            'what is this app for', 'what is the app used for']) ||
+          m.has({'features', 'feature'}) &&
+              !m.anyPhrase(['add a feature', 'new feature', 'feature request',
+                'request a feature']),
+      const ChatReply(
+        "Here's what Smart Curb does:\n"
+        '• Shows live open spots from the Smart Curb sensors\n'
+        "• Picks the best lot (or exact curb) for the building you're going "
+        'to, by real walking distance\n'
+        '• Turn-by-turn driving directions, then a walking path to the door\n'
+        '• Switches you to another lot if yours fills up on the way\n'
+        '• Keeps your cars, saved places and contact info\n'
+        '• And me, to help with all of it!',
+        [
+          ChatAction.ask('How do I use the app?'),
+          ChatAction.ask('Where should I park?'),
+        ],
+      ),
+    ),
+    _Faq(
+      // (Not "when will a spot open?": that's about parking.)
+      (m) => !m.any(_parkWords) && !m.has(_spotQuestion) &&
+          m.anyPhrase(['when will', 'coming soon', 'in the future',
+            'future updates', 'future update', 'next update', 'whats next',
+            'what is next', 'upcoming', 'new features coming', 'plans for',
+            'future plans', 'how often is it updated', 'how often do you update',
+            'how often does it update', 'how often is the app updated',
+            'how often does the app update', 'how often do you release',
+            'coming next', 'whats coming', 'what is coming', 'next version',
+            'next release', 'will you add', 'will there be',
+            'are you going to add', 'will it get', 'release date']),
+      const ChatReply(
+        "I don't have release dates, sorry! The team is still building "
+        'Smart Curb and adds features as they\'re ready. If there\'s '
+        "something you'd love to see, tell them at $kSupportEmail. They "
+        'read every request.',
+        [ChatAction.ask('What is the current progress of the app?')],
+      ),
+    ),
+    _Faq(
+      (m) =>
+          m.has({'iphone', 'android', 'ios', 'ipad', 'tablet', 'laptop',
+            'desktop', 'computer', 'pc', 'mac', 'browser', 'platform',
+            'platforms', 'samsung', 'pixel'}) ||
+          m.anyPhrase(['which phones', 'what phones', 'web browser',
+            'work on my', 'run on my', 'which devices', 'what devices']),
+      const ChatReply(
+        'Smart Curb is built with Flutter, so it runs on Android phones, '
+        'iPhones and in a web browser. Your account works the same on all '
+        'of them.',
+      ),
+    ),
+    _Faq(
+      (m) =>
+          m.has({'tech', 'technology', 'technologies', 'framework', 'flutter',
+            'firebase', 'database', 'backend', 'stack', 'maplibre', 'osrm',
+            'algorithm', 'programming'}) ||
+          m.anyPhrase(['built with', 'made with', 'coded in', 'written in',
+            'under the hood', 'how was it built', 'how is it built',
+            'how was the app made', 'source code', 'open source', 'github',
+            'what language is', 'how does the app work technically']),
+      const ChatReply(
+        'Under the hood: the app is built with Flutter. Sign-in and the live '
+        'curb data run on Google Firebase, the maps use MapLibre with '
+        'OpenStreetMap data, driving routes come from OSRM, and walking '
+        'paths use an A* search over the campus walkways. The curbs report '
+        'to Firebase, and the app updates the moment they do. For questions '
+        'about the code itself, the team is at $kSupportEmail.',
+        [ChatAction.ask('How does Smart Curb work?')],
+      ),
+    ),
+    _Faq(
+      (m) =>
+          m.has({'official', 'affiliated', 'endorsed', 'sponsored'}) ||
+          m.anyPhrase(['fau app', 'by fau', 'from fau', 'run by fau',
+            'made by fau', 'part of fau', 'fau own']),
+      const ChatReply(
+        'Smart Curb was built by an FAU Engineering senior design team, with '
+        "FAU's Boca Raton campus as its first home. For official FAU "
+        'parking rules and permits, check FAU Parking and Transportation '
+        'Services.',
+        [ChatAction.ask('Who made you?')],
+      ),
+    ),
+    _Faq(
+      // ("Why use this instead of Google Maps?" is the comparison below.)
+      (m) =>
+          !m.has({'google', 'waze', 'maps'}) &&
+          (m.has({'purpose', 'mission', 'goal', 'goals'}) ||
+              m.anyPhrase(['why was it made', 'why was smart curb made',
+                'why did you make', 'why make', 'the point of',
+                'what problem', 'why does it exist', 'why smart curb',
+                'why should i use', 'why use this', 'what is the idea',
+                'idea behind'])),
+      const ChatReply(
+        'Smart Curb was made to end circling around looking for a spot. '
+        'Each curb senses its own space live, so instead of guessing, you '
+        "drive straight to an open spot as close as possible to where "
+        "you're going, and walk the shortest way to the door. Less "
+        'circling, less stress, and fewer late arrivals!',
+        [ChatAction.ask('How does Smart Curb work?')],
+      ),
+    ),
+    _Faq(
+      (m) =>
+          m.has({'google', 'waze', 'apple', 'maps'}) &&
+          m.has({'maps', 'map', 'waze', 'different', 'better', 'vs',
+            'versus', 'instead', 'compared', 'compare', 'difference'}),
+      const ChatReply(
+        'Great question! Google Maps or Waze gets you to the building. Smart '
+        'Curb gets you to an open parking spot: it knows live which Smart '
+        'Curb spaces are free, picks the lot by the real walking distance to '
+        "the door, switches lots if yours fills up, and then walks you in.",
+        [ChatAction.ask('What can the app do?')],
+      ),
+    ),
+    _Faq(
+      (m) => m.anyPhrase(['how many users', 'how many people use',
+            'who uses', 'is it popular', 'how many downloads',
+            'how many people have', 'anyone use']),
+      const ChatReply(
+        "I don't have user numbers, sorry! Smart Curb is new and growing, "
+        'starting at FAU and Westfield Broward Mall.',
+      ),
+    ),
+    _Faq(
+      (m) => m.has({'ads', 'advertisements', 'advertising', 'commercials',
+            'adverts', 'popups'}),
+      const ChatReply(
+        'Nope, Smart Curb has no ads. Just parking help!',
+      ),
+    ),
+    _Faq(
+      (m) => m.anyPhrase(['privacy policy', 'terms of service',
+            'terms and conditions', 'terms of use', 'user agreement',
+            'data policy']) ||
+          m.has({'tos', 'eula', 'gdpr'}),
+      const ChatReply(
+        "There's no separate privacy policy page in the app yet. In short: "
+        'your location is only used on your phone for directions, and what '
+        "Smart Curb stores is what you enter (your profile, cars and saved "
+        'places), tied to your login. For anything more, ask the team at '
+        '$kSupportEmail.',
+        [ChatAction.ask('Is this app safe to use?')],
+      ),
+    ),
+    _Faq(
+      (m) =>
+          m.anyPhrase(['what permissions', 'which permissions',
+            'permissions does', 'what does the app access', 'access to my',
+            'why does it need my location', 'why does the app need my location',
+            'why do you need my location', 'why location', 'camera access',
+            'use my camera', 'use my microphone', 'access my contacts']) ||
+          m.has({'camera', 'microphone', 'contacts'}) && m.has({'app', 'use', 'access'}),
+      const ChatReply(
+        'Smart Curb asks for your location (for your arrow and directions) '
+        "and uses your phone's compass to turn the arrow the way you're "
+        "facing. It doesn't use your camera, microphone or contacts.",
+      ),
+    ),
+    _Faq(
+      (m) => m.anyPhrase(['rate the app', 'review the app', 'leave a review',
+            'give a rating', 'rate it', 'write a review', '5 stars',
+            'five stars', 'rate you', 'rate this']),
+      const ChatReply(
+        "Thank you, that means a lot! The best way to share what you think "
+        'is to tell the team at $kSupportEmail. They read every message.',
+      ),
+    ),
+    _Faq(
+      (m) => m.anyPhrase(['name of the app', 'app called', 'app name',
+            'apps name', 'what is this app called', 'name of this app']),
+      const ChatReply(
+        "It's called Smart Curb! Smart curbs in the parking spaces, and "
+        'this app to find the open ones.',
+      ),
+    ),
+    // ---- things people ask the assistant to do that it can't ----
+    _Faq(
+      (m) => m.anyPhrase([
+        'park my car', 'park the car', 'park it for me', 'park for me',
+        'drive for me', 'drive me', 'drive my car', 'valet',
+      ]),
+      const ChatReply(
+        "Ha, I wish I could! I can't drive or park your car, but I can find "
+        "you the best open spot and guide you right to it. Where are you "
+        'heading?',
+        [ChatAction.ask('Where should I park?')],
+      ),
+    ),
+    _Faq(
+      (m) => m.anyPhrase([
+        'when a spot opens', 'when spot opens', 'when a spot is open',
+        'when a spot frees', 'when spots open', 'notify me when',
+        'alert me when', 'let me know when', 'tell me when', 'text me',
+        'message me when', 'ping me', 'send me a notification',
+      ]),
+      const ChatReply(
+        "I can't send texts or alerts yet, sorry! But the map updates live, "
+        "so keep it open and you'll see a curb turn green the moment it "
+        "frees up. And if your lot fills while you're driving, I switch you "
+        'to another one automatically.',
+        [ChatAction.ask('Open spots right now')],
+      ),
+    ),
+    _Faq(
+      (m) => m.anyPhrase([
+        'call me', 'phone me', 'give me a call', 'call you', 'call support',
+        'call the team', 'call someone', 'support number', 'phone number for',
+        'your number', 'your phone number', 'email me', 'send me an email',
+        'contact me',
+      ]),
+      const ChatReply(
+        "I can't make calls or send emails, sorry! To reach a person on the "
+        'Smart Curb team, email $kSupportEmail (it\'s also in the ⋮ menu > '
+        "Settings > Contact Us). They'll get back to you.",
+        [ChatAction.ask('What can you do?')],
+      ),
+    ),
+    _Faq(
+      (m) => m.anyPhrase([
+        'where i parked', 'where did i park', 'remember where', 'find my car',
+        'where is my car', 'wheres my car', 'locate my car', 'where my car is',
+        'lost my car', 'cant find my car', 'where i left my car',
+      ]),
+      const ChatReply(
+        "Sorry, I can't remember where you parked yet. Tip: while you park, "
+        'the card at the bottom of the map shows your lot and curb (like '
+        '"Park at C-077 • Lot 14"). Snapping a photo of the lot sign works '
+        'great too!',
+      ),
+    ),
+    _Faq(
+      (m) => m.has({'remind', 'reminder', 'reminders', 'alarm', 'timer'}),
+      const ChatReply(
+        "I can't set reminders yet, sorry! Your phone's Clock or Reminders "
+        'app is perfect for "move my car at 5". I\'ll be here to find you a '
+        'spot next time.',
+      ),
+    ),
+    // ---- things outside parking people still ask about ----
+    _Faq(
+      (m) =>
+          m.has({'hours', 'closes', 'closing'}) ||
+          m.anyPhrase(['opening hours', 'open hours', 'what time does',
+            'is it open', 'is the mall open', 'is the library open',
+            'open today', 'open until', 'open late', 'when does it open',
+            'when does it close', 'when do they open', 'when do they close']),
+      const ChatReply(
+        "Sorry, I don't have opening hours for buildings or stores; FAU's "
+        "and the mall's websites list them. But I can always find you a "
+        'great spot!',
+        [ChatAction.ask('Where should I park?')],
+      ),
+      withBuilding: true,
+    ),
+    _Faq(
+      (m) => m.has({'bathroom', 'bathrooms', 'restroom', 'restrooms',
+            'toilet', 'toilets', 'washroom'}),
+      const ChatReply(
+        "Sorry, I can't find restrooms yet. I'm all about parking! Most "
+        'buildings and the mall have them inside, so the information desk '
+        'is a good place to ask.',
+      ),
+    ),
+    _Faq(
+      (m) => m.has({'food', 'eat', 'restaurant', 'restaurants', 'hungry',
+            'lunch', 'dinner', 'breakfast', 'coffee', 'cafe', 'starbucks'}),
+      const ChatReply(
+        "I can't recommend places to eat yet, but if you know where you're "
+        "going, I'll find you parking right by it! At Broward Mall, Brio is "
+        'on the map.',
+        [
+          ChatAction.ask('Park near Brio', 'Where should I park for Brio?'),
+          ChatAction.ask('Where should I park?'),
+        ],
+      ),
+    ),
+    _Faq(
+      (m) =>
+          m.has({'battery', 'batteries', 'drain', 'draining', 'drains'}) &&
+          !m.any({'curb', 'curbs', 'sensor', 'sensors'}),
+      const ChatReply(
+        'Navigation uses GPS, so like any map app it uses some battery '
+        "while you drive. To save power, close the map once you've parked "
+        'and arrived.',
+      ),
+    ),
+    _Faq(
+      (m) => m.anyPhrase(['delete the app', 'uninstall', 'remove the app',
+            'delete this app', 'get rid of the app']),
+      const ChatReply(
+        'You can uninstall Smart Curb like any other app. Just so you know: '
+        "uninstalling doesn't delete your account, so your cars, places and "
+        "contact info will be here if you come back. Sorry to see you go!",
+        [ChatAction.ask('How do I delete my account?')],
+      ),
+    ),
+    _Faq(
+      (m) => m.anyPhrase(['get the app', 'download the app', 'download it',
+            'install the app', 'share the app', 'recommend the app',
+            'app store', 'play store', 'friend wants the app',
+            'friend needs the app', 'friend get the app', 'friends get the app',
+            'tell my friend', 'invite my friend', 'invite a friend']),
+      const ChatReply(
+        'Thanks for spreading the word! Your friends can get Smart Curb the '
+        'same way you did, then register with their own email. Each person '
+        'needs their own account.',
+        [ChatAction.ask('How do I register another account?')],
+      ),
+    ),
+    _Faq(
+      (m) => m.anyPhrase(['close the chat', 'close chat', 'exit the chat',
+            'leave the chat', 'hide the bubble', 'turn off the chat',
+            'remove the bubble', 'hide the chat', 'get out of the chat',
+            'turn you off', 'go away']),
+      const ChatReply(
+        "Sure! Tap the back arrow at the top left to close the chat. I'll "
+        'be in the round bubble at the bottom right of Home, Vehicle and '
+        'Profile whenever you need me.',
+      ),
+    ),
+    // ---- parking questions with a twist ----
+    _Faq(
+      (m) =>
+          m.anyPhrase(['near me', 'closest to me', 'nearest to me',
+            'lot to me', 'spot to me', 'parking to me', 'closest to where i am',
+            'around me', 'close to me', 'by me']) &&
+          !m.anyPhrase(_gpsPhrases),
+      const ChatReply(
+        "Good question! I find spots by where you're going rather than "
+        "where you are, since that's what makes your walk short. Tell me "
+        "the building you're heading to and I'll pick the best open spot.",
+        [ChatAction.ask('Where should I park?')],
+      ),
+    ),
+    _Faq(
+      (m) => m.anyPhrase(['walking path', 'walk path', 'walking route',
+            'walking directions', 'walk to the building', 'walk to the door',
+            'directions to the door']),
+      const ChatReply(
+        'Yes! Once you arrive at your spot, the driving route goes away and '
+        "a dotted green walking path appears from your spot to the "
+        "building's door, with the distance left in the card at the bottom.",
+        [ChatAction.ask('Where should I park?')],
+      ),
+    ),
+    _Faq(
+      (m) => m.has({'sensored'}) ||
+          m.anyPhrase(['sensored spots', 'sensored spot']),
+      const ChatReply(
+        '"Sensored" spots are the parking spaces that have a Smart Curb, so '
+        "I can see live whether each one is open. Other spaces in the lot "
+        "aren't counted yet.",
+        [ChatAction.ask('Which lots have Smart Curbs?')],
+      ),
+    ),
+    _Faq(
+      (m) => m.anyPhrase(['cant find my building', 'cant find the building',
+            'building isnt', 'building is not', 'building not', 'not in the list',
+            'not on the map', 'missing building', 'building is missing',
+            'not in the search', 'cant find it in the search']),
+      const ChatReply(
+        "Sorry about that! Try the building's code (like ED-47) or a single "
+        'word from its name, like "library" or "business". Tell me here and '
+        "I'll search too. If it's really missing, the team would like to "
+        'know: $kSupportEmail.',
+        [ChatAction.ask('What buildings are there?')],
+      ),
+    ),
+    // ---- accounts ----
+    _Faq(
+      (m) => m.anyPhrase([
+        'why do i need an account', 'why an account', 'without an account',
+        'without account', 'without signing', 'without logging',
+        'need an account', 'need account', 'need to sign up',
+        'need to register', 'as a guest', 'guest mode',
+      ]),
+      const ChatReply(
+        'Yes, Smart Curb needs an account. It keeps your vehicles, saved '
+        'places and contact info safe and with you on any phone. Signing up '
+        "only takes an email and a password, and you're already signed in!",
+        [ChatAction.ask('How do I register another account?')],
+      ),
+    ),
+    _Faq(
+      (m) =>
+          m.has({'google', 'apple', 'facebook', 'gmail', 'microsoft', 'sso',
+            'outlook', 'icloud'}) &&
+          m.has({'sign', 'log', 'login', 'signin', 'account', 'register',
+            'signup', 'with', 'use'}) &&
+          !m.has({'maps', 'map', 'waze'}),
+      const ChatReply(
+        'Not right now: Smart Curb signs in with an email and a password '
+        'only. You can use any email address, including a Gmail or iCloud '
+        'one.',
+      ),
+    ),
+    // ---- parking rules ----
+    _Faq(
+      (m) => m.has({'visitor', 'visitors', 'guest', 'guests'}),
+      const ChatReply(
+        'Visitor rules depend on the place. At FAU, check Parking and '
+        'Transportation Services for visitor permits and where visitors can '
+        "park; at Broward Mall, follow the signs in the lot. Tell me where "
+        "you're going and I'll find the closest lot.",
+        [ChatAction.ask('Where should I park?')],
+      ),
+      withBuilding: true,
+    ),
+    _Faq(
+      (m) =>
+          m.has({'motorcycle', 'motorcycles', 'motorbike', 'scooter',
+            'scooters', 'bike', 'bikes', 'bicycle', 'moped'}) &&
+          !m.has(_addWords),
+      const ChatReply(
+        "Smart Curb spaces are regular car spaces, and I don't track "
+        'motorcycle or bike parking yet, so please follow the signs at the '
+        'lot. You can still add a motorcycle to your vehicles if you like!',
+        [ChatAction.ask('Add a vehicle')],
+      ),
+      withBuilding: true,
+    ),
+    _Faq(
+      (m) => m.has({'ticket', 'tickets', 'citation', 'citations', 'towed',
+            'towing', 'booted'}) ||
+          m.anyPhrase(['parking fine', 'got a fine']),
+      const ChatReply(
+        "Sorry to hear that! Smart Curb doesn't issue or handle parking "
+        'tickets. At FAU, Parking and Transportation Services handles '
+        'tickets and appeals; anywhere else, follow the instructions on the '
+        'ticket.',
+      ),
+    ),
+    _Faq(
+      (m) => m.has({'refund', 'refunds', 'charged', 'overcharged'}) ||
+          m.hasPhrase('money back'),
+      const ChatReply(
+        "There's nothing to refund in Smart Curb: the app is free and never "
+        'charges you. For parking fees or permits, contact whoever runs the '
+        'lot (at FAU, Parking and Transportation Services).',
+      ),
+    ),
+    // ---- the map ----
+    _Faq(
+      (m) =>
+          m.has({'route', 'directions', 'navigation', 'path', 'way'}) &&
+          m.has({'wrong', 'weird', 'bad', 'incorrect', 'strange', 'long',
+            'longer', 'crazy', 'broken', 'off', 'odd'}),
+      const ChatReply(
+        'Sorry about that! Routes follow real roads and update as you '
+        'drive. If one looks off: make sure your location is on so I know '
+        "where you are, then tap the ✕ in the search bar and pick the "
+        "building again to redraw it. If a road is closed, just drive around "
+        "it and I'll reroute. Still wrong? Tell the team at $kSupportEmail.",
+      ),
+    ),
+    _Faq(
+      (m) => m.anyPhrase([
+        'see my location', 'my location on the map', 'show my location',
+        'where am i on the map', 'find myself', 'see where i am',
+        'show where i am', 'my position on the map',
+      ]),
+      const ChatReply(
+        "You're the arrow on the map! It points the way you're facing. Tap "
+        'the arrow button at the top right to have the map follow you '
+        "(focus mode). Don't see your arrow? Make sure location is turned on "
+        'and allowed for Smart Curb (or your browser).',
+      ),
+    ),
+    _Faq(
+      (m) =>
+          (m.has({'line', 'lines', 'dotted', 'arrow', 'dots', 'blocks',
+                'block'}) &&
+              m.has({'what', 'whats', 'mean', 'means', 'meaning'}) &&
+              !m.has({'button'})) ||
+          m.anyPhrase(['blue line', 'green line', 'dotted line', 'map symbols',
+            'map icons', 'what am i looking at']),
+      const ChatReply(
+        "Here's what you see on the map:\n"
+        "• The arrow is you, pointing the way you're facing\n"
+        '• The bright green line is your driving route\n'
+        '• After you park, the dotted green line is your walk to the door\n'
+        '• Dots with names are parking lots (tap one for details)\n'
+        '• Colored blocks are Smart Curb spaces: green open, red taken, '
+        'gray offline',
+        [ChatAction.ask('What do the colors mean?')],
+      ),
+    ),
+    // ---- the curbs themselves ----
+    _Faq(
+      (m) => m.has({'detect', 'detects', 'detection', 'sense', 'senses',
+            'sensing'}) ||
+          m.anyPhrase(['know if a car', 'know when a car', 'know a car',
+            'know if a spot', 'know if someone']),
+      const ChatReply(
+        'Great question! Each Smart Curb sits at the front of a parking '
+        'space, where the concrete wheel stop usually goes, and senses '
+        'whether a car is parked there. It reports that live, so the map '
+        'shows the spot as open (green) or taken (red) within moments.',
+        [ChatAction.ask('What do the colors mean?')],
+      ),
+    ),
+    _Faq(
+      (m) =>
+          m.has({'curb', 'curbs', 'sensor', 'sensors', 'led', 'light',
+            'lights'}) &&
+          m.has({'broken', 'wrong', 'damaged', 'incorrect', 'stuck', 'dead',
+            'cracked', 'off', 'flickering', 'malfunctioning'}),
+      const ChatReply(
+        'Sorry about that! If a curb looks broken or shows the wrong status, '
+        'please tell the team at $kSupportEmail with the curb\'s number '
+        '(like C-077, shown on the map) and the lot. If a curb stops '
+        'reporting, it turns gray and I stop sending people to it.',
+        [ChatAction.ask('Contact support')],
+      ),
+    ),
+    _Faq(
+      (m) =>
+          m.has({'curb', 'curbs', 'sensor', 'sensors'}) &&
+          m.has({'battery', 'batteries', 'power', 'powered', 'charge',
+            'charged', 'electricity', 'energy', 'wires', 'wired', 'plugged'}),
+      const ChatReply(
+        'Each Smart Curb is solar-powered, so it runs on its own without '
+        'wires to the lot. If you have questions about the hardware, the '
+        'team is at $kSupportEmail.',
+        [ChatAction.ask('How does Smart Curb work?')],
+      ),
+    ),
+    _Faq(
+      (m) => m.anyPhrase(['at night', 'in the dark', 'after dark',
+            'night time', 'nighttime', 'in the evening']),
+      const ChatReply(
+        'Yes! The app works the same day and night, and the curbs keep '
+        'sensing spots after dark.',
+        [ChatAction.ask('Open spots right now')],
+      ),
+    ),
+    _Faq(
+      (m) => m.anyPhrase([
+        'smart curb cost', 'curb cost', 'cost of a curb', 'cost of a smart',
+        'buy a curb', 'buy a smart curb', 'buy smart curbs', 'price of a curb',
+        'how much is a curb', 'how much is a smart curb',
+        'how much does a curb', 'how much does a smart curb',
+        'get a smart curb', 'install a curb', 'install smart curb',
+        'install smart curbs', 'install a smart curb', 'curbs for sale',
+      ]),
+      const ChatReply(
+        "Smart Curb is an FAU Engineering senior design project, so the "
+        "curbs aren't for sale right now. If you're interested in the "
+        'hardware, the team would love to hear from you at $kSupportEmail.',
+        [ChatAction.ask('How does Smart Curb work?')],
+      ),
+    ),
+    // ---- ideas for the app ----
+    _Faq(
+      (m) =>
+          m.anyPhrase(['add a feature', 'feature request', 'new feature',
+            'suggestion', 'i suggest', 'an idea', 'improve the app',
+            'wish the app', 'it would be nice', 'you should add',
+            'would be cool', 'request a feature']) &&
+          !m.any(_vehicleWords) &&
+          !m.any(_placeWords),
+      const ChatReply(
+        'I love that! Feature ideas go straight to the team at '
+        "$kSupportEmail, and they read every one. Tell them what you'd like "
+        "and how you'd use it.",
+      ),
+    ),
+    // ---- why the app asks for things ----
+    _Faq(
+      (m) => m.anyPhrase(_whyNeedPhrases) && m.any(_vehicleWords),
+      const ChatReply(
+        "Adding your car is optional: Smart Curb finds you a spot either "
+        'way. Saving it just keeps its details (like the plate) handy in one '
+        'place.',
+        [ChatAction.ask('My vehicles')],
+      ),
+    ),
+    _Faq(
+      (m) =>
+          m.anyPhrase(_whyNeedPhrases) &&
+          (m.any(_profileWords) || m.has({'address', 'phone', 'gender'})),
+      const ChatReply(
+        "It's part of your Smart Curb account profile, so your details are "
+        'in one place. You can view or change it any time, here in the chat '
+        'or in the Profile tab.',
+        [ChatAction.ask('My profile')],
+      ),
+    ),
+    _Faq(
+      (m) => m.has({'default', 'primary'}) && m.any(_vehicleWords),
+      const ChatReply(
+        "There's no default car to set: Smart Curb doesn't need to know "
+        'which car you drive to find you a spot. Your cars are simply saved '
+        'on the Vehicle tab.',
+        [ChatAction.ask('My vehicles')],
+      ),
+    ),
     _Faq(
       (m) =>
           (m.has(_stopWords) || m.hasPhrase('turn off')) &&
@@ -2465,6 +3792,7 @@ class SmartCurbAssistant {
         'map.',
         [ChatAction.ask('How do I choose a building?')],
       ),
+      cantDo: 'stop your route from the chat',
     ),
     _Faq(
       (m) =>
@@ -2484,6 +3812,7 @@ class SmartCurbAssistant {
         'arrow along the route. Tap it again to leave focus mode.',
         [ChatAction.ask('How do I choose a building?')],
       ),
+      cantDo: 'turn on focus mode from the chat',
     ),
     _Faq(
       (m) =>
@@ -2610,6 +3939,7 @@ class SmartCurbAssistant {
         'On the map, tap the 3D button at the top right (the cube or map '
         'icon) to tilt the map into 3D, and again to go back to flat 2D.',
       ),
+      cantDo: 'switch the map to 3D from the chat',
     ),
     _Faq(
       (m) =>
@@ -2625,6 +3955,7 @@ class SmartCurbAssistant {
         'map) to zoom back out to the whole place. It also clears your '
         'destination and leaves focus mode. Pinch to zoom in and out.',
       ),
+      cantDo: 'move the map from the chat',
     ),
     _Faq(
       (m) =>
@@ -2640,6 +3971,7 @@ class SmartCurbAssistant {
         '"Simulate Walk" to play the drive and the walk. Tap the icon again '
         'to turn it off.',
       ),
+      cantDo: 'turn on developer mode from the chat',
     ),
     _Faq(
       (m) => m.has(_privacyWords) || m.anyPhrase(_privacyPhrases),
@@ -2679,9 +4011,13 @@ class SmartCurbAssistant {
         'The card at the bottom of the map shows the GPS status. Between '
         'tall buildings it can take a few seconds to lock on.',
       ),
+      cantDo: 'turn on your phone\'s location from the chat',
     ),
     _Faq(
-      (m) => m.anyPhrase(_fillsUpPhrases),
+      // "When does the lot fill up?" is about busy times (below).
+      (m) =>
+          m.anyPhrase(_fillsUpPhrases) &&
+          !m.anyPhrase(['when does', 'when do', 'what time']),
       const ChatReply(
         'No problem: the route follows the curbs live. If your lot (or curb) '
         "fills up while you're driving, I switch you to the next best lot "
@@ -2760,7 +4096,13 @@ class SmartCurbAssistant {
           m.has(_costWords) ||
           m.anyPhrase(_costPhrases) ||
           m.has(_rulesWords) ||
-          m.anyPhrase(_rulesPhrases),
+          m.anyPhrase(_rulesPhrases) ||
+          // "Is parking free?" is about money; "...free right now?" is
+          // about open spots.
+          (m.anyPhrase(['is parking free', 'parking free', 'free parking',
+                'parking cost']) &&
+              !m.has({'now', 'currently', 'today', 'right', 'spots',
+                'spaces'})),
       const ChatReply(
         'Good question! '
         "The Smart Curb app is free. It doesn't sell parking permits or take "
@@ -2769,6 +4111,8 @@ class SmartCurbAssistant {
         'FAU check Parking and Transportation Services.',
       ),
       withBuilding: true,
+      cantDo: 'pay for parking or buy permits',
+      cantDoHowTo: false,
     ),
     _Faq(
       (m) => m.anyPhrase(_bestTimePhrases),
@@ -2794,7 +4138,11 @@ class SmartCurbAssistant {
       (m) =>
           m.has({'offline'}) ||
           m.hasPhrase('not reporting') ||
-          (m.has({'gray', 'grey'}) && m.has({'why', 'curb', 'curbs'})),
+          // A gray lot has no sensors (the colors answer); a gray curb is
+          // offline.
+          (m.has({'gray', 'grey'}) &&
+              m.has({'why', 'curb', 'curbs'}) &&
+              !m.has({'lot', 'lots'})),
       const ChatReply(
         'Good eye! '
         "A gray curb is offline: it isn't reporting right now (for example "
@@ -2823,6 +4171,7 @@ class SmartCurbAssistant {
         'screen > Settings > Notifications. Flip the switch to turn them on '
         'or off.',
       ),
+      cantDo: 'change your settings from the chat',
     ),
     _Faq(
       (m) => m.has({'settings', 'setting', 'preferences'}),
@@ -2832,6 +4181,7 @@ class SmartCurbAssistant {
         'and Profile screens. There you can turn notifications on or off '
         'and find Contact Us. About App is in the same menu.',
       ),
+      cantDo: 'open or change your settings from the chat',
     ),
     _Faq(
       (m) => m.has({'version'}) || m.anyPhrase(_versionPhrases),
@@ -2839,6 +4189,7 @@ class SmartCurbAssistant {
         "You're on Smart Curb version $kAppVersion. You can see it any time "
         'in the ⋮ menu > About App.',
       ),
+      cantDo: 'update the app from the chat',
     ),
     _Faq(
       (m) =>
@@ -2846,12 +4197,17 @@ class SmartCurbAssistant {
           m.has({'signup', 'registration'}) ||
           (m.has({'register'}) && !m.any(_vehicleWords)),
       const ChatReply(
-        'Smart Curb needs an account, and you\'re already signed in! New '
-        "users tap \"Don't have an account? "
-        'Register" on the login screen and sign up with an email and a '
-        'password. To switch accounts, log out with the icon at the top '
-        'left first.',
+        "Sure! You're already signed in, so to register another account:\n"
+        '1. Log out with the icon at the top left of the main screen.\n'
+        '2. On the login screen, tap "Don\'t have an account? Register".\n'
+        '3. Enter the new email and a password (twice), then tap Register.\n'
+        "You'll be signed in to the new account right away. To come back to "
+        'this one, log out and log in with your current email. (Smart Curb '
+        'needs an account, so each person should have their own.)',
+        [ChatAction.ask('How do I log out?')],
       ),
+      cantDo: 'create or register an account for you from the chat. For '
+          'your security, only you can sign up',
     ),
     _Faq(
       (m) =>
@@ -2863,6 +4219,7 @@ class SmartCurbAssistant {
         'Contact support and the team can move your account to a new email.',
         [ChatAction.ask('Contact support')],
       ),
+      cantDo: 'change your email from the chat',
     ),
     _Faq(
       (m) =>
@@ -2876,6 +4233,7 @@ class SmartCurbAssistant {
         '$kSupportEmail from the address you signed up with, and they\'ll '
         'delete it along with your vehicles and saved places.',
       ),
+      cantDo: 'delete your account from the chat. For your security, that goes through the team',
     ),
     _Faq(
       (m) =>
@@ -2936,18 +4294,26 @@ class SmartCurbAssistant {
     ),
     _Faq(
       (m) => m.has({
-        'weather', 'forecast', 'raining', 'rain', 'rainy', 'temperature',
+        'weather', 'forecast', 'raining', 'rain', 'rains', 'rainy',
+        'temperature',
         'sunny', 'storm', 'hurricane',
       }),
       const ChatReply(
-        "I can't check the weather, but on a rainy day a spot close to the "
-        "door helps! Tell me your building and I'll find the closest open "
-        'lot.',
+        "I can't check the weather, but rain or shine the app works the "
+        'same, and on a rainy day a spot close to the door really helps! '
+        "Tell me your building and I'll find the closest open lot.",
         [ChatAction.ask('Where should I park?')],
       ),
     ),
     _Faq(
-      (m) => m.has(_appTrouble),
+      // ("I crashed my car" isn't about the app.)
+      (m) =>
+          (m.has(_appTrouble) ||
+              (m.has({'app'}) &&
+                  m.anyPhrase(['wont start', 'wont open', 'doesnt open',
+                    'not opening', 'wont load', 'keeps closing',
+                    'doesnt work', 'not working', 'stopped working']))) &&
+          !m.any(_vehicleWords),
       const ChatReply(
         'Sorry about that! Try closing and reopening the app, and check your '
         'internet connection. If it keeps happening, tell the team at '
@@ -2973,7 +4339,8 @@ class SmartCurbAssistant {
     ..._costWords, ..._internetWords, ..._accuracyWords,
     ..._notificationWords, ..._rulesWords, ..._okay, ..._hurryWords,
     ..._frustratedWords, 'settings', 'version', 'register',
-    'account', 'offline', 'gps', 'favorite', 'favourite',
+    'account', 'offline', 'gps', 'favorite', 'favourite', 'policy',
+    'policies', 'privacy', 'terms', 'update', 'updated', 'updates',
   };
 }
 
@@ -2984,10 +4351,21 @@ class _Faq {
     this.reply, {
     this.withBuilding = false,
     this.asksPlace = false,
+    this.cantDo,
+    this.cantDoHowTo = true,
   });
+
+  /// After "I can't [cantDo]": "here's how you can do it yourself" (true),
+  /// or just the explanation (when there's nothing to do yourself).
+  final bool cantDoHowTo;
 
   final bool Function(_Message m) when;
   final ChatReply reply;
+
+  /// What the assistant can't do for the user here ("create accounts"),
+  /// when they ask it to ("can you register an account for me?"): it says
+  /// so honestly, then how to do it themselves.
+  final String? cantDo;
 
   /// Ends by asking which place, with each place's live count and a chip
   /// that opens its map.
@@ -3003,7 +4381,7 @@ class _Faq {
 /// A message, normalized: lower case, plain apostrophes, punctuation
 /// dropped. Word checks forgive small typos in longer words.
 class _Message {
-  _Message(String raw)
+  _Message(this.raw)
       : text = raw
             .toLowerCase()
             .replaceAll(RegExp(r"[’‘`´]"), "'")
@@ -3017,6 +4395,8 @@ class _Message {
     ];
   }
 
+  /// As typed (for "2+2", whose "+" [text] drops).
+  final String raw;
   final String text;
   late final List<String> tokens;
 
@@ -3131,6 +4511,21 @@ class _BuildingIndex {
     'there', 'here', 'from', 'with', 'into', 'class', 'today', 'now',
   };
 
+  /// What people call a building -> words of its official name.
+  static const Map<String, List<String>> _nicknames = {
+    'gym': ['recreation', 'fitness'],
+    'rec': ['recreation'],
+    'workout': ['fitness'],
+    'dorm': ['residence'],
+    'dorms': ['residence'],
+    'admin': ['administration'],
+    'clinic': ['health'],
+    'doctor': ['health'],
+    'nurse': ['health'],
+    'cops': ['police'],
+    'books': ['bookstore'],
+  };
+
   static String _bare(String s) =>
       s.toLowerCase().replaceAll(RegExp(r"[\s\-']"), '');
 
@@ -3173,6 +4568,8 @@ class _BuildingIndex {
     final words = {
       for (final t in tokens)
         if (t.length >= 3 && !_askWords.contains(t)) _singular(t),
+      // Everyday names for buildings: "the gym", "my dorm".
+      for (final t in tokens) ...?_nicknames[t],
     };
     final hits = <_Hit>[];
     _words.forEach((b, bWords) {
@@ -3182,7 +4579,11 @@ class _BuildingIndex {
         final seen = words.contains(w) ||
             (w.length >= 6 &&
                 words.any((t) =>
-                    t.length >= 5 && editDistance(t, w, max: 1) != null));
+                    t.length >= 5 &&
+                    // A word the assistant knows is meant as itself:
+                    // "policy" isn't a misspelled "police".
+                    !SmartCurbAssistant.known.contains(t) &&
+                    editDistance(t, w, max: 1) != null));
         // A word that's also one the assistant answers on its own counts
         // half: "contact support" is about support, not the Student
         // Support Services building (its full name still finds it).
@@ -3386,6 +4787,8 @@ class _AssistantChatPageState extends State<AssistantChatPage> {
     }
     setState(() {
       _typing = false;
+      // "Start over": a clean conversation, then the reply.
+      if (r.clearsChat) _session.messages.clear();
       _session.add(false, r.text, r.actions, r.form);
     });
     _toBottom();
