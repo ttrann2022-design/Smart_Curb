@@ -1,6 +1,6 @@
 import {
   ref, get, update, onValue, push, remove, runTransaction, onDisconnect,
-  query, orderByKey, limitToLast, endBefore,
+  query, orderByKey, limitToLast, endBefore, serverTimestamp,
 } from "firebase/database";
 import { auth, database } from "../firebase";
 import { SIM_ROOT } from "../dataMode";
@@ -29,6 +29,34 @@ export const DEMO_LOT_COUNT = Object.keys(DEMO_LOTS).length;
 
 const TICK_MS = 2000;
 const LIVE_KEEP = 200;
+// Synthetic latency samples kept per simulated curb: sample keys cycle s0..s24,
+// so demo/latency stays bounded however long the simulation runs.
+const LATENCY_KEEP = 25;
+let latencySeq = 0;
+
+// One synthetic sample, shaped like the Receiver's latency/<unitId>/<sampleId>.
+// Mostly quick, with an occasional slow outlier; about 1 in 10 lacks eventAgeMs,
+// as a Receiver that can't tell when the curb saw the event would send.
+function latencySample(lastUpdated) {
+  const sample = { rxToWriteMs: Math.round(35 + Math.random() * 55 + (Math.random() < 0.06 ? 250 + Math.random() * 600 : 0)), lastUpdated };
+  if (Math.random() < 0.9) {
+    sample.eventAgeMs = Math.round(140 + Math.random() * 220 + (Math.random() < 0.05 ? 700 + Math.random() * 1500 : 0));
+  }
+  return sample;
+}
+
+// A few recent samples for each curb, spread over the last half hour.
+function buildLatency(unitIds) {
+  const latency = {};
+  const now = Date.now();
+  unitIds.forEach((id) => {
+    const n = Math.floor(Math.random() * 4);
+    for (let i = 0; i < n; i++) {
+      (latency[id] ||= {})["s" + i] = latencySample(now - Math.floor(Math.random() * 30 * 60000));
+    }
+  });
+  return latency;
+}
 const LOCK_PATH = simPath("simLock");
 const LOCK_STALE_MS = 15000;
 const SESSION = Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -92,6 +120,35 @@ function buildWeek() {
   return week;
 }
 
+// Fake quote requests for demo/leads. Every email is @example.com: none of these are real people.
+const FAKE_LEADS = [
+  { name: "Priya Raman", organization: "Westbrook University", facilityType: "university", message: "We have 14 surface lots and a permit system that nobody trusts. Could we pilot two lots next semester?" },
+  { name: "Marcus Bell", organization: "Riverside Arena", facilityType: "stadium", message: "Interested in event mode and gate routing for about 3,000 spaces." },
+  { name: "Elena Ortiz", organization: "St. Agnes Medical Center", facilityType: "hospital", message: "Accessible spaces near the ER entrance are always taken. What would a quote look like for one garage level?" },
+  { name: "Tom Becker", organization: "Harbor Point Mall", facilityType: "shopping", message: "" },
+  { name: "Aisha Khan", organization: "City of Fairview, Parking Services", facilityType: "city", message: "Looking at metered street parking downtown, roughly 400 spaces across six blocks." },
+  { name: "Jordan Lee", organization: "", facilityType: "airport", message: "Do you support economy lots with shuttle stops?" },
+  { name: "Sam Whitfield", organization: "Northgate College", facilityType: "university", message: "Visitor parking only, about 120 spaces." },
+];
+
+function fakeLead(i, createdAt, status) {
+  const f = FAKE_LEADS[i % FAKE_LEADS.length];
+  const lead = { name: f.name, email: f.name.toLowerCase().replace(/[^a-z]+/g, ".") + "@example.com", facilityType: f.facilityType, status, createdAt };
+  if (f.organization) lead.organization = f.organization;
+  if (f.message) lead.message = f.message;
+  return lead;
+}
+
+// A mix of statuses over the last two weeks, newest still "new".
+function buildLeads() {
+  const leads = {};
+  const now = Date.now();
+  const ages = [0.3, 2, 5, 26, 50, 120, 300]; // hours ago
+  const statuses = ["new", "new", "new", "contacted", "contacted", "closed", "closed"];
+  ages.forEach((h, i) => { leads["lead" + String(i).padStart(2, "0")] = fakeLead(i, now - Math.round(h * 3600000), statuses[i]); });
+  return leads;
+}
+
 export async function resetDemoData() {
   await stopSimulation();
   const { lots, units } = buildDemoData();
@@ -99,8 +156,18 @@ export async function resetDemoData() {
     [simPath("lots")]: lots,
     [simPath("units")]: units,
     [simPath("history")]: { week: buildWeek() },
+    [simPath("latency")]: buildLatency(Object.keys(units)),
+    [simPath("leads")]: buildLeads(),
   });
-  return `Loaded ${Object.keys(units).length} simulated curbs across ${Object.keys(lots).length} lots, plus a week of history.`;
+  return `Loaded ${Object.keys(units).length} simulated curbs across ${Object.keys(lots).length} lots, plus a week of history, latency samples and fake quote requests.`;
+}
+
+// One new fake quote request, as if someone just sent the website form.
+export async function addFakeLead() {
+  const key = push(ref(database, simPath("leads"))).key;
+  const lead = fakeLead(Math.floor(Math.random() * FAKE_LEADS.length), Date.now(), "new");
+  await writeSim({ [simPath(`leads/${key}`)]: lead });
+  return `New quote request from ${lead.name}. See Requests.`;
 }
 
 function applyChanges(units, changes) {
@@ -218,6 +285,15 @@ function tick() {
   writeSim({ [simPath("simLock/heartbeat")]: now }).catch(() => {});
   commit(latestUnits, changes).catch(() => {});
 
+  // Each simulated curb event also reports a latency sample, server-timestamped like the Receiver's.
+  const samples = {};
+  Object.entries(changes).forEach(([id, fields]) => {
+    if (!("occupied" in fields)) return;
+    latencySeq += 1;
+    samples[simPath(`latency/${id}/s${latencySeq % LATENCY_KEEP}`)] = latencySample(serverTimestamp());
+  });
+  if (Object.keys(samples).length) writeSim(samples).catch(() => {});
+
   tickCount += 1;
   if (tickCount % 3 === 0) recordSnapshot().catch(() => {});
 }
@@ -297,4 +373,28 @@ export async function restoreAllCurbs() {
   if (Object.keys(changes).length === 0) return "All curbs are already online.";
   await commit(all, changes);
   return `Brought ${Object.keys(changes).length} curb(s) back online.`;
+}
+
+// Newly installed curbs: they've reported in but aren't in a lot yet, so
+// Setup's Connect curbs step lists them. The last one is offline. Numbered
+// from C-201 so they never share an ID with a real curb like C-095.
+export async function addNewSimCurbs(count = 3) {
+  const all = await readUnits();
+  let n = Math.max(200, ...Object.keys(all).map((id) => Number(id.replace(/^C-/, "")) || 0));
+  const now = Date.now();
+  const updates = {};
+  const ids = [];
+  for (let i = 0; i < count; i++) {
+    n += 1;
+    const id = "C-" + String(n).padStart(3, "0");
+    ids.push(id);
+    updates[simPath(`units/${id}`)] = {
+      occupied: Math.random() < 0.4,
+      battery: 70 + Math.floor(Math.random() * 31),
+      online: i < count - 1,
+      lastUpdated: now - Math.floor(Math.random() * 20 * 60000),
+    };
+  }
+  await writeSim(updates);
+  return `Installed ${ids.join(", ")}. They're not in a lot yet: a manager can assign them in Settings → Site setup.`;
 }

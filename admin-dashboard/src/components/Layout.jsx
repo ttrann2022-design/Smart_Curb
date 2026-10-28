@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Navigate, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { ref, get, set, update, remove, onValue, serverTimestamp } from "firebase/database";
 import { auth, database, emailKey } from "../firebase";
 import { c, mono } from "../theme";
 import logo from "../assets/smartcurb-logo.jpg";
-import { useDataMode } from "../dataMode";
-import { stopSimulation } from "../demo/simulator";
+import { DEMO_BUILD, useDataMode } from "../dataMode";
+import { MODULES, enabledModules, useSiteConfig } from "../site";
+import { applyTheme, clearTheme, normalizeTheme } from "../themes";
+import { useLeads } from "../leads";
+import { stopSimulation, watchSimulation } from "../demo/simulator";
 import DataModeSwitch from "./DataModeSwitch";
 import SimBanner from "./SimBanner";
 import Icon from "./Icon";
@@ -19,17 +22,18 @@ const navItems = [
   { label: "Assistant", to: "/assistant", icon: "assistant" },
   { label: "Analytics", to: "/analytics", icon: "analytics" },
   { label: "Users & roles", to: "/users", icon: "users" },
+  { label: "Requests", to: "/requests", icon: "inbox", managerOnly: true },
   { label: "Simulation", to: "/simulation", icon: "simulation", simOnly: true },
   { label: "Settings", to: "/settings", icon: "settings" },
 ];
 
-function Brand({ size = 40 }) {
+function Brand({ size = 40, sub = "ADMIN CONSOLE" }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-      <img src={logo} alt="" style={{ width: size, height: size, borderRadius: 8, objectFit: "cover", flexShrink: 0 }} />
+      <img src={logo} alt="" width={size} height={size} style={{ width: size, height: size, borderRadius: 8, objectFit: "cover", flexShrink: 0 }} />
       <div style={{ minWidth: 0 }}>
         <div style={{ fontFamily: mono, fontSize: 12.5, fontWeight: 600, letterSpacing: 0.3, whiteSpace: "nowrap" }}>SMART WHEEL STOP</div>
-        <div style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: 1.4, color: c.dim }}>ADMIN CONSOLE</div>
+        <div style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: 1.4, color: c.dim }}>{sub}</div>
       </div>
     </div>
   );
@@ -39,7 +43,7 @@ function FullScreen({ children }) {
   return (
     <div style={{ minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", background: c.bg, padding: 24 }}>
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 18, textAlign: "center", maxWidth: 380 }}>
-        <img src={logo} alt="Smart Wheel Stop" style={{ width: 64, height: 64, borderRadius: 12, objectFit: "cover" }} />
+        <img src={logo} alt="Smart Wheel Stop" width={64} height={64} style={{ width: 64, height: 64, borderRadius: 12, objectFit: "cover" }} />
         {children}
       </div>
     </div>
@@ -64,6 +68,22 @@ function Layout() {
     if (mode === "live") stopSimulation();
   }, [mode]);
 
+  const [sim, setSim] = useState({ running: false, elsewhere: null });
+  useEffect(() => (mode === "sim" ? watchSimulation(setSim) : undefined), [mode]);
+  const simActive = !!(sim.running || sim.elsewhere);
+  const siteConfig = useSiteConfig(mode);
+
+  // Site theme: a manager's unsaved pick (previewTheme) wins, otherwise the value
+  // saved for this data mode. Until that loads, the theme index.html set from
+  // the cache stays on. Leaving the dashboard returns to the default look.
+  const [themeOverride, previewTheme] = useState(null);
+  const theme = themeOverride ?? (siteConfig.loaded ? normalizeTheme(siteConfig.site?.theme) : null);
+  useEffect(() => { if (theme) applyTheme(theme); }, [theme]);
+  useEffect(() => clearTheme, []);
+  // Quote requests: managers only (the database refuses everyone else).
+  const leadsState = useLeads(mode, role === "manager");
+  const newLeads = leadsState.leads.filter((l) => l.status === "new").length;
+
   useEffect(() => {
     let stopRole = () => {};
     let cancelled = false;
@@ -71,7 +91,7 @@ function Layout() {
     const stopAuth = onAuthStateChanged(auth, async (user) => {
       stopRole();
       if (!user) {
-        if (!cancelled) navigate("/", { replace: true, state: { from: location.pathname } });
+        if (!cancelled) navigate("/login", { replace: true, state: { from: location.pathname } });
         return;
       }
 
@@ -86,7 +106,7 @@ function Layout() {
           if (!invite.exists()) {
             cancelled = true;
             await signOut(auth);
-            navigate("/?noaccess=1", { replace: true });
+            navigate("/login?noaccess=1", { replace: true });
             return;
           }
 
@@ -137,13 +157,13 @@ function Layout() {
   const handleSignOut = async () => {
     await stopSimulation();
     await signOut(auth);
-    navigate("/");
+    navigate("/login");
   };
 
   if (phase === "checking") {
     return (
       <FullScreen>
-        <span className="sws-spinner" style={{ color: c.accent, width: 20, height: 20 }} aria-hidden="true" />
+        <span className="sws-spinner" style={{ color: c.brand, width: 20, height: 20 }} aria-hidden="true" />
         <div role="status" style={{ fontSize: 13, color: c.dim }}>Signing you in…</div>
       </FullScreen>
     );
@@ -164,8 +184,53 @@ function Layout() {
     );
   }
 
+  // First run: managers go through Setup until it's finished. Viewers and operators
+  // never see it. If the database refuses the read (older published rules), don't block.
+  const isManager = role === "manager";
+  const onSetup = location.pathname === "/setup";
+  if (isManager && !siteConfig.loaded) {
+    return (
+      <FullScreen>
+        <span className="sws-spinner" style={{ color: c.brand, width: 20, height: 20 }} aria-hidden="true" />
+        <div role="status" style={{ fontSize: 13, color: c.dim }}>Loading site settings…</div>
+      </FullScreen>
+    );
+  }
+  if (isManager && !siteConfig.error && siteConfig.site?.setupComplete !== true && !onSetup) {
+    return <Navigate to="/setup" replace />;
+  }
+  if (onSetup && !isManager) return <Navigate to="/overview" replace />;
+
+  // Setup gets its own bare screen: no sidebar, just the brand and a way out.
+  if (onSetup) {
+    return (
+      <div className="su-shell">
+        <a href="#main" className="sws-skip">Skip to content</a>
+        <header className="su-top">
+          <Brand size={36} sub="ADMIN CONSOLE · SETUP" />
+          <div className="su-top-actions">
+            {!DEMO_BUILD && <div className="su-top-switch"><DataModeSwitch /></div>}
+            <button type="button" onClick={handleSignOut} aria-label="Sign out" title="Sign out" className="sws-btn sws-btn-ghost sws-btn-sm" style={{ padding: "0 7px" }}>
+              <Icon name="logout" size={16} />
+            </button>
+          </div>
+        </header>
+        {mode === "sim" && <SimBanner />}
+        <main id="main" tabIndex={-1} className="su-main">
+          <Outlet key={mode} context={{ role, mode, siteConfig, leadsState, theme, previewTheme }} />
+        </main>
+      </div>
+    );
+  }
+
+  const modules = enabledModules(siteConfig.site);
+
+  // Pages scroll the window. The Assistant keeps a viewport-high layout so only
+  // its conversation scrolls and the question box stays in view.
+  const fixedHeight = location.pathname === "/assistant";
+
   return (
-    <div className="sws-shell" style={{ display: "flex", height: "100vh", background: c.bg, color: c.text }}>
+    <div className={`sws-shell${fixedHeight ? " sws-shell-fixed" : ""}`} style={{ display: "flex", minHeight: "100dvh", background: c.bg, color: c.text }}>
       <a href="#main" className="sws-skip">Skip to content</a>
       {menuOpen && <div className="sws-backdrop" onClick={closeMenu} aria-hidden="true" />}
 
@@ -174,7 +239,7 @@ function Layout() {
         id="sws-sidebar"
         aria-label="Main"
         className={`sws-sidebar${menuOpen ? " open" : ""}`}
-        style={{ width: 240, flexShrink: 0, background: c.side, borderRight: `1px solid #16160F`, padding: "18px 12px 14px", display: "flex", flexDirection: "column" }}
+        style={{ width: 240, flexShrink: 0, background: c.side, borderRight: `1px solid ${c.sideLine}`, padding: "18px 12px 14px", display: "flex", flexDirection: "column" }}
       >
         <div style={{ padding: "0 4px 22px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
           <Brand />
@@ -184,17 +249,46 @@ function Layout() {
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 2, flexGrow: 1 }}>
-          {navItems.filter((item) => !item.simOnly || mode === "sim").map((item) => (
+          {navItems.filter((item) => (!item.simOnly || mode === "sim") && (!item.managerOnly || role === "manager")).map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
               onClick={() => setMenuOpen(false)}
-              className={({ isActive }) => `sws-nav-link${item.simOnly ? " sim" : ""}${isActive ? " active" : ""}`}
+              className={({ isActive }) => `sws-nav-link${isActive ? " active" : ""}`}
             >
               <Icon name={item.icon} size={17} />
               {item.label}
+              {item.simOnly && (
+                <span className={`sws-badge sws-nav-badge${simActive ? " on" : ""}`} title={simActive ? "Simulation is running" : "Simulation is stopped"}>
+                  {simActive ? "ON" : "OFF"}
+                </span>
+              )}
+              {item.to === "/requests" && newLeads > 0 && (
+                // Keyed by count so it pops when a new request arrives.
+                <span key={newLeads} className="sws-badge sws-nav-badge is-count sws-pop">
+                  {newLeads}<span className="sws-sr-only"> new</span>
+                </span>
+              )}
             </NavLink>
           ))}
+
+          {/* Optional modules turned on in Setup. */}
+          {modules.length > 0 && (
+            <>
+              <div className="sws-label" style={{ fontSize: 10, letterSpacing: 1.1, padding: "14px 14px 6px" }}>Modules</div>
+              {modules.map((id) => (
+                <NavLink
+                  key={id}
+                  to={`/modules/${id}`}
+                  onClick={() => setMenuOpen(false)}
+                  className={({ isActive }) => `sws-nav-link${isActive ? " active" : ""}`}
+                >
+                  <Icon name="module" size={17} />
+                  {MODULES[id].label}
+                </NavLink>
+              ))}
+            </>
+          )}
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 18 }}>
@@ -208,7 +302,7 @@ function Layout() {
             target="_blank"
             rel="noreferrer"
             className="sws-nav-link"
-            style={{ border: `1px dashed ${c.line}`, color: c.accent, fontWeight: 600, fontSize: 13 }}
+            style={{ border: `1px dashed ${c.line}`, color: c.text, fontWeight: 600, fontSize: 13 }}
           >
             <Icon name="sign" size={16} />
             Open lot sign
@@ -217,12 +311,12 @@ function Layout() {
           </a>
 
           <div style={{ padding: "10px 12px", borderRadius: 6, background: c.card, display: "flex", alignItems: "center", gap: 10 }}>
-            <div aria-hidden="true" style={{ width: 30, height: 30, borderRadius: 15, background: c.navBg, color: c.accent, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: mono, fontWeight: 600, fontSize: 13, flexShrink: 0 }}>
+            <div aria-hidden="true" style={{ width: 30, height: 30, borderRadius: 15, background: c.brandBg, color: c.brand, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: mono, fontWeight: 600, fontSize: 13, flexShrink: 0 }}>
               {(userEmail || "?")[0].toUpperCase()}
             </div>
             <div style={{ minWidth: 0, flex: 1 }}>
               <div title={userEmail} style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{userEmail}</div>
-              <div style={{ fontFamily: mono, fontSize: 10, fontWeight: 600, letterSpacing: 0.8, color: c.accent, marginTop: 2 }}>{role.toUpperCase()}</div>
+              <div style={{ fontFamily: mono, fontSize: 10, fontWeight: 600, letterSpacing: 0.8, color: c.brand, marginTop: 2 }}>{role.toUpperCase()}</div>
             </div>
             <button type="button" onClick={handleSignOut} aria-label="Sign out" title="Sign out" className="sws-btn sws-btn-ghost sws-btn-sm" style={{ padding: "0 7px" }}>
               <Icon name="logout" size={16} />
@@ -231,7 +325,7 @@ function Layout() {
         </div>
       </nav>
 
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+      <div className="sws-content" style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
         <div className="sws-topbar">
           <Brand size={32} />
           <button
@@ -247,8 +341,11 @@ function Layout() {
           </button>
         </div>
         {mode === "sim" && <SimBanner />}
-        <main id="main" tabIndex={-1} className="sws-main" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", minWidth: 0, overflowY: "auto" }}>
-          <Outlet key={mode} context={{ role, mode }} />
+        <main id="main" tabIndex={-1} className="sws-main" style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+          {/* Keyed by path so each route fades in (.sws-route); query changes don't refade. */}
+          <div key={location.pathname} className="sws-route">
+            <Outlet key={mode} context={{ role, mode, siteConfig, leadsState, theme, previewTheme }} />
+          </div>
         </main>
       </div>
     </div>

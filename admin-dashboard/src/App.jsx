@@ -3,6 +3,7 @@ import Assistant from "./pages/Assistant";
 import Analytics from "./pages/Analytics";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Login from "./pages/Login";
+import Landing from "./pages/Landing";
 import Signup from "./pages/Signup";
 import Overview from "./pages/Overview";
 import LotDetail from "./pages/LotDetail";
@@ -12,12 +13,16 @@ import DemoControls from "./pages/DemoControls";
 import Layout from "./components/Layout";
 import NotFound from "./pages/NotFound";
 import Settings from "./pages/Settings";
+import Setup from "./pages/Setup";
+import Module from "./pages/Module";
+import Requests from "./pages/Requests";
 
 function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<Login />} />
+        <Route path="/" element={<Landing />} />
+        <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
         <Route path="/sign" element={<Sign />} />
         <Route element={<Layout />}>
@@ -30,6 +35,9 @@ function App() {
           <Route path="/simulation" element={<DemoControls />} />
           <Route path="/demo" element={<Navigate to="/simulation" replace />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/setup" element={<Setup />} />
+          <Route path="/requests" element={<Requests />} />
+          <Route path="/modules/:id" element={<Module />} />
         </Route>
         <Route path="*" element={<NotFound />} />
       </Routes>

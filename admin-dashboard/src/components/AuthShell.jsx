@@ -8,13 +8,13 @@ function AuthShell({ children }) {
       <div
         className="sws-login-brand"
         style={{
-          flex: 1, padding: 56, display: "flex", flexDirection: "column", justifyContent: "space-between", gap: 32,
-          background: `radial-gradient(120% 80% at 0% 100%, rgba(198, 242, 74, 0.07), transparent 60%), ${c.side}`,
+          flex: 1, padding: "var(--sp-8)", display: "flex", flexDirection: "column", justifyContent: "space-between", gap: "var(--sp-6)",
+          background: c.side,
           borderRight: `1px solid #16160F`,
         }}
       >
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 14 }}>
-          <img src={logo} alt="Smart Curb logo" style={{ width: 132, height: 132, borderRadius: 14, objectFit: "cover" }} />
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: "var(--sp-3)" }}>
+          <img src={logo} alt="Smart Curb logo" width={132} height={132} style={{ width: 132, height: 132, borderRadius: 14, objectFit: "cover" }} />
           <div>
             <div style={{ fontFamily: mono, fontSize: 14, fontWeight: 600, letterSpacing: 0.3 }}>SMART WHEEL STOP</div>
             <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: 1.4, color: c.dim }}>ADMIN CONSOLE</div>
@@ -26,7 +26,7 @@ function AuthShell({ children }) {
             Built for campuses, stadiums, airports, hospitals, and anywhere else with more cars than places to put them.
           </p>
         </div>
-        <div className="sws-login-foot" style={{ fontSize: 12, color: c.dim }}>Smart Curb · FAU Engineering Senior Design</div>
+        <div className="sws-login-foot" style={{ fontSize: "var(--fs-caption)", color: c.dim }}>Smart Curb · FAU Engineering Senior Design</div>
       </div>
 
       <main className="sws-auth-pane" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", background: c.bg, padding: "40px 0" }}>

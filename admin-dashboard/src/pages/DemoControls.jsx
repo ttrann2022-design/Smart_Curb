@@ -4,7 +4,7 @@ import { c } from "../theme";
 import { setDataMode } from "../dataMode";
 import {
   resetDemoData, startSimulation, stopSimulation, watchSimulation,
-  rushHour, knockCurbOffline, restoreAllCurbs, DEMO_CURB_COUNT, DEMO_LOT_COUNT,
+  rushHour, knockCurbOffline, restoreAllCurbs, addNewSimCurbs, addFakeLead, DEMO_CURB_COUNT, DEMO_LOT_COUNT,
 } from "../demo/simulator";
 import { PageHeader, Card, Button, Notice, StatusText } from "../components/ui";
 
@@ -90,6 +90,8 @@ function DemoControls() {
             <Button onClick={() => run(() => rushHour("lot06"))} disabled={busy || !canRun}>Rush hour in Lot 6</Button>
             <Button variant="danger" onClick={() => run(knockCurbOffline)} disabled={busy || !canRun}>Take a curb offline</Button>
             <Button onClick={() => run(restoreAllCurbs)} disabled={busy || !canRun}>Bring all curbs online</Button>
+            <Button onClick={() => run(() => addNewSimCurbs())} disabled={busy || !canRun}>Install 3 new curbs</Button>
+            <Button onClick={() => run(addFakeLead)} disabled={busy || !canRun}>Send a fake quote request</Button>
           </div>
         </Card>
 

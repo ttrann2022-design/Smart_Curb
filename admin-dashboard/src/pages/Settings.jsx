@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useNavigate, useOutletContext } from "react-router-dom";
 import { EmailAuthProvider, reauthenticateWithCredential, updatePassword, signOut } from "firebase/auth";
 import { ref, update } from "firebase/database";
@@ -7,6 +7,9 @@ import { c, mono } from "../theme";
 import { DEFAULT_ALERTS, useAlertSettings } from "../units";
 import { stopSimulation } from "../demo/simulator";
 import { DEMO_BUILD } from "../dataMode";
+import { MODULES, SITE_PATH, enabledModules, facilityById, writeSetup } from "../site";
+import { THEMES, normalizeTheme } from "../themes";
+import ThemePicker from "../components/ThemePicker";
 import DataModeSwitch from "../components/DataModeSwitch";
 import { PageHeader, Card, Button, Field, Input, StatusText, Notice } from "../components/ui";
 
@@ -42,12 +45,12 @@ function PasswordForm() {
   };
 
   return (
-    <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+    <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: "var(--sp-3)" }}>
       <input type="text" autoComplete="username" value={auth.currentUser?.email || ""} readOnly hidden />
       <Field label="Current password">
         <Input type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} />
       </Field>
-      <div className="sws-form-row" style={{ display: "flex", gap: 12 }}>
+      <div className="sws-form-row" style={{ display: "flex", gap: "var(--sp-3)" }}>
         <Field label="New password" hint="At least 6 characters." style={{ flex: 1 }}>
           <Input type="password" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} />
         </Field>
@@ -105,9 +108,9 @@ function AlertsForm({ saved, canEdit }) {
           </div>
         </Field>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: 14, borderRadius: 6, border: `1px solid ${c.line}`, background: c.bg }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-3)", padding: 14, borderRadius: "var(--radius)", background: c.bg }}>
           <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: canEdit ? "pointer" : "default" }}>
-            <input type="checkbox" checked={staleEnabled} onChange={(e) => setStaleEnabled(e.target.checked)} style={{ width: 16, height: 16, accentColor: c.accent, margin: 0 }} />
+            <input type="checkbox" checked={staleEnabled} onChange={(e) => setStaleEnabled(e.target.checked)} style={{ width: 16, height: 16, accentColor: c.text, margin: 0 }} />
             <span style={{ fontSize: 13.5, fontWeight: 600 }}>Flag curbs that stop reporting</span>
             <span className="sws-badge" style={{ marginLeft: "auto", background: staleEnabled ? c.warnBg : c.card, color: staleEnabled ? c.warn : c.dim }}>{staleEnabled ? "ON" : "OFF"}</span>
           </label>
@@ -115,7 +118,7 @@ function AlertsForm({ saved, canEdit }) {
             Leave this off until the Receiver sends a regular heartbeat. Right now <span className="sws-mono">lastUpdated</span> only changes when a car arrives or leaves,
             so a curb in a quiet spot would be flagged even though it's working.
           </div>
-          <label style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", opacity: staleEnabled ? 1 : 0.5 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", opacity: staleEnabled ? 1 : "var(--disabled-opacity)" }}>
             <span style={{ fontSize: 13 }}>Flag after</span>
             <Input type="number" min="1" max="10080" step="1" inputMode="numeric" value={staleMinutes} disabled={!staleEnabled || !canEdit} onChange={(e) => setStaleMinutes(e.target.value)} style={{ width: 96, fontFamily: mono }} />
             <span style={{ fontSize: 13 }}>minutes without a report</span>
@@ -136,8 +139,83 @@ function AlertsForm({ saved, canEdit }) {
   );
 }
 
+function SiteSummary({ siteConfig, canEdit }) {
+  const navigate = useNavigate();
+  const site = siteConfig.site;
+  const facility = facilityById(site?.facilityType);
+  const modules = enabledModules(site);
+  const contact = site?.contact;
+  const rows = [
+    ["Site name", site?.siteName],
+    ["Contact", contact && [contact.name, contact.email, contact.phone].filter(Boolean).join(" · ")],
+    ["Facility type", facility?.label],
+    ["Modules on", facility && (modules.length ? modules.map((id) => MODULES[id].label).join(", ") : "None")],
+  ];
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+      {siteConfig.error ? (
+        <Notice tone="warn">Couldn't read the site settings. The database may not allow it yet.</Notice>
+      ) : (
+        <dl style={{ display: "flex", flexDirection: "column", gap: "var(--sp-2)", margin: 0 }}>
+          {rows.map(([label, value]) => (
+            <div key={label} style={{ display: "flex", gap: "var(--sp-3)", fontSize: "var(--fs-body)", flexWrap: "wrap" }}>
+              <dt style={{ color: c.dim, width: 120, flexShrink: 0 }}>{label}</dt>
+              <dd style={{ margin: 0, fontWeight: value ? 600 : 400, color: value ? c.text : c.dim, minWidth: 0, flex: "1 1 200px", overflowWrap: "anywhere" }}>{value || "Not set"}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {canEdit ? (
+        <div>
+          <Button icon="settings" onClick={() => navigate("/setup")}>Reopen setup</Button>
+        </div>
+      ) : (
+        <Notice tone="info" icon="lock">Only managers can change the site setup.</Notice>
+      )}
+    </div>
+  );
+}
+
+// Site theme for everyone's dashboard. A pick applies at once (optimistic) and
+// saves to config/site/theme; if the save fails it goes back and says so.
+function Appearance({ canEdit, mode, theme, previewTheme }) {
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState(null);
+  // Only the latest pick may clear the preview, if picks overlap.
+  const latest = useRef(0);
+  const current = normalizeTheme(theme);
+
+  const pick = async (id) => {
+    if (!canEdit || id === current) return;
+    const previous = current;
+    const n = ++latest.current;
+    setMsg(null);
+    setSaving(true);
+    previewTheme(id);
+    try {
+      await writeSetup(SITE_PATH, { theme: id });
+      if (n === latest.current) setMsg({ ok: true, text: mode === "sim" ? "Saved for the simulation." : "Saved. Everyone's dashboard uses it now." });
+    } catch (err) {
+      if (n === latest.current) {
+        const why = err.code === "PERMISSION_DENIED" ? "Only managers can change the theme." : "Couldn't save the theme.";
+        setMsg({ ok: false, text: `${why} It's back to ${THEMES.find((t) => t.id === previous).label}.` });
+      }
+    }
+    // Saved: the database value now matches, so the preview can go. Failed: this reverts.
+    if (n === latest.current) { previewTheme(null); setSaving(false); }
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-4)" }} aria-busy={saving || undefined}>
+      <ThemePicker value={current} onPick={pick} disabled={!canEdit} label="Site theme" />
+      {canEdit ? <StatusText msg={msg} /> : <Notice tone="info" icon="lock">Only managers can change the theme.</Notice>}
+    </div>
+  );
+}
+
 function Settings() {
-  const { role } = useOutletContext();
+  const { role, mode, siteConfig, theme, previewTheme } = useOutletContext();
   const alerts = useAlertSettings();
   const navigate = useNavigate();
   const user = auth.currentUser;
@@ -145,7 +223,7 @@ function Settings() {
   const handleSignOut = async () => {
     await stopSimulation();
     await signOut(auth);
-    navigate("/");
+    navigate("/login");
   };
 
   return (
@@ -153,10 +231,10 @@ function Settings() {
       <PageHeader title="Settings" subtitle="Your account, where data comes from, and when to raise alerts" />
 
       <div className="sws-page-body sws-narrow">
-        <Card title="Account" delay={0}>
+        <Card plain title="Account" delay={0}>
           <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
-              <div aria-hidden="true" style={{ width: 42, height: 42, borderRadius: 21, background: c.navBg, color: c.accent, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: mono, fontWeight: 600, fontSize: 16 }}>
+              <div aria-hidden="true" style={{ width: 42, height: 42, borderRadius: 21, background: c.brandBg, color: c.brand, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: mono, fontWeight: 600, fontSize: 16 }}>
                 {(user?.email || "?")[0].toUpperCase()}
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -165,22 +243,32 @@ function Settings() {
               </div>
               <Button icon="logout" onClick={handleSignOut}>Sign out</Button>
             </div>
-            <div style={{ borderTop: `1px solid ${c.line}`, paddingTop: 16, display: "flex", flexDirection: "column", gap: 12 }}>
-              <h3 style={{ fontSize: 13.5, fontWeight: 600, margin: 0 }}>Change password</h3>
+            <div style={{ paddingTop: "var(--sp-2)", display: "flex", flexDirection: "column", gap: "var(--sp-3)" }}>
+              <h3 style={{ fontFamily: mono, fontSize: "var(--fs-body)", fontWeight: 600, margin: 0 }}>Change password</h3>
               <PasswordForm />
             </div>
           </div>
         </Card>
 
+        <Card
+          plain
+          title="Appearance"
+          delay={30}
+          subtitle={`The colour theme for everyone's dashboard. Curb status colours stay the same in every theme.${mode === "sim" && !DEMO_BUILD ? " Simulation has its own theme, separate from live." : ""}`}
+        >
+          <Appearance canEdit={role === "manager"} mode={mode} theme={theme} previewTheme={previewTheme} />
+        </Card>
+
         {DEMO_BUILD ? (
           // The demo build is locked to simulated data, so there's no switch to explain.
-          <Card title="Data source" delay={60}>
+          <Card plain title="Data source" delay={60}>
             <Notice tone="sim" title="Demo site: simulated data only">
               This site never shows or changes real curbs.
             </Notice>
           </Card>
         ) : (
           <Card
+            plain
             title="Data source"
             delay={60}
             subtitle="Live shows the real curbs, including C-095 from the hardware Receiver. Simulation shows a separate set of simulated curbs for demos and testing. Switching only changes what this browser shows; it never moves or changes any data."
@@ -191,7 +279,16 @@ function Settings() {
           </Card>
         )}
 
-        <Card title="Alert thresholds" delay={120} subtitle="Shared by everyone. These decide what shows up under Needs attention and Active alerts.">
+        <Card
+          plain
+          title="Site setup"
+          delay={120}
+          subtitle={`The site, its facility type and modules, chosen in Setup.${mode === "sim" && !DEMO_BUILD ? " Simulation has its own site setup, separate from live." : ""}`}
+        >
+          <SiteSummary siteConfig={siteConfig} canEdit={role === "manager"} />
+        </Card>
+
+        <Card plain title="Alert thresholds" delay={180} subtitle="Shared by everyone. These decide what shows up under Needs attention and Active alerts.">
           <AlertsForm key={JSON.stringify(alerts)} saved={alerts} canEdit={role === "manager"} />
         </Card>
       </div>

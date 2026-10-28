@@ -3,20 +3,19 @@ import { useOutletContext, useSearchParams } from "react-router-dom";
 import { ref, onValue } from "firebase/database";
 import { database } from "../firebase";
 import { dataPath } from "../dataMode";
-import { c, LED_HEX } from "../theme";
-import { useAlertSettings, useNow, hasBattery, isLowBattery, unitIssues, statusKey, cleanText, formatAgo, formatExact } from "../units";
+import { LED_HEX } from "../theme";
+import { useAlertSettings, useNow, hasBattery, isLowBattery, unitIssues, statusKey, cleanText, formatAgo, formatExact, STALL_WORD } from "../units";
 import Icon from "../components/Icon";
-import { PageHeader, Card, Chips, SearchInput, StatusPill, EmptyState, Button } from "../components/ui";
+import { StallMark } from "../components/LotPlan";
+import { PageHeader, Chips, SearchInput, EmptyState, Button } from "../components/ui";
 
 const FILTERS = [
   { id: "all", label: "All units" },
   { id: "attention", label: "Needs attention" },
   { id: "offline", label: "Offline" },
   { id: "lowbattery", label: "Low battery" },
-  { id: "open", label: "Open spots" },
+  { id: "open", label: "Free spots" },
 ];
-
-const columns = "96px minmax(150px, 1.5fr) 120px 150px 110px 100px minmax(110px, 1fr)";
 
 const STATUS_RANK = { open: 0, occupied: 1, offline: 2 };
 
@@ -38,12 +37,6 @@ const HEADERS = [
   { label: "LED" },
   { label: "Panel text" },
 ];
-
-function batteryColor(b, alerts) {
-  if (b < alerts.lowBattery) return c.busy;
-  if (b < 50) return c.warn;
-  return c.open;
-}
 
 function Units() {
   const [lots, setLots] = useState({});
@@ -100,15 +93,16 @@ function Units() {
       />
 
       <div className="sws-page-body">
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "var(--sp-3)", flexWrap: "wrap" }}>
           <Chips label="Filter units" options={chipOptions} value={filter} onChange={setFilter} />
-          <SearchInput label="Search by unit or lot" placeholder="Search unit or lot" value={search} onChange={(e) => setSearch(e.target.value)} style={{ width: 240 }} />
+          <SearchInput label="Search by unit or lot" placeholder="Search unit or lot…" value={search} onChange={(e) => setSearch(e.target.value)} style={{ width: 240, maxWidth: "100%" }} />
         </div>
 
-        <Card title="Units" meta={`${rows.length} of ${allUnits.length} units`} body={false}>
-          <div className="sws-table-scroll">
-            <div role="table" aria-label="Curb units" aria-rowcount={rows.length + 1}>
-              <div role="row" className="sws-trow sws-thead" style={{ gridTemplateColumns: columns }}>
+        <div className="un-wrap sws-enter">
+          <p className="un-meta" role="status">{rows.length} of {allUnits.length} {allUnits.length === 1 ? "unit" : "units"}</p>
+          <div role="table" aria-label="Curb units" aria-rowcount={rows.length + 1}>
+            <div role="rowgroup">
+              <div role="row" className="un-row un-head">
                 {HEADERS.map((h) => {
                   if (!h.sort) return <div key={h.label} role="columnheader" className="sws-th">{h.label}</div>;
                   const active = sort.key === h.sort;
@@ -123,64 +117,62 @@ function Units() {
                   );
                 })}
               </div>
+            </div>
 
-              <div role="rowgroup" className="sws-tbody">
-                {rows.length === 0 && (
-                  <EmptyState
-                    icon={allUnits.length ? "search" : "units"}
-                    title={allUnits.length ? "No units match" : "No curbs yet"}
-                    action={allUnits.length && (filter !== "all" || q) ? <Button size="sm" onClick={() => { setFilter("all"); setSearch(""); }}>Clear filters</Button> : null}
-                  >
-                    {allUnits.length ? "Try a different filter or search." : "Curbs appear here as soon as they report in."}
-                  </EmptyState>
-                )}
+            <div role="rowgroup" className="un-body">
+              {rows.length === 0 && (
+                <EmptyState
+                  icon={allUnits.length ? "search" : "units"}
+                  title={allUnits.length ? "No units match" : "No curbs yet"}
+                  action={allUnits.length && (filter !== "all" || q) ? <Button size="sm" onClick={() => { setFilter("all"); setSearch(""); }}>Clear filters</Button> : null}
+                >
+                  {allUnits.length ? "Try a different filter or search." : "Curbs appear here as soon as they report in."}
+                </EmptyState>
+              )}
 
-                {rows.map(([id, u]) => {
-                  const led = cleanText(u.ledColor);
-                  const ago = formatAgo(u.lastUpdated, now);
-                  const known = !!lots[u.lot];
-                  return (
-                    <div key={id} role="row" className="sws-trow" style={{ gridTemplateColumns: columns }}>
-                      <div role="cell" className="sws-mono" style={{ fontSize: 13, fontWeight: 600 }}>{id}</div>
-                      <div role="cell" title={lotName(u)} style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: known ? c.text : c.warn }}>
-                        {lotName(u)}
-                      </div>
-                      <div role="cell"><StatusPill status={statusKey(u)} /></div>
-                      <div role="cell">
-                        {hasBattery(u) ? (
-                          <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-                            <div aria-hidden="true" style={{ width: 64, height: 6, borderRadius: 3, background: c.line, overflow: "hidden" }}>
-                              <div style={{ width: `${u.battery}%`, height: 6, background: batteryColor(u.battery, alerts) }} />
-                            </div>
-                            <span className="sws-mono" style={{ fontSize: 12.5, color: batteryColor(u.battery, alerts) }}>{u.battery}%</span>
-                          </div>
-                        ) : (
-                          <span style={{ fontSize: 12.5, color: c.dim }}>Not measured</span>
-                        )}
-                      </div>
-                      <div role="cell" title={formatExact(u.lastUpdated)} style={{ fontSize: 12.5, color: ago ? c.text : c.dim }}>
-                        {ago || "—"}
-                      </div>
-                      <div role="cell" style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 13 }}>
-                        {led ? (
-                          <>
-                            <span aria-hidden="true" style={{ width: 12, height: 12, borderRadius: 3, background: LED_HEX[led] || "transparent", border: LED_HEX[led] ? "none" : `1px dashed ${c.dim}`, display: "inline-block" }} />
-                            <span style={{ color: LED_HEX[led] ? c.text : c.warn }}>{led}</span>
-                          </>
-                        ) : (
-                          <span style={{ color: c.dim }}>Not set</span>
-                        )}
-                      </div>
-                      <div role="cell" className="sws-mono" style={{ fontSize: 12.5, color: u.panelText ? c.text : c.dim }}>
-                        {u.panelText || "Not set"}
-                      </div>
+              {rows.map(([id, u]) => {
+                const status = statusKey(u);
+                const low = isLowBattery(u, alerts);
+                const led = cleanText(u.ledColor);
+                const ago = formatAgo(u.lastUpdated, now);
+                const known = !!lots[u.lot];
+                return (
+                  <div key={id} role="row" className="un-row">
+                    <div role="cell" className="un-c un-id">
+                      {/* Same block as the lot plans: colour = status, amber ring = low battery. */}
+                      <StallMark status={status} low={low} swatch />
+                      <span className="sws-mono" translate="no">{id}</span>
                     </div>
-                  );
-                })}
-              </div>
+                    <div role="cell" className={`un-c un-lot${known ? "" : " un-warn"}`} title={lotName(u)}>{lotName(u)}</div>
+                    <div role="cell" className={`un-c un-status${status === "offline" ? " un-dim" : ""}`}>{STALL_WORD[status]}</div>
+                    <div role="cell" className="un-c un-batt">
+                      {hasBattery(u) ? (
+                        <>
+                          <span className={`un-bar${low ? " is-low" : ""}`} aria-hidden="true"><span style={{ width: `${u.battery}%` }} /></span>
+                          <span className={`sws-mono${low ? " un-warn" : ""}`}>{u.battery}%</span>
+                        </>
+                      ) : (
+                        <span className="un-dim">Not measured</span>
+                      )}
+                    </div>
+                    <div role="cell" className={`un-c un-ago${ago ? "" : " un-dim"}`} title={formatExact(u.lastUpdated)}>{ago || "—"}</div>
+                    <div role="cell" className={`un-c un-led${led ? "" : " is-unset"}`}>
+                      {led ? (
+                        <>
+                          <span aria-hidden="true" className={`un-led-dot${LED_HEX[led] ? "" : " is-unknown"}`} style={LED_HEX[led] ? { background: LED_HEX[led] } : undefined} />
+                          <span className={LED_HEX[led] ? undefined : "un-warn"}>{led}</span>
+                        </>
+                      ) : (
+                        <span className="un-dim">LED not set</span>
+                      )}
+                    </div>
+                    <div role="cell" className={`un-c un-text sws-mono${u.panelText ? "" : " un-dim is-unset"}`}>{u.panelText || "No text"}</div>
+                  </div>
+                );
+              })}
             </div>
           </div>
-        </Card>
+        </div>
       </div>
     </>
   );

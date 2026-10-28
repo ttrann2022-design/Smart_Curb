@@ -58,6 +58,19 @@ export function statusKey(u) {
 
 export const STATUS_LABEL = { open: "Open", occupied: "Occupied", offline: "Offline" };
 
+// Overview lot plans say "free" for an open spot.
+export const STALL_WORD = { open: "Free", occupied: "Occupied", offline: "Offline" };
+
+// Lots this small get large stalls with their ID printed underneath.
+export const ROOMY_MAX = 6;
+const MAX_PER_ROW = 16;
+
+// Rows for a lot plan: two facing rows for most lots, more once a lot passes 2 × MAX_PER_ROW.
+export function planLayout(n) {
+  const rows = Math.max(n > ROOMY_MAX ? 2 : 1, Math.ceil(n / MAX_PER_ROW));
+  return { rows, perRow: Math.ceil(n / rows) };
+}
+
 // Older records store values like "\"red\"" (quotes included); strip them for display.
 export function cleanText(v) {
   return typeof v === "string" ? v.replace(/^"+|"+$/g, "").trim() : v;

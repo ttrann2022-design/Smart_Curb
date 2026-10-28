@@ -68,6 +68,55 @@
       "$other": { ".validate": false }
     },
 
+    // Site settings from the Setup wizard. Staff read, managers write.
+    // setupComplete can only turn true once the site has a name and a facility type.
+    "config": {
+      ".read": "auth != null && root.child('users').child(auth.uid).exists()",
+      "site": {
+        ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'manager'",
+        "siteName": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 80" },
+        "contact": {
+          ".validate": "newData.hasChildren(['name', 'email'])",
+          "name": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 80" },
+          "email": { ".validate": "newData.isString() && newData.val().length <= 120 && newData.val().matches(/^[^@ ]+@[^@ ]+[.][^@ ]+$/)" },
+          "phone": { ".validate": "newData.isString() && newData.val().length <= 40" },
+          "$other": { ".validate": false }
+        },
+        "facilityType": { ".validate": "newData.isString() && newData.val().matches(/^(university|stadium|airport|hospital|shopping|city)$/)" },
+        "modules": {
+          "$module": { ".validate": "newData.isBoolean() && $module.matches(/^(eventMode|gateRouting|demandPricing|tailgateZones|permitTiers|semesterCalendar|rateTiers|patientPriority|staffShifts|dwellLimits|meteredParking|enforcementRouting)$/)" }
+        },
+        "setupComplete": { ".validate": "newData.isBoolean() && (newData.val() === false || (newData.parent().child('siteName').exists() && newData.parent().child('facilityType').exists()))" },
+        "theme": { ".validate": "newData.isString() && newData.val().matches(/^(lime|paper|midnight|ember|mint|violet)$/)" },
+        "$other": { ".validate": false }
+      }
+    },
+
+    // Quote requests from the website. Anyone, even signed out, can CREATE one
+    // fully valid lead at a new key. Only managers read them, change status or
+    // delete. Nobody can overwrite a lead or edit its fields after it's created.
+    "leads": {
+      ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'manager'",
+      "$leadId": {
+        // Create: only where nothing exists yet. Delete: managers only.
+        // Status changes go through the status rule below.
+        ".write": "(!data.exists() && newData.exists()) || (data.exists() && !newData.exists() && auth != null && root.child('users').child(auth.uid).child('role').val() === 'manager')",
+        ".validate": "newData.hasChildren(['name', 'email', 'facilityType', 'status', 'createdAt'])",
+        "name": { ".validate": "!data.exists() && newData.isString() && newData.val().length >= 1 && newData.val().length <= 80" },
+        "email": { ".validate": "!data.exists() && newData.isString() && newData.val().length < 120 && newData.val().matches(/^[^@ ]+@[^@ ]+[.][^@ ]+$/)" },
+        "organization": { ".validate": "!data.exists() && newData.isString() && newData.val().length < 120" },
+        "facilityType": { ".validate": "!data.exists() && newData.isString() && newData.val().matches(/^(university|stadium|airport|hospital|shopping|city)$/)" },
+        "message": { ".validate": "!data.exists() && newData.isString() && newData.val().length < 1000" },
+        "createdAt": { ".validate": "!data.exists() && newData.isNumber() && newData.val() === now" },
+        "status": {
+          ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'manager' && data.exists()",
+          // A new lead starts as "new"; managers then move it between the three.
+          ".validate": "newData.isString() && (data.exists() ? newData.val().matches(/^(new|contacted|closed)$/) : newData.val() === 'new')"
+        },
+        "$other": { ".validate": false }
+      }
+    },
+
     // Public read: the lot entrance sign runs signed-out on a TV.
     "lots": {
       ".read": true
@@ -89,6 +138,12 @@
         "panelText": {
           ".write": "auth != null && root.child('users').child(auth.uid).child('role').val().matches(/^(operator|manager)$/)",
           ".validate": "newData.isString() && newData.val().length <= 16"
+        },
+        // Managers put a curb that has already reported into a lot (Setup, Connect curbs).
+        // The lot must exist, and this can't create a unit that never reported.
+        "lot": {
+          ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'manager' && data.parent().exists()",
+          ".validate": "newData.isString() && root.child('lots').child(newData.val()).exists()"
         },
 
         // ============ RECEIVER SECTION: OPTIONAL, FOR A FUTURE FIREBASE AUTH ACCOUNT ============
@@ -134,6 +189,15 @@
       ".read": "auth != null && root.child('users').child(auth.uid).exists()"
     },
 
+    // Transmission latency samples, latency/<unitId>/<sampleId> with optional
+    // eventAgeMs, rxToWriteMs and lastUpdated. Staff read them on Analytics.
+    // No client writes: there is no .write here, and the root denies writes.
+    // The Receiver writes with the legacy database secret, which bypasses these
+    // rules. Simulated samples live under demo/latency (see "demo" below).
+    "latency": {
+      ".read": "auth != null && root.child('users').child(auth.uid).exists()"
+    },
+
     // Driver-app accounts: each driver reads and writes only their own data.
     "drivers": {
       "$uid": {
@@ -146,7 +210,32 @@
     // only dashboard staff can write. Real curbs never live here.
     "demo": {
       ".read": true,
-      ".write": "auth != null && root.child('users').child(auth.uid).exists()"
+      // Simulated site settings follow the same rules as config/site, so Setup
+      // behaves the same in Simulation: only managers write, same validation.
+      "config": {
+        "site": {
+          ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'manager'",
+          "siteName": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 80" },
+          "contact": {
+            ".validate": "newData.hasChildren(['name', 'email'])",
+            "name": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 80" },
+            "email": { ".validate": "newData.isString() && newData.val().length <= 120 && newData.val().matches(/^[^@ ]+@[^@ ]+[.][^@ ]+$/)" },
+            "phone": { ".validate": "newData.isString() && newData.val().length <= 40" },
+            "$other": { ".validate": false }
+          },
+          "facilityType": { ".validate": "newData.isString() && newData.val().matches(/^(university|stadium|airport|hospital|shopping|city)$/)" },
+          "modules": {
+            "$module": { ".validate": "newData.isBoolean() && $module.matches(/^(eventMode|gateRouting|demandPricing|tailgateZones|permitTiers|semesterCalendar|rateTiers|patientPriority|staffShifts|dwellLimits|meteredParking|enforcementRouting)$/)" }
+          },
+          "setupComplete": { ".validate": "newData.isBoolean() && (newData.val() === false || (newData.parent().child('siteName').exists() && newData.parent().child('facilityType').exists()))" },
+          "theme": { ".validate": "newData.isString() && newData.val().matches(/^(lime|paper|midnight|ember|mint|violet)$/)" },
+          "$other": { ".validate": false }
+        }
+      },
+      // Everything else under demo/ (units, lots, history, latency, simLock): any staff account.
+      "$other": {
+        ".write": "auth != null && root.child('users').child(auth.uid).exists()"
+      }
     }
   }
 }

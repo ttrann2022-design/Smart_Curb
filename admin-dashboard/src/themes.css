@@ -1,0 +1,279 @@
+/* ---------- Colour themes ----------
+   Every colour in the dashboard comes from these tokens (src/theme.js maps its
+   `c.*` names onto them for inline styles). scripts/check-contrast.mjs reads
+   this file, so keep each declaration on one line as `--name: #RRGGBB;`
+   (or rgba(...) for tints, which the check ignores). */
+
+/* Curb status: the same in every theme, and never the accent. A theme whose
+   surfaces can't carry them adjusts its surfaces, never these. */
+:root {
+  --free: #C6F24A;
+  --occupied: #F2694C;
+  --attention: #E0A63C;
+  --offline: #34342D;
+  --offline-mark: #8E8C82;
+}
+
+/* Lime: the default look. Also matches [data-theme="lime"] so a lime preview
+   card renders correctly inside any other theme. */
+:root, [data-theme="lime"] {
+  color-scheme: dark;
+  --bg: #0F0F0D;
+  --side: #090908;
+  --side-line: #16160F;
+  --panel: #171714;
+  --panel-2: #1A1A17;
+  --card: #1D1D19;
+  --line: #2B2B25;
+  --line-strong: #3A3A32;
+  --line-hover: #45453B;
+  --text: #F2F1EA;
+  --dim: #8E8C82;
+  --faint: #5F5E56;
+  --nav-text: #A5A399;
+
+  /* Brand: primary buttons, links, input focus, the active nav item, badges,
+     checkmarks, role highlights, avatars, active sort. */
+  --brand: #C6F24A;
+  --brand-ink: #0F0F0D;
+  --brand-hover: #B3DE3A;
+  --brand-bg: #232B15;
+  --brand-line: #3A4A1F;
+
+  /* Message tones (success, error, warning notices and text). Not curb status. */
+  --open: #8BD44A;
+  --open-bg: #1C2612;
+  --open-text: #B4E86A;
+  --busy: #F2694C;
+  --busy-bg: #221410;
+  --busy-line: #4A2A20;
+  --busy-text: #FF8F74;
+  --warn: #E0A63C;
+  --warn-bg: #26200F;
+  --warn-line: #4A3A1C;
+  --warn-text: #FFC078;
+
+  /* Simulation mode: its own hue, so it's never mistaken for live data or the accent. */
+  --sim: #8FB4FF;
+  --sim-bg: #121A2B;
+  --sim-line: #2A3B5E;
+  --sim-ink: #0B1220;
+  --sim-hover: #A9C6FF;
+  --sim-text: #C9D8F5;
+
+  /* Tints over surfaces (hover, selection). */
+  --hover-tint: rgba(255, 255, 255, 0.04);
+  --row-tint: rgba(255, 255, 255, 0.022);
+  --soft-tint: rgba(242, 241, 234, 0.035);
+  --selection: rgba(242, 241, 234, 0.22);
+  /* How far a disabled row's text fades. Not a colour, but it decides contrast. */
+  --disabled-opacity: 0.5;
+}
+
+/* Aliases, recomputed on every themed element (not just inherited from :root),
+   so a preview card with its own data-theme gets its own accent. */
+:root, [data-theme] {
+  --accent: var(--brand);
+  --on-accent: var(--brand-ink);
+  --accent-bg: var(--brand-bg);
+  --accent-line: var(--brand-line);
+  --link: var(--brand);
+  --nav-active: var(--brand);
+  --nav-active-bg: var(--brand-bg);
+}
+
+/* Paper: light, with dark text and a deep green accent. Message tones and the
+   Simulation hue are darkened so they read as text on a light page. */
+[data-theme="paper"] {
+  color-scheme: light;
+  --bg: #F2F1EA;
+  --side: #E7E5DB;
+  --side-line: #D6D3C6;
+  --panel: #FBFAF6;
+  --panel-2: #F6F5EF;
+  --card: #ECEAE1;
+  --line: #DCD9CD;
+  --line-strong: #C5C1B2;
+  --line-hover: #A9A596;
+  --text: #1B1B17;
+  --dim: #5A584F;
+  --faint: #8A877B;
+  --nav-text: #46443C;
+  --brand: #2D6A1E;
+  --brand-ink: #FFFFFF;
+  --brand-hover: #245717;
+  --brand-bg: #DDE8D0;
+  --brand-line: #A8C38D;
+  --open: #2B6614;
+  --open-bg: #E2EFD4;
+  --open-text: #22530F;
+  --busy: #B42318;
+  --busy-bg: #FBE5E0;
+  --busy-line: #EFB5A8;
+  --busy-text: #8E1C12;
+  --warn: #855600;
+  --warn-bg: #FAEED3;
+  --warn-line: #E6C784;
+  --warn-text: #6A4500;
+  --sim: #2A57BE;
+  --sim-bg: #E2EAFA;
+  --sim-line: #B5C6EC;
+  --sim-ink: #FFFFFF;
+  --sim-hover: #22479E;
+  --sim-text: #1D3C82;
+  --hover-tint: rgba(27, 27, 23, 0.05);
+  --row-tint: rgba(27, 27, 23, 0.03);
+  --soft-tint: rgba(27, 27, 23, 0.04);
+  --selection: rgba(45, 106, 30, 0.22);
+  /* Dark text at half opacity is too faint on a light page (3.2:1); 0.7 gives about 6:1. */
+  --disabled-opacity: 0.7;
+  /* Ring around status swatches drawn on light surfaces. */
+  --status-ring: #1F201A;
+}
+
+/* Midnight: blue-black with an electric blue accent. Simulation turns lavender so
+   it never looks like the accent. */
+[data-theme="midnight"] {
+  --bg: #0A0E17;
+  --side: #070A11;
+  --side-line: #121827;
+  --panel: #101625;
+  --panel-2: #131A2B;
+  --card: #172036;
+  --line: #222C44;
+  --line-strong: #2F3B58;
+  --line-hover: #3C4A6B;
+  --text: #EEF2FA;
+  --dim: #8E98AE;
+  --faint: #5A6580;
+  --nav-text: #A8B1C5;
+  --brand: #4C9AFF;
+  --brand-ink: #06101F;
+  --brand-hover: #3787F5;
+  --brand-bg: #12233F;
+  --brand-line: #1F3D6B;
+  --sim: #C4B5FD;
+  --sim-bg: #1C1830;
+  --sim-line: #3A3160;
+  --sim-ink: #140F24;
+  --sim-hover: #D6CBFF;
+  --sim-text: #DDD5FF;
+  --selection: rgba(238, 242, 250, 0.22);
+}
+
+/* Ember: warm dark with an orange accent. */
+[data-theme="ember"] {
+  --bg: #14100D;
+  --side: #0D0A08;
+  --side-line: #1E1712;
+  --panel: #1C1612;
+  --panel-2: #201915;
+  --card: #251D18;
+  --line: #362B23;
+  --line-strong: #47392E;
+  --line-hover: #5A4839;
+  --text: #F6EEE6;
+  --dim: #A5978B;
+  --faint: #6E6157;
+  --nav-text: #BCAFA3;
+  --brand: #FF9A4D;
+  --brand-ink: #1A0D04;
+  --brand-hover: #F58935;
+  --brand-bg: #33200F;
+  --brand-line: #5A3518;
+  --selection: rgba(246, 238, 230, 0.22);
+}
+
+/* Mint: dark with a teal accent. */
+[data-theme="mint"] {
+  --bg: #0B1312;
+  --side: #070D0C;
+  --side-line: #121D1B;
+  --panel: #111B1A;
+  --panel-2: #13201E;
+  --card: #172624;
+  --line: #213432;
+  --line-strong: #2D4542;
+  --line-hover: #3A5753;
+  --text: #ECF6F3;
+  --dim: #8BA29D;
+  --faint: #59706B;
+  --nav-text: #A4B9B4;
+  --brand: #2DD4BF;
+  --brand-ink: #04140F;
+  --brand-hover: #22BFAA;
+  --brand-bg: #0F2B27;
+  --brand-line: #1A4A43;
+  --selection: rgba(236, 246, 243, 0.22);
+}
+
+/* Violet: dark with a violet accent. */
+[data-theme="violet"] {
+  --bg: #100D17;
+  --side: #0A0810;
+  --side-line: #18131F;
+  --panel: #17131F;
+  --panel-2: #1B1624;
+  --card: #201A2B;
+  --line: #2D253B;
+  --line-strong: #3C324E;
+  --line-hover: #4C4062;
+  --text: #F1EEF8;
+  --dim: #9B93AE;
+  --faint: #665E79;
+  --nav-text: #B3ABC5;
+  --brand: #B197FC;
+  --brand-ink: #120A24;
+  --brand-hover: #9F82F5;
+  --brand-bg: #241B3A;
+  --brand-line: #3D2F63;
+  --selection: rgba(241, 238, 248, 0.22);
+}
+
+/* Paper's status insets. Lime "free" can't reach 3:1 on any light surface, and
+   status colours never change, so wherever Paper draws curb status (lot plans,
+   the Overview summary, attention list and hardware card, the Units table,
+   Analytics charts, Paper's own theme preview) the surface turns dark: these regions
+   re-declare the dark surface and text tokens, and everything inside follows. */
+[data-theme="paper"] :is(.lp, .ov-summary, .ov-hw, .ov-attn-list, .un-wrap, .an-panel),
+.tp-card[data-theme="paper"] .tp-plan {
+  color-scheme: dark;
+  --bg: #1A1B16;
+  --panel: #22231D;
+  --panel-2: #25261F;
+  --card: #2A2B24;
+  --line: #35362E;
+  --line-strong: #46473D;
+  --line-hover: #57584D;
+  --text: #F2F1EA;
+  --dim: #A4A296;
+  --faint: #77756A;
+  --nav-text: #B6B4A9;
+  --hover-tint: rgba(255, 255, 255, 0.04);
+  --row-tint: rgba(255, 255, 255, 0.022);
+  --soft-tint: rgba(242, 241, 234, 0.035);
+  /* Paper's green, lightened to read on the dark inset (active sort, links). */
+  --brand: #8FCB6B;
+  --brand-ink: #0F1A09;
+  --brand-hover: #7DB959;
+  --brand-bg: #26331C;
+  --brand-line: #3C5229;
+  /* Aliases resolve where they're declared, so re-declare them for the inset. */
+  --accent: var(--brand);
+  --on-accent: var(--brand-ink);
+  --accent-bg: var(--brand-bg);
+  --accent-line: var(--brand-line);
+  --link: var(--brand);
+  --nav-active: var(--brand);
+  --nav-active-bg: var(--brand-bg);
+}
+/* The insets that aren't already panels get the dark surface and some room. */
+:where([data-theme="paper"]) :is(.lp, .ov-summary, .ov-attn-list, .un-wrap) {
+  background: var(--bg);
+  color: var(--text);
+  border-radius: var(--radius);
+  padding: var(--sp-4);
+}
+/* Status swatches on light surfaces get a dark ring, so lime and amber stay visible. */
+:where([data-theme="paper"]) .lp-block.is-swatch:not(.is-low) { box-shadow: 0 0 0 2px var(--status-ring); }
+:where([data-theme="paper"]) .lp-block.is-swatch.is-low { --lp-ring-gap: var(--status-ring); }

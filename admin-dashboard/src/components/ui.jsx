@@ -22,9 +22,10 @@ export function PageHeader({ title, subtitle, live, actions }) {
   );
 }
 
-export function Card({ title, subtitle, meta, actions, children, body = true, className = "", style, delay, as: Tag = "section" }) {
+// plain: the panel surface without a border or header rule.
+export function Card({ title, subtitle, meta, actions, children, body = true, plain, className = "", style, delay, as: Tag = "section" }) {
   return (
-    <Tag className={`sws-card${delay !== undefined ? " sws-enter" : ""} ${className}`} style={{ ...(delay !== undefined ? { "--d": `${delay}ms` } : null), ...style }}>
+    <Tag className={`sws-card${plain ? " is-plain" : ""}${delay !== undefined ? " sws-enter" : ""} ${className}`} style={{ ...(delay !== undefined ? { "--d": `${delay}ms` } : null), ...style }}>
       {(title || actions || meta) && (
         <div className="sws-card-head">
           <div style={{ minWidth: 0 }}>
@@ -44,7 +45,7 @@ export function Card({ title, subtitle, meta, actions, children, body = true, cl
   );
 }
 
-export function StatTile({ label, value, sub, color, animate = true, title }) {
+export function StatTile({ label, value, sub, subColor, color, animate = true, title }) {
   const flash = useFlash(value);
   return (
     <div className={`sws-tile-stat${animate && flash ? " sws-flash" : ""}`} title={title}>
@@ -53,7 +54,7 @@ export function StatTile({ label, value, sub, color, animate = true, title }) {
         <span className="sws-tile-value" style={{ color: color || c.text }}>
           {animate && typeof value === "number" ? <AnimatedNumber value={value} /> : value}
         </span>
-        {sub && <span className="sws-tile-sub">{sub}</span>}
+        {sub && <span className="sws-tile-sub" style={subColor ? { color: subColor } : undefined}>{sub}</span>}
       </div>
     </div>
   );
@@ -107,23 +108,6 @@ export function Chips({ options, value, onChange, label }) {
         </button>
       ))}
     </div>
-  );
-}
-
-const STATUS_TONE = {
-  open: { color: c.open, label: "Open" },
-  occupied: { color: c.busy, label: "Occupied" },
-  offline: { color: c.faint, label: "Offline" },
-  stale: { color: c.warn, label: "No recent report" },
-};
-
-export function StatusPill({ status, label }) {
-  const tone = STATUS_TONE[status] || STATUS_TONE.offline;
-  return (
-    <span className="sws-pill">
-      <span className="sws-dot" style={{ background: tone.color, boxShadow: status === "offline" ? `inset 0 0 0 1.5px ${c.dim}` : "none" }} />
-      <span style={{ color: status === "offline" ? c.dim : c.text }}>{label || tone.label}</span>
-    </span>
   );
 }
 
