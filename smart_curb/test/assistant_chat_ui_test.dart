@@ -16,6 +16,46 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
   }
 
+  testWidgets('keeps the focus after Enter, and answers messages in order',
+      (tester) async {
+    tester.view.physicalSize = const Size(800, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final session = ChatSession(data: FakeData());
+    await tester.pumpWidget(
+        MaterialApp(home: AssistantChatPage(session: session)));
+    await tester.pump(const Duration(seconds: 11)); // the greeting
+    await tester.pump(const Duration(seconds: 1));
+
+    final box = find.byType(TextField).last;
+    await tester.tap(box);
+    await tester.pump();
+    await tester.enterText(box, 'hi');
+    await tester.testTextInput.receiveAction(TextInputAction.send);
+    await tester.pump();
+    // Still in the box: the next message can be typed straight away...
+    expect(tester.widget<TextField>(box).focusNode!.hasFocus, isTrue);
+    // ...and sent while the assistant is still "typing".
+    await tester.enterText(box, 'thanks');
+    await tester.testTextInput.receiveAction(TextInputAction.send);
+    await tester.pump();
+    expect(find.text('thanks'), findsOneWidget);
+    expect(tester.widget<TextField>(box).focusNode!.hasFocus, isTrue);
+
+    await tester.pump(const Duration(seconds: 11));
+    await tester.pump(const Duration(seconds: 11));
+    await tester.pump(const Duration(seconds: 1));
+    final bot = [
+      for (final m in session.messages)
+        if (!m.fromUser) m.text,
+    ];
+    expect(bot, hasLength(3)); // greeting, hi, thanks
+    expect(bot[1], startsWith('Hi!'));
+    expect(bot[2], contains('welcome'));
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 1));
+  });
+
   testWidgets('add a car through the form in the chat, sent with Enter',
       (tester) async {
     tester.view.physicalSize = const Size(800, 2400);

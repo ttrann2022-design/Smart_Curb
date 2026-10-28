@@ -336,8 +336,6 @@ class SmartCurbAssistant {
   /// Asked which building; the next message may just be its name.
   bool _awaitingBuilding = false;
 
-  static const String _intro =
-      "Hi! I'm Smart Curb AI Agent. I can help you with:";
 
   /// The things it can do, as tap-to-ask suggestions.
   static const List<ChatAction> menu = [
@@ -360,7 +358,19 @@ class SmartCurbAssistant {
     ChatAction.ask('What else can you do?'),
   ];
 
-  ChatReply greeting() => const ChatReply(_intro, menu);
+  /// The hello when the chat opens, for the time of day.
+  ChatReply greeting() {
+    _introduced = true;
+    final h = DateTime.now().hour;
+    final hello = h >= 5 && h < 12
+        ? 'Good morning'
+        : (h >= 12 && h < 17 ? 'Good afternoon' : (h >= 17 ? 'Good evening' : 'Hi'));
+    return ChatReply(
+      "$hello! I'm Smart Curb AI Agent, your parking buddy. What can I help "
+      'you with today?',
+      menu,
+    );
+  }
 
   /// Steps offered by the last reply ("Yes, delete it", a car to pick):
   /// typing one ("yes", "the camry") works like tapping it.
@@ -377,10 +387,23 @@ class SmartCurbAssistant {
     return _guard(() async {
       final answer = await _answer(m, wasAwaiting);
       // "Hi, where do I park for ED-47?": answer it, with a hello.
-      if (m.hasGreeting && !m.isOnlyGreeting && answer.text != _intro) {
-        return _retext(answer, 'Hi! ${answer.text}');
+      var text = answer.text;
+      // Parking answers, said the way the question was asked: "I'm late
+      // for ED-47" gets hurried along, "ugh" gets some sympathy.
+      if (answer.actions.any((a) => a.building != null)) {
+        if (m.has(_hurryWords)) {
+          text = "Let's get you there fast! $text";
+        } else if (m.has(_frustratedWords) ||
+            m.anyPhrase(_frustratedPhrases)) {
+          text = "Sorry it's been stressful, let's fix that. $text";
+        }
       }
-      return answer;
+      // "Good morning, where do I park for ED-47?": answer it, with a
+      // good morning back.
+      if (m.hasGreeting && !m.isOnlyGreeting) {
+        text = '${_helloWord(m)}! $text';
+      }
+      return text == answer.text ? answer : _retext(answer, text);
     });
   }
 
@@ -465,31 +488,92 @@ class SmartCurbAssistant {
 
   Future<ChatReply> _answer(_Message m, bool wasAwaiting) async {
     // ---- greetings and small talk ----
-    if (m.isOnlyGreeting) return greeting();
+    if (m.isOnlyGreeting) return _greetBack(m);
     // Bye before thanks: "ok bye" / "thanks, bye" are goodbyes.
     if (m.short && (m.any(_bye) || m.anyPhrase(_byePhrases))) {
-      return const ChatReply(
-        'Bye! Drive safe, and good luck finding a spot. '
-        "I'm here whenever you need me.",
-      );
+      final name = await _firstName();
+      final night = m.hasPhrase('good night') || m.has({'goodnight', 'night'});
+      return ChatReply(night
+          ? 'Good night${name == null ? '' : ', $name'}! Sleep well, and '
+              "I'll be here whenever you need a spot."
+          : _pick('bye', [
+              'Bye${name == null ? '' : ', $name'}! Drive safe, and good luck '
+                  "finding a spot. I'm here whenever you need me.",
+              'See you later${name == null ? '' : ', $name'}! Hope you get a '
+                  'great spot.',
+              'Take care! Come back any time you need help parking.',
+            ]));
     }
     if (m.anyPhrase(_compliments)) {
-      return const ChatReply(
-        "Aw, thank you! I'm happy to help. Anything else you need?",
+      return ChatReply(
+        _pick('compliment', [
+          "Aw, thank you! That made my day. Anything else you need?",
+          "You're too kind! Happy to help anytime.",
+          'Thanks! I try my best. What else can I do for you?',
+        ]),
         _moreHelp,
       );
     }
     if (m.short && m.has(_insults) && !m.any(_parkWords)) {
       return const ChatReply(
-        "Sorry I let you down! I'm still learning. Try asking another way, "
-        "or pick one of these. If something in the app isn't working, the "
-        'team would like to know: $kSupportEmail.',
+        "Oh no, sorry I let you down! I'm still learning. Could you try "
+        "asking another way, or pick one of these? And if something in the "
+        "app isn't working, the team would really like to know: "
+        '$kSupportEmail.',
         menu,
       );
     }
-    if (m.short && m.any(_thanks)) {
-      return const ChatReply(
-        "You're welcome! Anything else I can help with?",
+    // "I can't find parking anywhere, ugh": sympathy, then straight to it.
+    if ((m.has(_frustratedWords) || m.anyPhrase(_frustratedPhrases)) &&
+        _index.find(m).unique == null) {
+      _awaitingBuilding = true;
+      return ChatReply(
+        _pick('frustrated', [
+          "Ugh, I'm sorry, parking hunts are the worst! Let's sort it out. "
+              'Which building are you going to?',
+          "I hear you, that's frustrating. Tell me which building you're "
+              "heading to and I'll find you the best open spot.",
+        ]),
+        _buildingExamples(),
+      );
+    }
+    if (m.has(_hurryWords) && !m.any(_parkWords) && m.tokens.length <= 6 &&
+        _index.find(m).unique == null) {
+      _awaitingBuilding = true;
+      return ChatReply(
+        "No worries, let's get you parked fast! Which building are you "
+        'heading to?',
+        _buildingExamples(),
+      );
+    }
+    if (m.anyPhrase(_userIsFine)) {
+      // "I'm good, how are you?"
+      return ChatReply(
+        m.anyPhrase(_howAreYou)
+            ? "Glad to hear it! I'm doing great too, thanks for asking. What "
+                'can I help you with today?'
+            : 'Glad to hear it! What can I help you with today?',
+        _moreHelp,
+      );
+    }
+    if (m.short && m.any(_thanks) && !m.anyPhrase(['you are welcome', 'youre welcome'])) {
+      final name = await _firstName();
+      return ChatReply(
+        _pick('thanks', [
+          "You're welcome${name == null ? '' : ', $name'}! Anything else I "
+              'can help with?',
+          'Happy to help! Let me know if you need anything else.',
+          'Anytime! Is there anything else you need?',
+        ]),
+        _moreHelp,
+      );
+    }
+    if (m.tokens.length <= 3 && m.tokens.every(_okay.contains)) {
+      return ChatReply(
+        _pick('okay', [
+          'Great! Anything else I can help you with?',
+          "Sounds good! I'm here if you need anything else.",
+        ]),
         _moreHelp,
       );
     }
@@ -498,25 +582,31 @@ class SmartCurbAssistant {
     }
     if (m.tokens.length <= 3 && m.tokens.every(_no.contains)) {
       return const ChatReply(
-        "Okay! I'm right here if you need anything.",
+        "Okay, no problem! I'm right here if you need anything.",
         _moreHelp,
       );
     }
     if (m.anyPhrase(_howAreYou)) {
-      return const ChatReply(
-        "I'm running smoothly, thanks for asking! "
-        'Ready to help you find parking. What do you need?',
+      return ChatReply(
+        _pick('howareyou', [
+          "I'm doing great and running smoothly, thanks for asking! How "
+              'about you? Need help finding a spot?',
+          "I'm good, thanks! Just keeping an eye on the curbs. What can I "
+              'do for you?',
+        ]),
         menu,
       );
     }
+    if (await _smallTalk(m) case final r?) return r;
     // "Help" / "help me please", but not "can you help me add a car".
     if (m.anyPhrase(_whoAreYou) || m.anyPhrase(_whatCanYouDo) ||
         (m.any(_help) && m.tokens.every(_helpOnly.contains))) {
       return const ChatReply(
-        "I'm Smart Curb AI Agent, your parking assistant in this app. "
-        'I can tell you where to park for any building, how many spots '
-        'are open, what each color on the map means, and help with your '
-        'cars, places and profile. Try one of these:',
+        "I'm Smart Curb AI Agent, your parking buddy in this app! I can "
+        'tell you where to park for any building, how many spots are open '
+        'right now, and what the colors on the map mean. I can also add, '
+        'change or remove your cars, places and contact info for you. Try '
+        'one of these:',
         menu,
       );
     }
@@ -525,9 +615,10 @@ class SmartCurbAssistant {
         (m.anyPhrase(_talkPhrases) && m.has(_humanWords))) {
       return const ChatReply(
         "I'm Smart Curb AI Agent, the app's virtual assistant, so I'm not a "
-        "person, but I'll do my best to help! To reach someone on the Smart "
-        'Curb team, email $kSupportEmail (also in the ⋮ menu > Settings > '
-        'Contact Us). Tell them what happened and which screen you were on.',
+        "person, but I'll do my best to help! If you'd like to talk to "
+        'someone on the Smart Curb team, email $kSupportEmail (also in the '
+        '⋮ menu > Settings > Contact Us). Tell them what happened and which '
+        "screen you were on, and they'll get back to you.",
         [
           ChatAction.ask('What can you do?'),
           ChatAction.ask('How do I use the app?'),
@@ -536,17 +627,25 @@ class SmartCurbAssistant {
     }
     if (m.anyPhrase(_whoMadeYou)) {
       return const ChatReply(
-        'Smart Curb was built by Team Smart Curb, an FAU Engineering senior '
-        'design team: solar-powered smart curbs that sense whether a spot is '
-        'taken, plus this app and an admin dashboard.',
+        'I was made by Team Smart Curb, an FAU Engineering senior design '
+        'team! They built solar-powered smart curbs that sense whether a '
+        'spot is taken, plus this app and an admin dashboard.',
         [ChatAction.ask('How does Smart Curb work?')],
       );
     }
     if (m.any(_joke)) {
-      return const ChatReply(
-        'Why did the car apply to college? It wanted to be a little more '
-        'parked in knowledge. ...I know, I should stick to parking.',
-        [ChatAction.ask('Where should I park?')],
+      return ChatReply(
+        _pick('joke', [
+          'Why did the car apply to college? It wanted to be a little more '
+              'parked in knowledge. ...I know, I should stick to parking.',
+          "What do you call a car that's always on time? A Smart Curb user! "
+              'Okay, okay, that one was an ad.',
+          'Why did the parking spot break up with the car? It felt taken '
+              'for granted.',
+          "I'd tell you a joke about parking, but all the good ones are "
+              'taken.',
+        ]),
+        const [ChatAction.ask('Tell me another joke'), ChatAction.ask('Where should I park?')],
       );
     }
 
@@ -605,15 +704,20 @@ class SmartCurbAssistant {
       if (wasAwaiting && !asksParking) {
         _awaitingBuilding = true;
         return ChatReply(
-          "I couldn't find that building. Try its code (like ED-47) or a "
-          'word from its name (like "library" or "business").',
+          "Hmm, I couldn't find that building. Could you try its code (like "
+          'ED-47) or a word from its name (like "library" or "business")?',
           _buildingExamples(),
         );
       }
       _awaitingBuilding = true;
       return ChatReply(
-        'Sure! Which building are you going to? Type its name or code '
-        '(like ED-47 or "College of Business"), or pick one:',
+        _pick('whichbuilding', [
+          'Sure, I can help with that! Which building are you heading to? '
+              'Type its name or code (like ED-47 or "College of Business"), '
+              'or pick one:',
+          "Happy to help! Which building are you going to? Just type its "
+              'name or code, or pick one:',
+        ]),
         _buildingExamples(),
       );
     }
@@ -623,12 +727,14 @@ class SmartCurbAssistant {
     if (m.any(_placeWords) || m.anyPhrase(_placePhrases)) return _places(m);
     if (m.any(_logoutWords) || m.anyPhrase(_logoutPhrases)) {
       return const ChatReply(
+        'Sure! '
         'To log out, tap the log-out icon at the top left of the main '
         "screen. You'll go back to the login page.",
       );
     }
     if (m.any(_passwordWords)) {
       return const ChatReply(
+        'Sorry about that! '
         "Password changes aren't in the app yet. If you can't sign in, "
         'contact support and we can help you reset it.',
         [ChatAction.ask('Contact support')],
@@ -659,6 +765,7 @@ class SmartCurbAssistant {
     }
     if (m.any(_supportWords) || m.anyPhrase(_supportPhrases)) {
       return const ChatReply(
+        'Of course! '
         'You can reach the Smart Curb team at $kSupportEmail. Tell us what '
         "happened and which screen you were on, and we'll get back to you.",
       );
@@ -679,11 +786,251 @@ class SmartCurbAssistant {
       if (_carsNamed(m, cars).isNotEmpty) return _vehicles(m);
     }
 
-    return const ChatReply(
-      "Sorry, I don't understand that. Here's what I can help with:",
+    // Not understood: said differently each time it happens.
+    return ChatReply(
+      _pick('sorry', [
+        "Sorry, I don't understand that. Could you say it another way? Or "
+            'pick one of these:',
+        "Sorry, I don't understand that one either. Short questions work "
+            'best, like "park near the library" or "add a car". Or tap one '
+            'of these:',
+        "Sorry, I don't understand that. I'm best with parking and app "
+            'questions. If you need a person, the team is at $kSupportEmail. '
+            "Here's what I can do:",
+      ]),
       menu,
     );
   }
+
+  // ---- sounding like a person ----
+
+  /// How many times each kind of reply was given, so saying the same thing
+  /// again uses different words ([_pick]).
+  final Map<String, int> _said = {};
+
+  /// The next of [options] for [key]: the first one the first time, then
+  /// the others in turn.
+  String _pick(String key, List<String> options) {
+    final i = _said[key] ?? 0;
+    _said[key] = i + 1;
+    return options[i % options.length];
+  }
+
+  /// Already said who it is (the chat's opening hello, or a greeting).
+  bool _introduced = false;
+
+  String? _name;
+  bool _nameLoaded = false;
+
+  /// The user's first name from their contact info, to greet them by name
+  /// (null if it's not filled in or can't be read).
+  Future<String?> _firstName() async {
+    if (_nameLoaded) return _name;
+    try {
+      final p = await data.profile();
+      final first = p == null ? '' : _v(p, 'firstName');
+      _name = first.isEmpty ? null : first;
+    } catch (_) {
+      _name = null;
+    }
+    _nameLoaded = true;
+    return _name;
+  }
+
+  /// The greeting [m] opens with, said back: "good morning" gets "Good
+  /// morning", "hey" gets "Hey".
+  static String _helloWord(_Message m) {
+    if (m.has({'morning'})) return 'Good morning';
+    if (m.has({'afternoon'})) return 'Good afternoon';
+    if (m.has({'evening'})) return 'Good evening';
+    return switch (m.tokens.first) {
+      'hey' || 'heya' || 'yo' || 'sup' => 'Hey',
+      'hello' || 'helo' || 'hallo' => 'Hello',
+      'howdy' => 'Howdy',
+      'hola' => 'Hola',
+      'greetings' => 'Greetings',
+      _ => 'Hi',
+    };
+  }
+
+  Future<ChatReply> _greetBack(_Message m) async {
+    final name = await _firstName();
+    final hello = '${_helloWord(m)}${name == null ? '' : ', $name'}!';
+    if (_introduced) {
+      return ChatReply(
+        '$hello ${_pick('regreet', [
+              'Good to see you. What can I do for you?',
+              "I'm still here! What do you need?",
+              'What can I help you with?',
+            ])}',
+        menu,
+      );
+    }
+    _introduced = true;
+    return ChatReply(
+      "$hello I'm Smart Curb AI Agent, your parking buddy. I can find you a "
+      "spot, tell you what's open right now, and take care of your cars, "
+      'places and contact info. What can I do for you today?',
+      menu,
+    );
+  }
+
+  /// Everyday chat that isn't about the app ("lol", "sorry", "are you
+  /// there?"); null when [m] is something else.
+  Future<ChatReply?> _smallTalk(_Message m) async {
+    if (!m.short) return null;
+    if (m.anyPhrase(['you are welcome', 'youre welcome', 'no problem', 'np'])) {
+      return const ChatReply('Aw, thanks! What else can I do for you?', _moreHelp);
+    }
+    if (m.tokens.every(_laughs.contains)) {
+      return const ChatReply(
+        "Haha! Glad I could make you smile. Anything I can help with?",
+        _moreHelp,
+      );
+    }
+    if (m.has({'sorry', 'oops', 'apologize', 'apologies'}) ||
+        m.hasPhrase('my bad')) {
+      return const ChatReply(
+        'No worries at all! What can I help you with?',
+        _moreHelp,
+      );
+    }
+    if (m.anyPhrase(['are you there', 'you there', 'anyone there',
+      'is anyone there', 'are you still there', 'you still there'])) {
+      return const ChatReply("I'm here! What can I do for you?", menu);
+    }
+    if (m.anyPhrase(['whats up', 'what up', 'wassup', 'whatsup'])) {
+      return const ChatReply(
+        'Not much, just keeping an eye on the curbs! What can I do for you?',
+        menu,
+      );
+    }
+    if (m.anyPhrase(['what are you doing', 'whatcha doing', 'what you doing'])) {
+      return const ChatReply(
+        'Just watching the curbs and waiting to help you! What do you need?',
+        menu,
+      );
+    }
+    if (m.anyPhrase(['nice to meet you', 'pleased to meet you',
+      'nice meeting you'])) {
+      return const ChatReply(
+        "Nice to meet you too! I'm Smart Curb AI Agent. Whenever you need a "
+        "spot or help with the app, I'm your bot.",
+        menu,
+      );
+    }
+    if (m.anyPhrase(['how old are you', 'your age', 'when were you born'])) {
+      return const ChatReply(
+        "I'm pretty new! I came with Smart Curb version $kAppVersion, so I'm "
+        'still young, but I know my way around a parking lot.',
+        _moreHelp,
+      );
+    }
+    if (m.anyPhrase(['where are you from', 'where do you live',
+      'where were you made'])) {
+      return const ChatReply(
+        'I live right here in the Smart Curb app! I was built by Team Smart '
+        'Curb at FAU in Boca Raton.',
+        [ChatAction.ask('How does Smart Curb work?')],
+      );
+    }
+    if (m.has({'chatgpt', 'gpt', 'siri', 'alexa', 'openai', 'gemini',
+      'claude', 'cortana', 'copilot'})) {
+      return const ChatReply(
+        "Nope, I'm Smart Curb AI Agent, made just for this app to help you "
+        'park and get around. Parking is my specialty!',
+        menu,
+      );
+    }
+    if (m.anyPhrase(['do you sleep', 'are you always', 'are you awake',
+      'do you ever sleep', 'are you open'])) {
+      return const ChatReply(
+        "I don't sleep! I'm here 24/7, so ask me anything, anytime.",
+        _moreHelp,
+      );
+    }
+    if (m.anyPhrase(['are you smart', 'are you intelligent', 'are you dumb'])) {
+      return const ChatReply(
+        "I'm learning every day! Try me with a parking question.",
+        _moreHelp,
+      );
+    }
+    if (m.anyPhrase(['can you hear me', 'can you see me', 'can you hear'])) {
+      return const ChatReply(
+        "I can't hear or see you, but I read every word you type! Go ahead.",
+        _moreHelp,
+      );
+    }
+    if (m.anyPhrase(['im bored', 'i am bored', 'so bored'])) {
+      return const ChatReply(
+        'Want to hear a parking joke? I have a few. Or I could tell you a '
+        'fun fact about Smart Curb.',
+        [ChatAction.ask('Tell me a joke'), ChatAction.ask('Tell me a fun fact')],
+      );
+    }
+    if (m.anyPhrase(['fun fact', 'tell me something', 'something interesting',
+      'did you know'])) {
+      return ChatReply(
+        _pick('fact', [
+          'Fun fact: every Smart Curb runs on solar power, so it keeps '
+              'reporting without any wires to the lot.',
+          'Fun fact: I pick your lot by the real walking distance to the '
+              "building's door, not the straight-line distance.",
+          "Fun fact: when a curb's spot fills up while you're driving to it, "
+              'I quietly switch you to the next best one.',
+        ]),
+        const [ChatAction.ask('Tell me another fun fact'), ChatAction.ask('Where should I park?')],
+      );
+    }
+    if (m.anyPhrase(['your favorite', 'your favourite'])) {
+      return const ChatReply(
+        'My favorite thing? A green curb right next to the door you need!',
+        _moreHelp,
+      );
+    }
+    if (m.anyPhrase(['im tired', 'i am tired', 'so tired', 'long day',
+      'rough day', 'bad day'])) {
+      _awaitingBuilding = true;
+      return ChatReply(
+        "Sounds like a long day! Let me make parking the easy part. Which "
+        'building are you heading to?',
+        _buildingExamples(),
+      );
+    }
+    if (m.anyPhrase(['good luck'])) {
+      return const ChatReply('Thanks, you too! Drive safe.', _moreHelp);
+    }
+    return null;
+  }
+
+  static const _laughs = {
+    'lol', 'haha', 'hahaha', 'hah', 'lmao', 'lmfao', 'hehe', 'rofl', 'xd',
+    'lololol', 'lolol', 'ha',
+  };
+  static const _okay = {
+    'ok', 'okay', 'k', 'kk', 'cool', 'alright', 'got', 'it', 'gotcha', 'great',
+    'awesome', 'perfect', 'nice', 'sounds', 'good', 'understood', 'noted',
+    'fine', 'oh', 'ah', 'i', 'see',
+  };
+  static const _hurryWords = {
+    'late', 'hurry', 'asap', 'quickly', 'rush', 'rushing', 'urgent',
+  };
+  static const _frustratedWords = {
+    'frustrated', 'frustrating', 'stressed', 'stressful', 'annoyed', 'ugh',
+    'argh', 'ughh',
+  };
+  static const _frustratedPhrases = [
+    'cant find parking', 'cant find a spot', 'cant find a parking',
+    'cant find any parking', 'no parking anywhere', 'no spots anywhere',
+    'parking is hard', 'parking is terrible', 'parking sucks',
+    'parking is the worst', 'been circling', 'keep circling',
+    'driving around forever',
+  ];
+  static const _userIsFine = [
+    'im good', 'im fine', 'im great', 'im okay', 'im ok', 'im doing well',
+    'doing well', 'doing good', 'doing great', 'not bad', 'pretty good',
+    'all good', 'im alright', 'i am good', 'i am fine', 'i am great',
+  ];
 
   /// The first app question [m] asks (see [_faqs]), if any.
   _Faq? _faqFor(_Message m) {
@@ -841,6 +1188,7 @@ class SmartCurbAssistant {
     ];
     if (best == null || best.free == 0) {
       return const ChatReply(
+        'Bad luck right now: '
         "None of the lots with Smart Curbs has an open spot right now. Lots "
         "without sensors may still have space: tell me your building and "
         "I'll pick the closest one.",
@@ -866,8 +1214,8 @@ class SmartCurbAssistant {
     ];
     if (best == null) {
       return ChatReply(
-        "All the lots near $where are full right now. I'd try again in a "
-        'few minutes, or open the map to watch for a spot.',
+        "Oh no, all the lots near $where are full right now. I'd give it a "
+        "few minutes, or open the map and we'll watch for a spot together.",
         actions,
       );
     }
@@ -880,9 +1228,16 @@ class SmartCurbAssistant {
         : lotName.toString();
     final count = free == null ? '' : ' ($free right now)';
     return ChatReply(
-      'For $where, park at $spot$count. '
-      "It's about a $walk walk from there. "
-      'Tap Navigate there and I\'ll guide you in.',
+      _pick('parkfor', [
+        'Heading to $where? Your best bet is $spot$count. '
+            "It's about a $walk walk from there to the door. "
+            "Tap Navigate there and I'll guide you in.",
+        "For $where, I'd park at $spot$count. "
+            "That's about a $walk walk. Tap Navigate there whenever you're "
+            'ready.',
+        'For $where, your best spot is $spot$count, about a $walk walk '
+            "away. Tap Navigate there and I'll take you right to it.",
+      ]),
       actions,
     );
   }
@@ -892,8 +1247,8 @@ class SmartCurbAssistant {
     final lot = lots[lotId];
     if (lot == null) {
       return ChatReply(
-        "I couldn't find $label at ${place.nickname}. "
-        'Open the map to see all its lots.',
+        "Hmm, I couldn't find $label at ${place.nickname}. You can see all "
+        'its lots on the map.',
         const [ChatAction.ask('Open spots right now')],
       );
     }
@@ -904,8 +1259,8 @@ class SmartCurbAssistant {
           if (l['sensors'] == true) l['name'],
       ];
       return ChatReply(
-        "$name doesn't have Smart Curb sensors yet, so I can't see its "
-        'spaces. ${live.isEmpty ? '' : 'Live counts are available for ${live.join(', ')}.'}'
+        "Sorry, $name doesn't have Smart Curb sensors yet, so I can't see "
+        'its spaces. ${live.isEmpty ? '' : 'I do have live counts for ${live.join(', ')}, though.'}'
             .trim(),
         const [ChatAction.ask('Open spots right now')],
       );
@@ -920,19 +1275,22 @@ class SmartCurbAssistant {
         offline == 0 ? '' : ' ($offline curb${offline == 1 ? ' is' : 's are'} offline.)';
     if (total == 0) {
       return ChatReply(
-        "$name's curbs aren't reporting right now, so I can't tell how many "
-        'spots are open.',
+        "Sorry, $name's curbs aren't reporting right now, so I can't tell "
+        'how many spots are open.',
         const [ChatAction.ask('Open spots right now')],
       );
     }
     if (free == 0) {
       return ChatReply(
-        '$name is full right now: all $total sensored spots are taken.$offlineNote',
+        'Bad news, $name is full right now: all $total sensored spots are '
+        "taken.$offlineNote Tell me where you're going and I'll find you "
+        'another lot.',
         const [ChatAction.ask('Where should I park?')],
       );
     }
     return ChatReply(
-      '$name has $free of $total sensored spots open right now.$offlineNote',
+      '${free == 1 ? 'Good news, but hurry! ' : 'Good news! '}$name has '
+      '$free of $total sensored spots open right now.$offlineNote',
       const [ChatAction.ask('Where should I park?')],
     );
   }
@@ -964,10 +1322,10 @@ class SmartCurbAssistant {
       }
     }
     return ChatReply(
-      'Here are the live counts from the Smart Curb sensors:\n'
+      "Here's what the Smart Curb sensors see right now:\n"
       '${lines.join('\n')}\n'
-      'Lots without sensors still show on the map; tell me a building and '
-      "I'll pick the best lot for it.",
+      "Lots without sensors still show on the map. Tell me where you're "
+      "headed and I'll pick the best lot for you.",
       const [ChatAction.ask('Where should I park?')],
     );
   }
@@ -975,7 +1333,7 @@ class SmartCurbAssistant {
   ChatReply _whichBuilding(List<_Hit> candidates) {
     _awaitingBuilding = true;
     return ChatReply(
-      'Which one do you mean?',
+      'A few buildings match that. Which one do you mean?',
       [
         for (final c in candidates.take(4))
           ChatAction.ask(c.building.name, 'Park near ${c.building.name}'),
@@ -1522,6 +1880,7 @@ class SmartCurbAssistant {
         await data.saveProfile({
           for (final f in _contactFields) f.key: (values[f.key] ?? '').trim(),
         });
+        _nameLoaded = false; // greet them by their (new) name from now on
         return ChatReply(
           'Done! I ${isNew ? 'saved' : 'changed'} your contact information. '
           'Anything else I can help you with?',
@@ -1606,7 +1965,7 @@ class SmartCurbAssistant {
   }
 
   ChatReply _colors() => const ChatReply(
-        'On the map:\n'
+        "Good question! Here's what the colors mean on the map:\n"
         '• Green space: the curb sees the spot is open\n'
         '• Red space: the spot is taken\n'
         '• Gray space: that curb is offline, so its spot is unknown\n'
@@ -1617,6 +1976,7 @@ class SmartCurbAssistant {
       );
 
   ChatReply _navigationHelp() => const ChatReply(
+        'Happy to walk you through it! '
         'To get directions: open a place from Home, then search for a '
         'building or tap it on the map. I pick the best lot (or open curb), '
         'draw the drive there, and once you park I show the walking path to '
@@ -1626,6 +1986,7 @@ class SmartCurbAssistant {
       );
 
   ChatReply _howItWorks() => const ChatReply(
+        'Great question! '
         'Each Smart Curb replaces the concrete wheel stop at the front of a '
         'parking space. It senses whether a car is parked, shows the zone '
         'with a colored LED panel, and reports live, running on solar power. '
@@ -1693,15 +2054,23 @@ class SmartCurbAssistant {
     'sup', 'howdy', 'hola', 'greetings', 'morning', 'afternoon', 'evening',
   };
   static const _thanks = {
-    'thanks', 'thank', 'thx', 'ty', 'thankyou', 'appreciate', 'cheers',
-    'great', 'awesome', 'perfect', 'cool', 'nice', 'ok', 'okay', 'got',
+    'thanks', 'thank', 'thx', 'ty', 'thankyou', 'appreciate', 'appreciated',
+    'cheers', 'tysm', 'thnx', 'thanx',
   };
-  static const _bye = {'bye', 'goodbye', 'cya', 'farewell', 'goodnight'};
-  static const _byePhrases = ['see you', 'see ya', 'talk later', 'catch you later'];
+  static const _bye = {
+    'bye', 'goodbye', 'cya', 'farewell', 'goodnight', 'byee', 'byebye',
+  };
+  static const _byePhrases = [
+    'see you', 'see ya', 'talk later', 'catch you later', 'good night',
+    'night night', 'have a good day', 'have a nice day', 'gotta go',
+    'got to go', 'im leaving', 'later',
+  ];
   static const _help = {'help', 'menu', 'options', 'commands', 'start'};
   static const _howAreYou = [
     'how are you', 'how r u', 'how are u', 'how is it going',
-    'hows it going', 'how you doing', 'how are things',
+    'hows it going', 'how you doing', 'how are things', 'how about you',
+    'and you', 'hbu', 'wbu', 'what about you', 'how is your day',
+    'hows your day', 'how was your day', 'how have you been',
   ];
   static const _whoAreYou = [
     'who are you', 'what are you', 'your name', 'are you real',
@@ -2088,6 +2457,7 @@ class SmartCurbAssistant {
           (m.has(_stopWords) || m.hasPhrase('turn off')) &&
           (m.has(_routeWords) || m.hasPhrase('focus mode')),
       const ChatReply(
+        'Sure! '
         'To stop navigating, tap the ✕ in the search bar at the top of the '
         'map: the route and the destination clear. To leave turn-by-turn '
         'focus mode but keep the route, tap the arrow button at the top '
@@ -2107,6 +2477,7 @@ class SmartCurbAssistant {
             'frozen', 'updating',
           }),
       const ChatReply(
+        'Good question! '
         'Focus mode follows you turn by turn. On the map, once your GPS is '
         'found, tap the arrow button at the top right (next to Reset Map '
         'View): the map zooms in, turns with your heading and follows your '
@@ -2120,6 +2491,7 @@ class SmartCurbAssistant {
             'favourites', 'bookmark', 'star'}) &&
           m.any(_destinationWords),
       const ChatReply(
+        'Not yet, sorry! '
         "Single buildings can't be saved yet, only places (like FAU) on "
         'Home. To go to a building, search for it on the place\'s map, or '
         "just tell me its name here: that's the quickest way.",
@@ -2136,6 +2508,7 @@ class SmartCurbAssistant {
               !m.any(_parkWords) &&
               (m.has(_chooseWords) || m.anyPhrase(_howToPhrases))),
       const ChatReply(
+        "Sure, it's easy! "
         "To choose where you're going:\n"
         '1. On Home, tap a place (like Florida Atlantic University) to open '
         'its map. Not there? Tap "Add more locations" first.\n'
@@ -2160,6 +2533,7 @@ class SmartCurbAssistant {
           m.any(_placeWords) &&
           !m.any(_destinationWords),
       const ChatReply(
+        'Sure! '
         'The search box at the top of Home filters your saved places as you '
         'type. To search for a building, open a place\'s map and use the '
         'search bar at the top there.',
@@ -2172,6 +2546,7 @@ class SmartCurbAssistant {
           (m.has(_mapTrouble) || m.hasPhrase('not working') ||
               m.hasPhrase('not loading') || m.hasPhrase("won't load")),
       const ChatReply(
+        "Sorry the map's giving you trouble! "
         'If the map is blank or stuck, check your internet connection, then '
         'go back to Home and open the place again. Still stuck? Close and '
         'reopen the app. If it keeps happening, tell the team at '
@@ -2188,6 +2563,7 @@ class SmartCurbAssistant {
           !m.has(_spotQuestion) &&
           !RegExp(r'\d').hasMatch(m.text),
       const ChatReply(
+        'Sure! '
         'Maps open from Home: tap a place card (like Florida Atlantic '
         'University) and its live map opens with every lot and building. '
         'No places yet? Tap "Add more locations" on Home and add one first.',
@@ -2201,6 +2577,7 @@ class SmartCurbAssistant {
     _Faq(
       (m) => m.anyPhrase(_backPhrases),
       const ChatReply(
+        'No problem! '
         'On a map, the back arrow at the top left takes you back to Home. '
         'On the main screen, switch between Home, Vehicle and Profile with '
         'the bar at the bottom.',
@@ -2216,6 +2593,7 @@ class SmartCurbAssistant {
               !RegExp(r'\d').hasMatch(m.text)) ||
           m.anyPhrase(_lotDetailPhrases),
       const ChatReply(
+        'Easy! '
         "On a place's map, tap a lot's dot. A bubble shows the lot's name "
         'and how many spots are free (like 3/5 free), with each curb listed '
         'as available, occupied or offline. Tap anywhere else on the map to '
@@ -2228,6 +2606,7 @@ class SmartCurbAssistant {
           m.has({'3d', '2d', 'tilt', 'tilted', 'perspective'}) ||
           m.anyPhrase(['3 d', '2 d', 'three d']),
       const ChatReply(
+        'Sure! '
         'On the map, tap the 3D button at the top right (the cube or map '
         'icon) to tilt the map into 3D, and again to go back to flat 2D.',
       ),
@@ -2241,6 +2620,7 @@ class SmartCurbAssistant {
             'see the whole', 'whole map', 'whole campus',
           ]),
       const ChatReply(
+        'No worries, that happens! '
         'Tap Reset Map View (the square target icon at the top right of the '
         'map) to zoom back out to the whole place. It also clears your '
         'destination and leaves focus mode. Pinch to zoom in and out.',
@@ -2252,6 +2632,7 @@ class SmartCurbAssistant {
           m.has({'dev', 'demo', 'simulator'}) ||
           m.anyPhrase(['click to move', 'travel to fau']),
       const ChatReply(
+        'Good question! '
         'Developer mode is for testing and demos. On a map, tap the '
         'developer icon at the top right. Then you can see and copy the '
         'coordinates of any tap, use "Click to move" to put your arrow '
@@ -2263,6 +2644,7 @@ class SmartCurbAssistant {
     _Faq(
       (m) => m.has(_privacyWords) || m.anyPhrase(_privacyPhrases),
       const ChatReply(
+        'Good question, your privacy matters! '
         'Your location is used on your phone to show your arrow and route '
         "you; Smart Curb doesn't save it to your account. What's stored is "
         'what you enter yourself: your profile, your vehicles and your saved '
@@ -2290,6 +2672,7 @@ class SmartCurbAssistant {
           ((m.has({'gps', 'location'}) || m.anyPhrase(_gpsWhosePhrases)) &&
               m.has(_gpsTrouble)),
       const ChatReply(
+        "Sorry about that, let's fix it! "
         "Smart Curb uses your phone's GPS to show your arrow and route you. "
         "If it can't find you: turn on Location Services, allow Smart Curb "
         '(or your browser) to use your location, then open the map again. '
@@ -2310,6 +2693,7 @@ class SmartCurbAssistant {
     _Faq(
       (m) => m.anyPhrase(_parkedPhrases),
       const ChatReply(
+        'Nice work! '
         'Once you park, the driving route goes away and a walking path '
         "appears from your spot to the building's door, with the distance "
         "counting down in the bottom card. Follow it and I'll tell you when "
@@ -2319,6 +2703,7 @@ class SmartCurbAssistant {
     _Faq(
       (m) => m.anyPhrase(_walkPhrases) || m.has({'eta'}),
       const ChatReply(
+        'Good question! '
         'The card at the bottom of the map shows it: "Drive ... • then walk '
         '..." on the way, and the walk left once you park. Walks follow the '
         "real sidewalks, not a straight line. Tell me a building and I'll "
@@ -2329,6 +2714,7 @@ class SmartCurbAssistant {
     _Faq(
       (m) => m.anyPhrase(_whyLotPhrases),
       const ChatReply(
+        'Happy to explain! '
         'I pick the open lot (or curb) that gives you the shortest walk to '
         "the building's door, measured along the real walking paths. Full "
         "lots and offline curbs are skipped, so the nearest lot isn't always "
@@ -2340,6 +2726,7 @@ class SmartCurbAssistant {
     _Faq(
       (m) => m.has(_reserveWords) || m.anyPhrase(_reservePhrases),
       const ChatReply(
+        'Unfortunately not. '
         "Spots can't be reserved: they're first come, first served. Smart "
         'Curb shows which are open right now and sends you to one, and if '
         "it's taken before you get there, I switch you to another.",
@@ -2350,6 +2737,7 @@ class SmartCurbAssistant {
     _Faq(
       (m) => m.has(_evWords) || m.anyPhrase(_evPhrases),
       const ChatReply(
+        'Sorry, not yet! '
         "Charging stations aren't on the Smart Curb map yet. I can still "
         "find you the closest lot with space.",
         [ChatAction.ask('Where should I park?')],
@@ -2359,6 +2747,7 @@ class SmartCurbAssistant {
     _Faq(
       (m) => m.has(_accessibleWords) || m.anyPhrase(_accessiblePhrases),
       const ChatReply(
+        'Thanks for asking. '
         "Smart Curb doesn't mark accessible (ADA) spaces separately yet, so "
         'please use the accessible spaces signed at each lot. I can still '
         'find the lot closest to your building.',
@@ -2373,6 +2762,7 @@ class SmartCurbAssistant {
           m.has(_rulesWords) ||
           m.anyPhrase(_rulesPhrases),
       const ChatReply(
+        'Good question! '
         "The Smart Curb app is free. It doesn't sell parking permits or take "
         "payments, and it doesn't set the parking rules (permits, time "
         'limits, overnight parking): follow the signs at the lot, and at '
@@ -2383,6 +2773,7 @@ class SmartCurbAssistant {
     _Faq(
       (m) => m.anyPhrase(_bestTimePhrases),
       const ChatReply(
+        'I wish I could tell you! '
         "I don't keep parking history yet, so I can't predict busy times. "
         'I can show you what\'s open right now, and if a lot fills on your '
         "way, I'll move you to another.",
@@ -2393,6 +2784,7 @@ class SmartCurbAssistant {
     _Faq(
       (m) => m.has(_internetWords) || m.anyPhrase(_internetPhrases),
       const ChatReply(
+        'Good question! '
         'Smart Curb needs an internet connection for live spot counts and '
         "routes. With a weak signal the map may lag; once you're back "
         'online it catches up by itself.',
@@ -2404,6 +2796,7 @@ class SmartCurbAssistant {
           m.hasPhrase('not reporting') ||
           (m.has({'gray', 'grey'}) && m.has({'why', 'curb', 'curbs'})),
       const ChatReply(
+        'Good eye! '
         "A gray curb is offline: it isn't reporting right now (for example "
         "low power or a lost connection), so I don't know if its spot is "
         "free and I won't send you there. It's left out of the lot's count. "
@@ -2414,6 +2807,7 @@ class SmartCurbAssistant {
     _Faq(
       (m) => m.has(_accuracyWords) || m.anyPhrase(_accuracyPhrases),
       const ChatReply(
+        'Good question! '
         'The counts are live: each curb reports when a car pulls in or '
         'leaves, and the map updates right away, no refresh needed. Gray '
         "(offline) curbs are left out. If a spot shows open but isn't, "
@@ -2424,6 +2818,7 @@ class SmartCurbAssistant {
     _Faq(
       (m) => m.any(_notificationWords),
       const ChatReply(
+        'Sure! '
         'Notifications are in the ⋮ menu at the top right of the main '
         'screen > Settings > Notifications. Flip the switch to turn them on '
         'or off.',
@@ -2432,6 +2827,7 @@ class SmartCurbAssistant {
     _Faq(
       (m) => m.has({'settings', 'setting', 'preferences'}),
       const ChatReply(
+        'Sure! '
         'Settings are in the ⋮ menu at the top right of the Home, Vehicle '
         'and Profile screens. There you can turn notifications on or off '
         'and find Contact Us. About App is in the same menu.',
@@ -2462,6 +2858,7 @@ class SmartCurbAssistant {
           m.has({'email', 'mail'}) &&
           (m.has(_editWords) || m.has({'new', 'different', 'another'})),
       const ChatReply(
+        'Sorry about that! '
         "Your email is your login, so it can't be changed in the app yet. "
         'Contact support and the team can move your account to a new email.',
         [ChatAction.ask('Contact support')],
@@ -2474,6 +2871,7 @@ class SmartCurbAssistant {
                   m.has({'close', 'deactivate', 'cancel', 'terminate'}))) ||
           m.anyPhrase(['delete my data', 'remove my data', 'delete everything']),
       const ChatReply(
+        'Sorry to see you go! '
         "Deleting an account isn't in the app yet. Email the team at "
         '$kSupportEmail from the address you signed up with, and they\'ll '
         'delete it along with your vehicles and saved places.',
@@ -2487,6 +2885,7 @@ class SmartCurbAssistant {
           !m.has(_navigationWords) &&
           !m.hasPhrase('focus mode'),
       const ChatReply(
+        'Welcome! '
         "Here's how to use Smart Curb:\n"
         '1. On Home, add a place (FAU or Broward Mall) with "Add more '
         'locations".\n'
@@ -2508,6 +2907,7 @@ class SmartCurbAssistant {
           m.has({'voice', 'audio', 'spoken', 'sound', 'sounds', 'narration'}) ||
           m.anyPhrase(_voicePhrases),
       const ChatReply(
+        'Not yet, sorry! '
         'Directions are on screen for now, with no spoken voice yet. Follow '
         'the route line and the card at the bottom, or turn on focus mode '
         '(the arrow button at the top right of the map) so the map turns '
@@ -2571,7 +2971,8 @@ class SmartCurbAssistant {
     ..._appTrouble, ..._tapWords, ..._lotPartWords, ..._gpsTrouble,
     ..._privacyWords, ..._reserveWords, ..._evWords, ..._accessibleWords,
     ..._costWords, ..._internetWords, ..._accuracyWords,
-    ..._notificationWords, ..._rulesWords, 'settings', 'version', 'register',
+    ..._notificationWords, ..._rulesWords, ..._okay, ..._hurryWords,
+    ..._frustratedWords, 'settings', 'version', 'register',
     'account', 'offline', 'gps', 'favorite', 'favourite',
   };
 }
@@ -2974,9 +3375,13 @@ class _AssistantChatPageState extends State<AssistantChatPage> {
     // Pacing, not an animation, so it applies with reduced motion too.
     final wait = typingTime(r.text) - DateTime.now().difference(started);
     if (wait > Duration.zero) await Future<void>.delayed(wait);
-    // Chat closed while "typing": the reply is still there next time.
+    // Chat closed while "typing": the replies are still there next time.
     if (!mounted) {
       _session.add(false, r.text, r.actions, r.form);
+      while (_waiting.isNotEmpty) {
+        final next = await _session.assistant.reply(_waiting.removeAt(0));
+        _session.add(false, next.text, next.actions, next.form);
+      }
       return;
     }
     setState(() {
@@ -2984,6 +3389,10 @@ class _AssistantChatPageState extends State<AssistantChatPage> {
       _session.add(false, r.text, r.actions, r.form);
     });
     _toBottom();
+    if (_waiting.isNotEmpty) {
+      _botSays(_session.assistant.reply(_waiting.removeAt(0)));
+      return;
+    }
     // "Opening the FAU map...": a moment to read it, then open it.
     final place = r.followUp?.place;
     if (place != null) {
@@ -3008,11 +3417,23 @@ class _AssistantChatPageState extends State<AssistantChatPage> {
 
   void _send(String text) {
     final t = text.trim();
-    if (t.isEmpty || _typing) return;
+    if (t.isEmpty) return;
     _input.clear();
+    // Ready for the next message: also after clicking the send button,
+    // which on web/desktop takes the focus off the box.
+    _inputFocus.requestFocus();
     setState(() => _session.add(true, t));
+    if (_typing) {
+      // Sent while the assistant is still answering: shown now, answered
+      // next, in order.
+      _waiting.add(t);
+      return;
+    }
     _botSays(_session.assistant.reply(t));
   }
+
+  /// Messages sent while the assistant was still answering.
+  final List<String> _waiting = [];
 
   void _onAction(ChatAction a) {
     if (_typing) return;
@@ -3145,7 +3566,7 @@ class _AssistantChatPageState extends State<AssistantChatPage> {
           _InputBar(
             controller: _input,
             focusNode: _inputFocus,
-            canSend: _hasText && !_typing,
+            canSend: _hasText,
             onSend: () => _send(_input.text),
           ),
         ],
@@ -3639,6 +4060,9 @@ class _InputBar extends StatelessWidget {
                 controller: controller,
                 focusNode: focusNode,
                 textInputAction: TextInputAction.send,
+                // Without this, Enter also takes the focus away, and you'd
+                // have to click the box again to type the next message.
+                onEditingComplete: () {},
                 onSubmitted: (_) => onSend(),
                 minLines: 1,
                 maxLines: 4,

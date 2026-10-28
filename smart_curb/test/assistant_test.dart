@@ -93,6 +93,111 @@ void main() {
       }
     });
 
+    test('a greeting is said back the way it was said', () async {
+      final cases = {
+        'good morning': 'Good morning!',
+        'Good afternoon!': 'Good afternoon!',
+        'evening': 'Good evening!',
+        'hey there': 'Hey!',
+        'hello': 'Hello!',
+        'hi': 'Hi!',
+        'howdy': 'Howdy!',
+      };
+      for (final e in cases.entries) {
+        expect((await bot().reply(e.key)).text, startsWith(e.value), reason: e.key);
+      }
+      // With a question after it, the question gets answered too.
+      final r = await bot().reply('good morning, where do I park for ED-47?');
+      expect(r.text, startsWith('Good morning! '));
+      expect(r.text, contains('ED-47'));
+    });
+
+    test('greets the user by first name, and briefly the second time', () async {
+      final b = bot(FakeData(me: {'firstName': 'Sam'}));
+      final first = await b.reply('good morning');
+      expect(first.text, startsWith('Good morning, Sam! '));
+      expect(first.text, contains('Smart Curb AI Agent'));
+      final again = await b.reply('hi');
+      expect(again.text, startsWith('Hi, Sam! '));
+      expect(again.text, isNot(contains('Smart Curb AI Agent')));
+      expect((await b.reply('thanks')).text, contains("You're welcome, Sam!"));
+      expect((await b.reply('good night')).text, startsWith('Good night, Sam!'));
+    });
+
+    test('the chat opens with a hello for the time of day', () {
+      final h = DateTime.now().hour;
+      final hello = h >= 5 && h < 12
+          ? 'Good morning'
+          : (h >= 12 && h < 17 ? 'Good afternoon' : (h >= 17 ? 'Good evening' : 'Hi'));
+      expect(bot().greeting().text, startsWith("$hello! I'm Smart Curb AI Agent"));
+    });
+
+    test('saying the same thing twice gets different words', () async {
+      final b = bot();
+      final one = await b.reply('thanks');
+      final two = await b.reply('thank you');
+      expect(one.text, isNot(two.text));
+      final miss1 = await b.reply('asdf qwerty');
+      final miss2 = await b.reply('zxcv bnm');
+      expect(miss1.text, startsWith(_sorry));
+      expect(miss2.text, startsWith(_sorry));
+      expect(miss1.text, isNot(miss2.text));
+      final p1 = await b.reply('where should I park for ED-47');
+      final p2 = await b.reply('where should I park for ED-47');
+      expect(p1.text, isNot(p2.text));
+      expect(p2.text, contains('ED-47'));
+    });
+
+    test('everyday chat gets an everyday answer', () async {
+      final cases = {
+        "I'm good, how about you?": "I'm doing great too",
+        "I'm fine": 'Glad to hear it',
+        'ok': 'Great!',
+        'got it': 'Great!',
+        'lol': 'Haha',
+        'sorry': 'No worries',
+        'my bad': 'No worries',
+        'are you there?': "I'm here",
+        "what's up": 'Not much',
+        'nice to meet you': 'Nice to meet you too',
+        'are you chatgpt': "Nope, I'm Smart Curb AI Agent",
+        'are you siri': "Nope, I'm Smart Curb AI Agent",
+        'do you sleep': '24/7',
+        "I'm bored": 'parking joke',
+        'tell me a fun fact': 'Fun fact',
+        "what's your favorite thing": 'My favorite thing',
+        'how old are you': kAppVersion,
+        'where are you from': 'FAU',
+        "I'm so tired": 'long day',
+        'you are welcome': 'Aw, thanks',
+        'good luck': 'you too',
+        'have a nice day': 'Bye',
+        'tell me a joke': 'parked in knowledge',
+      };
+      for (final e in cases.entries) {
+        expect((await bot().reply(e.key)).text, contains(e.value), reason: e.key);
+      }
+      // A second joke is a different one.
+      final b = bot();
+      final j1 = await b.reply('tell me a joke');
+      final j2 = await b.reply('Tell me another joke');
+      expect(j1.text, isNot(j2.text));
+    });
+
+    test('in a hurry or frustrated: answered in kind', () async {
+      expect((await bot().reply("I'm late!")).text, contains("let's get you parked fast"));
+      final late = await bot().reply("I'm late for class at ED-47");
+      expect(late.text, startsWith("Let's get you there fast! "));
+      expect(late.text, contains('ED-47'));
+      final ugh = await bot().reply("ugh I can't find parking anywhere");
+      expect(ugh.text, contains("parking hunts are the worst"));
+      expect(ugh.text, contains('Which building'));
+      // ...and then the building is enough.
+      final b = bot();
+      await b.reply("I can't find a spot");
+      expect((await b.reply('the library')).text, contains('LY-3'));
+    });
+
     test('gibberish gets "sorry" and the menu again', () async {
       for (final m in [
         'asdf qwerty',
@@ -562,7 +667,7 @@ void main() {
 
     test('small talk: compliments, insults, yes and no', () async {
       expect((await bot().reply("you're awesome")).text, contains('thank'));
-      expect((await bot().reply('this app sucks')).text, contains('Sorry I let'));
+      expect((await bot().reply('this app sucks')).text, contains('sorry I let'));
       expect((await bot().reply('yes')).text, contains('What would you like'));
       expect((await bot().reply('no')).text, contains("I'm right here"));
     });
@@ -570,7 +675,7 @@ void main() {
     test('the old answers still win where they should', () async {
       final cases = {
         'what does the green dot mean': 'Green space',
-        'show me open spots on the map': 'live counts',
+        'show me open spots on the map': 'sensors see right now',
         'how do I get directions': 'focus mode',
         'how do I add a place': 'Which place do you want to add?',
         'how do I add a new car': "Fill in your car's details",
