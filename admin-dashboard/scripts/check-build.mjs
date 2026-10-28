@@ -7,6 +7,8 @@
 // and firebase.console.json).
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { checkContrast, report } from "./check-contrast.mjs";
 import { CONSOLE_MARKER } from "../src/console/constants.js";
 
@@ -16,6 +18,7 @@ const BUILD_CMD = { real: "npm run build", demo: "npm run build:demo", console: 
 // Simulation, Landing). None of it may reach the console bundle.
 const DASHBOARD_MARKERS = [
   "Open lot sign",
+  "Sorry, I didn't catch that",
   "Pick a lot, then a curb to see its status",
   "Load fresh simulated data",
   "Tell us about your parking",
@@ -87,6 +90,12 @@ if (expected === "console") {
   if (leaked.length) fail(`the ${expected} bundle contains company console pages: ${leaked.map((m) => `"${m}"`).join(", ")}.`);
   const missing = DASHBOARD_MARKERS.filter((m) => !bundle.includes(m));
   if (missing.length) fail(`the ${expected} bundle is missing dashboard text it should have: ${missing.map((m) => `"${m}"`).join(", ")}. If you changed that text, update DASHBOARD_MARKERS in scripts/check-build.mjs.`);
+  // The Assistant ships in this bundle: its phrasing tests take well under a second.
+  const assistant = spawnSync(process.execPath, ["--test", fileURLToPath(new URL("./test-assistant.mjs", import.meta.url))], { encoding: "utf8" });
+  if (assistant.status !== 0) {
+    console.error(assistant.stdout.split("\n").filter((l) => /^\s*(✖|AssertionError)/.test(l)).slice(0, 12).join("\n"));
+    fail("the Assistant's tests fail (npm run test:assistant shows why).");
+  }
 }
 
 if (!report(checkContrast())) {
