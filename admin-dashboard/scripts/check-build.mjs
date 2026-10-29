@@ -25,16 +25,40 @@ const DASHBOARD_MARKERS = [
   "A dashboard built around the curbs",
 ];
 
-// Text from the console's own pages (Requests, Customers, Deployments, Home, Import lots).
+// Text from the console's own pages (Requests, Customers, Deployments, Home, Import lots, Settings).
 // None of it may reach a customer bundle; quote requests live only in the console.
 const CONSOLE_PAGE_MARKERS = [
   "Convert to customer",
   "Lots without a customer",
   "Reload demo customers",
   "Assign a lot",
-  "Open spots keep coming from the curbs",
+  "Capacity comes from the curbs that report into this lot",
   "Nothing is written until you press Import.",
+  "Your console preferences, kept in this browser",
 ];
+
+// Each Assistant's own answers (src/assistant/console/ and the dashboard's
+// src/assistant/intents/). Only the shared engine (jokes, facts, sums) is in both.
+const CONSOLE_ASSISTANT_MARKERS = [
+  "Smart Wheel Stop Console Assistant",
+  "Delete customer stays disabled while any lot points to the customer",
+  "Still new after more than 2 days (oldest first):",
+  "Platform admin = us, across all customers",
+];
+const DASHBOARD_ASSISTANT_MARKERS = [
+  "Lot by lot, right now:",
+  "Free spots in each lot",
+  "the hardware Receiver reports them",
+];
+
+// Runs one of the scripts/test-*.mjs suites; a failure blocks the deploy.
+function runTests(file, what, npmScript) {
+  const run = spawnSync(process.execPath, ["--test", fileURLToPath(new URL(file, import.meta.url))], { encoding: "utf8" });
+  if (run.status !== 0) {
+    console.error(run.stdout.split("\n").filter((l) => /^\s*(✖|AssertionError)/.test(l)).slice(0, 12).join("\n"));
+    fail(`${what} tests fail (npm run ${npmScript} shows why).`);
+  }
+}
 
 const [dir, expected] = process.argv.slice(2);
 
@@ -85,24 +109,25 @@ if (expected === "console") {
   if (leaked.length) fail(`the console bundle contains customer dashboard code: ${leaked.map((m) => `"${m}"`).join(", ")}.`);
   const absent = CONSOLE_PAGE_MARKERS.filter((m) => !bundle.includes(m));
   if (absent.length) fail(`the console bundle is missing its own pages' text: ${absent.map((m) => `"${m}"`).join(", ")}. If you changed that text, update CONSOLE_PAGE_MARKERS in scripts/check-build.mjs.`);
-  // Import lots ships in this bundle: its parsing and batch tests take well under a second.
-  const imports = spawnSync(process.execPath, ["--test", fileURLToPath(new URL("./test-import.mjs", import.meta.url))], { encoding: "utf8" });
-  if (imports.status !== 0) {
-    console.error(imports.stdout.split("\n").filter((l) => /^\s*(✖|AssertionError)/.test(l)).slice(0, 12).join("\n"));
-    fail("the lot import's tests fail (npm run test:import shows why).");
-  }
+  const otherAssistant = DASHBOARD_ASSISTANT_MARKERS.filter((m) => bundle.includes(m));
+  if (otherAssistant.length) fail(`the console bundle contains the dashboard Assistant's answers: ${otherAssistant.map((m) => `"${m}"`).join(", ")}.`);
+  const ownAssistant = CONSOLE_ASSISTANT_MARKERS.filter((m) => !bundle.includes(m));
+  if (ownAssistant.length) fail(`the console bundle is missing the Console Assistant's text: ${ownAssistant.map((m) => `"${m}"`).join(", ")}. If you changed that text, update CONSOLE_ASSISTANT_MARKERS in scripts/check-build.mjs.`);
+  // Import lots and the Console Assistant ship in this bundle; their tests take a second or two.
+  runTests("./test-import.mjs", "the lot import's", "test:import");
+  runTests("./test-console-assistant.mjs", "the Console Assistant's", "test:console-assistant");
 } else {
   if (bundle.includes(CONSOLE_MARKER)) fail(`the ${expected} bundle contains company console code ("${CONSOLE_MARKER}").`);
   const leaked = CONSOLE_PAGE_MARKERS.filter((m) => bundle.includes(m));
   if (leaked.length) fail(`the ${expected} bundle contains company console pages: ${leaked.map((m) => `"${m}"`).join(", ")}.`);
   const missing = DASHBOARD_MARKERS.filter((m) => !bundle.includes(m));
   if (missing.length) fail(`the ${expected} bundle is missing dashboard text it should have: ${missing.map((m) => `"${m}"`).join(", ")}. If you changed that text, update DASHBOARD_MARKERS in scripts/check-build.mjs.`);
+  const otherAssistant = CONSOLE_ASSISTANT_MARKERS.filter((m) => bundle.includes(m));
+  if (otherAssistant.length) fail(`the ${expected} bundle contains the Console Assistant: ${otherAssistant.map((m) => `"${m}"`).join(", ")}.`);
+  const ownAssistant = DASHBOARD_ASSISTANT_MARKERS.filter((m) => !bundle.includes(m));
+  if (ownAssistant.length) fail(`the ${expected} bundle is missing the dashboard Assistant's text: ${ownAssistant.map((m) => `"${m}"`).join(", ")}. If you changed that text, update DASHBOARD_ASSISTANT_MARKERS in scripts/check-build.mjs.`);
   // The Assistant ships in this bundle: its phrasing tests take well under a second.
-  const assistant = spawnSync(process.execPath, ["--test", fileURLToPath(new URL("./test-assistant.mjs", import.meta.url))], { encoding: "utf8" });
-  if (assistant.status !== 0) {
-    console.error(assistant.stdout.split("\n").filter((l) => /^\s*(✖|AssertionError)/.test(l)).slice(0, 12).join("\n"));
-    fail("the Assistant's tests fail (npm run test:assistant shows why).");
-  }
+  runTests("./test-assistant.mjs", "the Assistant's", "test:assistant");
 }
 
 if (!report(checkContrast())) {

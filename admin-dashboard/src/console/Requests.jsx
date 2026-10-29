@@ -4,9 +4,9 @@ import { LEAD_STATUSES, setLeadStatus } from "../leads";
 import { facilityById } from "../site";
 import { useNow, formatAgo, formatExact } from "../units";
 import Icon from "../components/Icon";
-import { PageHeader, Card, Chips, EmptyState, Button, StatusText } from "../components/ui";
+import { PageHeader, Chips, Button, StatusText } from "../components/ui";
 import { convertLead } from "./data";
-import { LoadError, LoadingCard } from "./parts";
+import { ConsoleEmpty, LoadError, LoadingCard } from "./parts";
 
 const STATUS_LABEL = Object.fromEntries(LEAD_STATUSES.map((s) => [s.id, s.label]));
 // "won" is set by converting, never picked by hand.
@@ -64,32 +64,30 @@ function LeadItem({ lead, site, now, index }) {
 
   return (
     <li id={lead.id} className="rq-item sws-enter" style={{ "--d": `${Math.min(index, 8) * 40}ms`, scrollMarginTop: 72 }}>
-      <div className="rq-main">
-        <div className="rq-head">
-          <h2 className="rq-name">{lead.name}</h2>
-          <span className={`sws-badge rq-badge is-${lead.status}`}>{(STATUS_LABEL[lead.status] || lead.status || "").toUpperCase()}</span>
-        </div>
-        <div className="rq-meta">
-          {lead.organization && <span>{lead.organization}</span>}
-          {facility && <span>{facility.label}</span>}
-          <span title={formatExact(lead.createdAt)}>{ago || "Date unknown"}</span>
-        </div>
-        <a className="sws-link rq-email" href={`mailto:${lead.email}`}>
-          <Icon name="mail" size={14} />{lead.email}
-        </a>
-        {lead.message ? <p className="rq-msg">{lead.message}</p> : <p className="rq-msg is-empty">No message.</p>}
+      <div className="rq-head">
+        <h2 className="rq-name">{lead.name}</h2>
+        <span className={`sws-badge rq-badge is-${lead.status}`}>{(STATUS_LABEL[lead.status] || lead.status || "").toUpperCase()}</span>
+        <span className="rq-when" title={formatExact(lead.createdAt)}>{ago || "Date unknown"}</span>
+      </div>
+      <div className="rq-meta">
+        <span>{lead.organization || "No organization"}</span>
+        {facility && <span>{facility.label}</span>}
+      </div>
+      <a className="sws-link rq-email" href={`mailto:${lead.email}`}><Icon name="mail" size={14} />{lead.email}</a>
+      {lead.message ? <p className="rq-msg">{lead.message}</p> : <p className="rq-msg is-empty">No message.</p>}
+      <div className="rq-foot">
         <div className="rq-actions">
           {won ? (
             site
-              ? <Link className="sws-link" to={`/customers/${lead.siteId}`}>Customer: {site.name}</Link>
+              ? <Link className="sws-link rq-cust" to={`/customers/${lead.siteId}`}><Icon name="check" size={14} />Customer: {site.name} <span aria-hidden="true">→</span></Link>
               : <span className="sws-note">Converted. That customer has since been deleted.</span>
           ) : (
-            <Button size="sm" icon="users" onClick={convert} busy={converting} disabled={converting}>Convert to customer</Button>
+            <Button size="sm" variant="primary" icon="users" onClick={convert} busy={converting} disabled={converting}>Convert to customer</Button>
           )}
           <StatusText msg={msg} />
         </div>
+        {!won && <StatusControl lead={lead} onChange={change} busy={saving} />}
       </div>
-      {!won && <StatusControl lead={lead} onChange={change} busy={saving} />}
     </li>
   );
 }
@@ -124,15 +122,18 @@ function Requests() {
         </div>
         <p className="sws-sr-only" role="status">{shown.length} {shown.length === 1 ? "request" : "requests"} shown</p>
         {shown.length === 0 ? (
-          <Card delay={60}>
-            <EmptyState icon="inbox" title={leads.length ? `No ${STATUS_LABEL[filter]?.toLowerCase()} requests` : "No requests yet"}>
-              {leads.length
-                ? "Try another filter."
-                : mode === "sim"
-                  ? "Send a fake quote request, or reload the demo customers, from Home."
-                  : "Quote requests from the website appear here as they arrive."}
-            </EmptyState>
-          </Card>
+          <ConsoleEmpty
+            icon={leads.length && filter === "new" ? "check" : "inbox"}
+            tone={leads.length && filter === "new" ? "ok" : undefined}
+            title={leads.length ? (filter === "new" ? "Every request has a reply" : `No ${STATUS_LABEL[filter]?.toLowerCase()} requests`) : "No requests yet"}
+            action={leads.length > 0 && <Button size="sm" onClick={() => setFilter("all")}>Show all {leads.length} requests</Button>}
+          >
+            {leads.length
+              ? "Nothing has this status right now."
+              : mode === "sim"
+                ? "Send a fake quote request, or reload the demo customers, from Home."
+                : "Quote requests from the website appear here as they arrive."}
+          </ConsoleEmpty>
         ) : (
           <ul className="rq-list" aria-label="Quote requests">
             {shown.map((lead, i) => <LeadItem key={lead.id} lead={lead} site={lead.siteId ? sites[lead.siteId] : null} now={now} index={i} />)}

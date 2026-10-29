@@ -12,12 +12,101 @@
 .cn-form .is-wide { grid-column: 1 / -1; }
 .cn-form-actions { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
 
-/* Home: five counts, each a link to its page. */
-.cn-tiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; }
-.cn-tile-link { display: block; color: inherit; text-decoration: none; border-radius: var(--radius); }
-.cn-tile-link .sws-tile-stat { height: 100%; transition: border-color var(--dur-fast); }
-.cn-tile-link:hover .sws-tile-stat { border-color: var(--line-strong); }
-.cn-tile-link:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+/* ---------- Home (src/console/Home.jsx) ----------
+   The hero follows the dashboard Overview: one big number, a line under it, then
+   the pipeline strip. Sections below get the same 40px rhythm. */
+.cn-home { gap: 40px; padding-top: 30px; }
+.cn-hero { display: grid; grid-template-columns: auto minmax(0, 560px); justify-content: space-between; align-items: end; gap: 28px 64px; }
+.cn-hero-num { display: flex; align-items: baseline; gap: var(--sp-4); line-height: 0.8; font-family: var(--mono); }
+.cn-hero-big { font-size: var(--fs-hero); font-weight: 600; letter-spacing: -0.05em; font-variant-numeric: tabular-nums; color: var(--text); }
+.cn-hero-big.is-on { color: var(--brand); }
+.cn-hero-word { font-size: clamp(34px, 3.4vw, 50px); font-weight: 500; }
+.cn-hero-line { margin: 18px 0 0; font-size: 13.5px; color: var(--dim); line-height: 1.55; }
+.cn-hero-facts { list-style: none; margin: 14px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 22px; font-size: var(--fs-body); color: var(--dim); }
+.cn-hero-facts .cn-num { color: var(--text); font-weight: 600; }
+.cn-hero-facts .cn-num.cn-warn { color: var(--warn); }
+.cn-ghost { color: transparent; border-radius: 4px; display: inline-block; }
+
+/* Pipeline: Requests -> Prospect -> Active. */
+.cn-pipe ol { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-2); }
+.cn-pipe li { position: relative; display: flex; min-width: 0; }
+.cn-pipe-arrow { position: absolute; left: -12px; top: 50%; transform: translate(-50%, -50%); color: var(--dim); z-index: 1; }
+.cn-pipe-step {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; padding: 14px 16px 14px 18px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px; color: var(--text); text-decoration: none;
+  transition: border-color var(--dur-fast), transform var(--dur-base) var(--ease-out);
+}
+.cn-pipe li + li .cn-pipe-step { margin-left: 6px; }
+.cn-pipe-step:hover { border-color: var(--line-strong); transform: translateY(-2px); }
+.cn-pipe-step:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+.cn-pipe-n { font-family: var(--mono); font-size: 28px; font-weight: 600; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.cn-pipe-l { font-family: var(--mono); font-size: var(--fs-body); font-weight: 600; }
+.cn-pipe-s { font-size: 12px; color: var(--dim); line-height: 1.4; }
+
+/* A titled block on a page: heading, optional count, "All …" link on the right. */
+.cn-section { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
+.cn-section-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+.cn-h2 { font-family: var(--mono); font-size: var(--fs-section); font-weight: 600; margin: 0; }
+.cn-section-all { margin-left: auto; font-size: var(--fs-body); }
+.cn-req { grid-template-columns: minmax(0, 1fr) auto; padding: 10px 12px; }
+.cn-req-end { display: flex; align-items: center; gap: 10px; }
+
+/* Filter chips on the left, search on the right; the search takes the full width on phones. */
+.cn-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; }
+.cn-toolbar > .sws-input-wrap { flex: 0 1 260px; min-width: 0; }
+@media (max-width: 520px) {
+  .cn-toolbar > .sws-input-wrap { flex: 1 1 100%; }
+}
+
+/* ---------- Customer cards (parts.jsx CustomerCards) ---------- */
+.cn-cards { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 290px), 1fr)); gap: var(--sp-4); }
+.cn-cards > li { display: flex; min-width: 0; }
+.cn-cc {
+  position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 14px; padding: 18px 18px 14px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  transition: border-color var(--dur-fast), transform var(--dur-base) var(--ease-out);
+}
+.cn-cc:hover { border-color: var(--line-strong); transform: translateY(-2px); }
+.cn-cc:has(.cn-cc-link:focus-visible) { outline: 2px solid var(--text); outline-offset: 2px; }
+.cn-cc-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-3); }
+.cn-cc-name { margin: 0; font-family: var(--mono); font-size: 15px; font-weight: 600; line-height: 1.35; min-width: 0; overflow-wrap: anywhere; }
+.cn-cc-link { color: var(--text); text-decoration: none; }
+.cn-cc-link::after { content: ""; position: absolute; inset: 0; border-radius: inherit; }
+.cn-cc-link:focus-visible { outline: none; }
+.cn-cc-type { margin-top: -10px; font-size: 12.5px; color: var(--dim); overflow-wrap: anywhere; }
+.cn-cc-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-3); margin: 0; }
+.cn-cc-stats dt, .cn-k { font-size: 10.5px; font-weight: 600; letter-spacing: 0.6px; text-transform: uppercase; color: var(--dim); }
+.cn-cc-stats dd { margin: 4px 0 0; font-size: 20px; font-weight: 600; line-height: 1.2; }
+.cn-cc-foot { margin-top: auto; padding-top: 12px; border-top: 1px solid var(--line); font-size: 12px; color: var(--dim); }
+
+/* ---------- Curb health bar (parts.jsx HealthBar) ----------
+   Fixed status colours on a dark track. Paper turns the track dark through its
+   status insets in themes.css, so the colours keep their contrast there too. */
+.cn-health { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.cn-health.is-empty { font-size: 12.5px; color: var(--dim); }
+.cn-health-bar { display: flex; gap: 2px; height: 12px; padding: 2px; border-radius: 4px; background: var(--bg); overflow: hidden; }
+.cn-seg { min-width: 4px; border-radius: 2px; transform-origin: left center; animation: cn-grow var(--dur-slow) var(--ease-out) both; }
+.cn-seg.is-free { background: var(--free); }
+.cn-seg.is-occupied { background: var(--occupied); }
+.cn-seg.is-attention { background: var(--attention); }
+.cn-seg.is-offline { background: repeating-linear-gradient(135deg, var(--offline-mark) 0 1.5px, var(--offline) 1.5px 5px); }
+@keyframes cn-grow { from { transform: scaleX(0); } }
+.cn-health-key { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--dim); }
+.cn-health-key li { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.cn-health-key .cn-num { color: var(--text); font-weight: 600; }
+.cn-health-key .lp-block { width: 10px; --ring: 1.5px; flex-shrink: 0; }
+
+/* ---------- Empty and all-clear states (parts.jsx ConsoleEmpty) ---------- */
+.cn-empty {
+  display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px; padding: 40px 20px;
+  border: 1px dashed var(--line-strong); border-radius: 8px; background: var(--panel);
+  animation: sws-fade-in var(--dur-base) var(--ease-out);
+}
+.cn-empty-icon { width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; margin-bottom: 8px; background: var(--brand-bg); color: var(--brand); box-shadow: inset 0 0 0 1px var(--brand-line); }
+.cn-empty.is-ok .cn-empty-icon { background: var(--open-bg); color: var(--open-text); box-shadow: none; }
+.cn-empty-title { font-family: var(--mono); font-size: 15px; font-weight: 600; }
+.cn-empty-text { margin: 0; max-width: 440px; font-size: var(--fs-body); line-height: 1.55; color: var(--dim); }
+.cn-empty-actions { display: flex; gap: var(--sp-2); flex-wrap: wrap; justify-content: center; margin-top: 10px; }
 
 /* Customer status badges. */
 .cn-status.is-prospect { background: var(--card); color: var(--text); box-shadow: inset 0 0 0 1px var(--line-strong); }
@@ -33,50 +122,31 @@
 }
 .cn-body .cn-row { border-top: 1px solid var(--line); border-radius: 0; }
 .cn-body .cn-row:first-child { border-top: none; }
-a.cn-row, .cn-row.is-link { color: inherit; text-decoration: none; transition: background-color var(--dur-fast); }
-a.cn-row:hover, .cn-row.is-link:hover { background: var(--soft-tint); }
+a.cn-row { color: inherit; text-decoration: none; transition: background-color var(--dur-fast); }
+a.cn-row:hover { background: var(--soft-tint); }
 a.cn-row:focus-visible { outline: 2px solid var(--text); outline-offset: -2px; }
-/* A link inside a row that covers the whole row (the row stays a table row for screen readers). */
-.cn-row.is-link { position: relative; }
-.cn-row-link { color: inherit; text-decoration: none; }
-.cn-row-link::after { content: ""; position: absolute; inset: 0; border-radius: inherit; }
-.cn-row-link:focus-visible { outline: none; }
-.cn-row.is-link:has(.cn-row-link:focus-visible) { outline: 2px solid var(--text); outline-offset: -2px; }
 .cn-c { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cn-name { font-weight: 600; }
 .cn-dim { color: var(--dim); }
-.cn-warn { color: var(--attention); }
+/* Warning text uses the warning tone, not the fixed attention colour: on Paper's
+   light surfaces attention is too pale to read (scripts/check-contrast.mjs). */
+.cn-warn { color: var(--warn); }
 .cn-num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 
-/* Customers: name | type | status | lots | curbs | online | last seen */
-.cn-cust { grid-template-columns: minmax(160px, 1.6fr) 90px 100px 60px 60px 120px 110px; grid-template-areas: "name type status lots curbs online seen"; }
-.cn-cust > :nth-child(1) { grid-area: name; }
-.cn-cust > :nth-child(2) { grid-area: type; }
-.cn-cust > :nth-child(3) { grid-area: status; }
-.cn-cust > :nth-child(4) { grid-area: lots; }
-.cn-cust > :nth-child(5) { grid-area: curbs; }
-.cn-cust > :nth-child(6) { grid-area: online; }
-.cn-cust > :nth-child(7) { grid-area: seen; }
+/* Short labels that only show where a row folds into a card (Import lots). */
 .cn-key { display: none; color: var(--dim); }
-@container (max-width: 720px) {
-  .cn-cust { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name status" "type online" "lots seen" "curbs curbs"; padding: var(--sp-3) var(--sp-2); }
-  .cn-cust.cn-head { display: none; }
-  .cn-cust > :nth-child(3), .cn-cust > :nth-child(6), .cn-cust > :nth-child(7) { justify-self: end; }
-  .cn-cust > :nth-child(5) { display: none; }
-  .cn-key { display: inline; }
-  .cn-cust .cn-c { font-size: 12px; }
-  .cn-cust .cn-name { font-size: var(--fs-body); }
-}
 
 /* Curbs in a lot: id | status | battery | last seen */
 .cn-curb { grid-template-columns: minmax(80px, 1fr) 100px 130px 120px; padding: 8px var(--sp-3); }
 .cn-curb .cn-id { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-weight: 600; }
 .cn-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--free); }
 .cn-dot.is-off { background: var(--offline-mark); }
+/* Paper: status dots on light rows get the dark status ring, like the legend swatches. */
+:where([data-theme="paper"]) .cn-dot { box-shadow: 0 0 0 2px var(--status-ring); }
 .cn-batt { display: flex; align-items: center; gap: var(--sp-2); }
 .cn-bar { width: 48px; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; flex-shrink: 0; }
 .cn-bar > span { display: block; height: 100%; background: var(--nav-text); }
-.cn-bar.is-low > span { background: var(--attention); }
+.cn-bar.is-low > span { background: var(--warn); }
 @container (max-width: 520px) {
   .cn-curb { grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "id status status" "batt batt seen"; padding: 8px var(--sp-2); }
   .cn-curb > :nth-child(1) { grid-area: id; }
@@ -105,29 +175,76 @@ a.cn-row:focus-visible { outline: 2px solid var(--text); outline-offset: -2px; }
 .cn-inline > .sws-field { flex: 1 1 220px; }
 .cn-inline + .sws-field-hint { margin-top: -2px; }
 
+/* ---------- Customer detail (src/console/CustomerDetail.jsx) ----------
+   Summary strip (stats, health bar, the three actions), then lots on the left and
+   status, details and delete on the right. One column below 1100px. */
+.cn-sum { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "stats actions" "health actions"; gap: 18px 32px; align-items: center; padding: 20px 22px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+.cn-sum-stats { grid-area: stats; display: flex; flex-wrap: wrap; gap: 14px 40px; margin: 0; }
+.cn-sum-stats dd { margin: 6px 0 0; font-family: var(--mono); font-size: 26px; font-weight: 600; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.cn-sum-stats dd.cn-sum-ago { font-size: 15px; line-height: 1.75; }
+.cn-sum .cn-health { grid-area: health; }
+.cn-sum-actions { grid-area: actions; display: flex; flex-direction: column; gap: var(--sp-2); align-self: stretch; justify-content: center; }
+.cn-detail { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 360px); gap: 16px; align-items: start; }
+.cn-detail-main, .cn-detail-side { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.cn-detail-side .cn-form { grid-template-columns: minmax(0, 1fr); }
+.cn-facts { margin: 0; display: flex; flex-direction: column; gap: 14px; }
+.cn-facts dd { margin: 4px 0 0; font-size: var(--fs-body); overflow-wrap: anywhere; white-space: pre-wrap; }
+.cn-anchor { scroll-margin-top: 80px; }
+/* A lot's plan beside its curb list; stacked when the card is narrow. */
+.cn-lot-body { display: grid; grid-template-columns: minmax(170px, 240px) minmax(0, 1fr); align-items: start; container-type: inline-size; }
+.cn-lot-plan { padding: var(--sp-4) var(--sp-3); border-right: 1px solid var(--line); min-width: 0; }
+/* The lot head above already names the lot; the plan keeps only its free count. */
+.cn-lot-plan .lp-name { display: none; }
+.cn-lot-plan .lp-head { justify-content: flex-start; }
+.cn-lot-plan .lp { --lp-ring-gap: var(--bg); }
+.cn-curb.is-sel { background: var(--nav-active-bg); box-shadow: inset 2px 0 0 var(--brand); }
+@media (max-width: 1100px) {
+  .cn-detail { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 720px) {
+  .cn-sum { grid-template-columns: minmax(0, 1fr); grid-template-areas: "stats" "health" "actions"; padding: 16px; }
+  .cn-sum-stats { gap: 14px 28px; }
+  .cn-sum-stats dd { font-size: 22px; }
+  .cn-sum-actions { flex-direction: row; flex-wrap: wrap; }
+  .cn-sum-actions .sws-btn { flex: 1 1 140px; }
+  .cn-lot-body { grid-template-columns: minmax(0, 1fr); }
+  .cn-lot-plan { border-right: 0; border-bottom: 1px solid var(--line); }
+}
+
 /* Detail page header line: back link, then badges. */
 .cn-back { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; }
 .cn-badges { display: flex; gap: var(--sp-2); flex-wrap: wrap; align-items: center; }
 
 /* Requests: convert action under each request. */
 .rq-badge.is-won { background: var(--open-bg); color: var(--open-text); }
-.rq-item:has(.rq-badge.is-won) { border-left: 2px solid var(--open); }
-.rq-actions { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; margin-top: 6px; }
+.rq-item:has(.rq-badge.is-won) { box-shadow: inset 3px 0 0 var(--open); }
+.rq-actions { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
 /* Home's newest requests wrap instead of truncating when the card is narrow. */
 @container (max-width: 520px) {
-  .cn-req { grid-template-columns: minmax(0, 1fr) !important; row-gap: 6px !important; }
+  .cn-req { grid-template-columns: minmax(0, 1fr); row-gap: 6px; }
   .cn-req > .cn-c { white-space: normal; }
 }
 
 @media (max-width: 1100px) {
-  .cn-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .cn-hero { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 900px) {
-  .cn-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .cn-form { grid-template-columns: minmax(0, 1fr); }
+  .cn-home { gap: 32px; padding-top: 22px; }
 }
+/* Phones: the pipeline turns into a column, its arrows pointing down. */
 @media (max-width: 520px) {
-  .cn-tiles .sws-tile-value { font-size: 24px; }
+  .cn-pipe ol { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .cn-pipe li + li .cn-pipe-step { margin-left: 0; }
+  .cn-pipe-arrow { left: 50%; top: -7px; transform: translate(-50%, -50%) rotate(90deg); }
+  .cn-pipe-step { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-areas: "n l" "n s"; column-gap: 14px; align-items: center; padding: 12px 14px; }
+  .cn-pipe-n { grid-area: n; font-size: 24px; min-width: 1.6em; }
+  .cn-pipe-l { grid-area: l; }
+  .cn-pipe-s { grid-area: s; }
+  .cn-req-end { justify-content: space-between; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cn-seg, .cn-empty { animation: none; }
 }
 
 /* ---------- Requests (src/console/Requests.jsx) ---------- */
@@ -135,22 +252,26 @@ a.cn-row:focus-visible { outline: 2px solid var(--text); outline-offset: -2px; }
 .sws-nav-badge.is-count { color: var(--brand); background: var(--brand-bg); box-shadow: inset 0 0 0 1px var(--brand-line); font-variant-numeric: tabular-nums; }
 
 .rq-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-3); }
+/* One request: name, status and age; who and where; the message; then Convert
+   (primary) on the left and the status control on the right. */
 .rq-item {
-  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--sp-4); align-items: start;
-  padding: 16px 18px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  display: flex; flex-direction: column; gap: 8px; min-width: 0;
+  padding: 18px 20px 16px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
 }
-.rq-item:has(.rq-badge.is-new) { border-left: 2px solid var(--brand); }
-.rq-main { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.rq-head { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
-.rq-name { font-family: var(--mono); font-size: var(--fs-section); font-weight: 600; margin: 0; overflow-wrap: anywhere; }
+.rq-item:has(.rq-badge.is-new) { box-shadow: inset 3px 0 0 var(--brand); }
+.rq-head { display: flex; align-items: center; gap: var(--sp-2) var(--sp-3); flex-wrap: wrap; }
+.rq-name { font-family: var(--mono); font-size: 15px; font-weight: 600; margin: 0; overflow-wrap: anywhere; }
+.rq-when { margin-left: auto; font-size: 12px; color: var(--dim); white-space: nowrap; }
 .rq-badge.is-contacted { background: var(--card); color: var(--text); box-shadow: inset 0 0 0 1px var(--line-strong); }
 .rq-badge.is-closed { background: var(--card); color: var(--dim); }
-.rq-meta { display: flex; flex-wrap: wrap; gap: 4px 0; font-size: 12.5px; color: var(--dim); }
-.rq-meta > span + span::before { content: "·"; margin: 0 7px; color: var(--faint); }
-.rq-email { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; overflow-wrap: anywhere; }
+.rq-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 0; font-size: 12.5px; color: var(--dim); }
+.rq-meta > * + *::before { content: "·"; margin: 0 8px; color: var(--dim); }
+.rq-email { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; font-size: var(--fs-body); overflow-wrap: anywhere; }
 .rq-email svg { flex-shrink: 0; }
-.rq-msg { margin: 4px 0 0; font-size: var(--fs-body); line-height: 1.55; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
-.rq-msg.is-empty { color: var(--faint); }
+.rq-msg { margin: 4px 0 2px; padding: 10px 14px; border-radius: var(--radius); background: var(--panel-2); box-shadow: inset 2px 0 0 var(--line-strong); font-size: var(--fs-body); line-height: 1.6; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
+.rq-msg.is-empty { padding: 0; background: none; box-shadow: none; color: var(--dim); font-style: italic; }
+.rq-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; padding-top: 10px; margin-top: 4px; border-top: 1px solid var(--line); }
+.rq-cust { display: inline-flex; align-items: center; gap: 6px; }
 
 /* Status: native radios as a segmented control (same look as the Live / Simulation switch). */
 .rq-seg { display: flex; gap: 3px; padding: 3px; margin: 0; min-width: 0; border-radius: 7px; border: 1px solid var(--line); background: var(--bg); }
@@ -168,8 +289,8 @@ a.cn-row:focus-visible { outline: 2px solid var(--text); outline-offset: -2px; }
 .rq-seg[aria-busy="true"] .rq-seg-opt { cursor: progress; }
 
 @media (max-width: 900px) {
-  .rq-item { grid-template-columns: minmax(0, 1fr); padding: 14px; }
-  .rq-seg { align-self: stretch; }
+  .rq-item { padding: 14px; }
+  .rq-foot > .rq-seg { flex: 1 1 100%; }
   .rq-seg-opt { flex: 1; }
 }
 
@@ -178,7 +299,9 @@ a.cn-row:focus-visible { outline: 2px solid var(--text); outline-offset: -2px; }
    line | id | name | customer | spots | location | status, folding into a card per
    row when the card is narrow. Reasons wrap under the status badge. */
 .im-text { font-family: var(--mono); font-size: 12.5px; min-height: 160px; white-space: pre; overflow-wrap: normal; overflow-x: auto; }
+.im-paste, .im-paste + .cn-empty { max-width: 960px; width: 100%; }
 .im-hint { line-height: 1.55; }
+.im-rules { margin: 6px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 3px; }
 .im-cols { display: block; margin: 2px 0 4px; font-family: var(--mono); font-size: 12px; color: var(--text); overflow-wrap: anywhere; }
 .im-bar { margin-bottom: var(--sp-3); }
 .im-actions { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; margin-top: var(--sp-4); }
@@ -213,4 +336,39 @@ a.cn-row:focus-visible { outline: 2px solid var(--text); outline-offset: -2px; }
   .im-row > .im-cust { color: var(--dim); }
   .im-row > .im-status { margin-top: 4px; }
   .im-row .cn-key { display: inline; }
+}
+
+/* ---------- Deployments (src/console/Deployments.jsx, parts.jsx LotRow) ----------
+   Each lot is a row: name and meta, call-outs on the right, then its curbs as a
+   strip of stall marks (a status inset on Paper), the curbs that need a look, and
+   the full curb list folded away. */
+.cn-lrows { display: flex; flex-direction: column; }
+.cn-lrow { display: flex; flex-direction: column; gap: 10px; padding: 16px 0; border-top: 1px solid var(--line); min-width: 0; }
+.cn-lrow:first-child { border-top: 0; padding-top: 2px; }
+.cn-lrow:last-child { padding-bottom: 0; }
+.cn-lrow-head { display: flex; align-items: baseline; gap: 6px var(--sp-3); flex-wrap: wrap; }
+.cn-calls { display: inline-flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+.cn-call.is-off { background: var(--busy-bg); color: var(--busy-text); }
+.cn-call.is-low { background: var(--warn-bg); color: var(--warn-text); }
+.cn-call.is-ok { background: var(--open-bg); color: var(--open-text); }
+.cn-dots { list-style: none; margin: 0; padding: 8px 10px; display: flex; flex-wrap: wrap; gap: 6px; align-self: flex-start; max-width: 100%; border-radius: var(--radius); background: var(--bg); }
+.cn-dots li { display: flex; }
+.cn-dots .lp-block { width: 14px; --ring: 1.5px; --lp-ring-gap: var(--bg); border-radius: 2px; }
+.cn-issues { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; }
+.cn-issues li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
+.cn-issue-id { font-weight: 600; min-width: 4.5em; }
+.cn-issue-off { color: var(--busy); }
+.cn-more > summary { cursor: pointer; width: fit-content; font-size: 12.5px; color: var(--dim); border-radius: 3px; }
+.cn-more > summary:hover { color: var(--text); }
+.cn-more > summary:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+.cn-more[open] > summary { margin-bottom: 10px; }
+
+/* ---------- Console Assistant (src/console/ConsoleAssistant.jsx) ----------
+   Spacing only; the chat itself uses the shared .as-* styles. On phones the
+   suggestion row fades at its right edge so it reads as scrollable, and the
+   composer keeps clear of the home indicator. */
+@media (max-width: 900px) {
+  .as-body .as-suggest { -webkit-mask-image: linear-gradient(90deg, #000 85%, transparent); mask-image: linear-gradient(90deg, #000 85%, transparent); padding-right: 24px; scroll-padding-right: 24px; }
+  .as-body .as-head { padding: 10px 12px; }
+  .as-body .as-form { padding-bottom: env(safe-area-inset-bottom); }
 }

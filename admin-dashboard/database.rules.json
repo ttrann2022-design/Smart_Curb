@@ -163,10 +163,11 @@
       ".read": true,
       "$lotId": {
         // Platform admins create a lot, but never replace or delete one. The ID is lowercase
-        // letters and numbers; a new lot has name, totalSpots, openSpots equal to totalSpots,
-        // siteId and optional latitude/longitude, and nothing else.
+        // letters and numbers; a new lot has name, siteId and optional latitude/longitude,
+        // totalSpots and openSpots (only alongside totalSpots, and equal to it), and nothing
+        // else. Capacity comes from the curbs, so the console leaves both counts out.
         ".write": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true && !data.exists() && newData.exists()",
-        ".validate": "data.exists() || ($lotId.matches(/^[a-z0-9]+$/) && $lotId.length <= 80 && newData.hasChildren(['name', 'totalSpots', 'openSpots', 'siteId']) && newData.child('openSpots').val() === newData.child('totalSpots').val())",
+        ".validate": "data.exists() || ($lotId.matches(/^[a-z0-9]+$/) && $lotId.length <= 80 && newData.hasChildren(['name', 'siteId']))",
         // After that they change only name, totalSpots, latitude and longitude.
         "name": {
           ".write": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true && data.parent().exists() && newData.exists()",
@@ -184,7 +185,8 @@
           ".write": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true && data.parent().exists()",
           ".validate": "newData.isNumber() && newData.val() >= -180 && newData.val() <= 180"
         },
-        // Set by a platform admin only when creating the lot; then it belongs to the hardware.
+        // Optional when a platform admin creates the lot, and then only equal to totalSpots;
+        // after that it belongs to the hardware.
         "openSpots": { ".validate": "data.exists() || newData.val() === newData.parent().child('totalSpots').val()" },
         // No other field on a new lot (units and the rest come from the hardware).
         "$other": { ".validate": "data.exists() || data.parent().exists()" },
@@ -341,10 +343,11 @@
         ".write": "auth != null && root.child('users').child(auth.uid).exists()",
         "$lotId": {
           // Platform admins create a lot, but never replace or delete one. The ID is lowercase
-          // letters and numbers; a new lot has name, totalSpots, openSpots equal to totalSpots,
-          // siteId and optional latitude/longitude, and nothing else.
+          // letters and numbers; a new lot has name, siteId and optional latitude/longitude,
+          // totalSpots and openSpots (only alongside totalSpots, and equal to it), and nothing
+          // else. Capacity comes from the curbs, so the console leaves both counts out.
           ".write": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true && !data.exists() && newData.exists()",
-          ".validate": "auth != null && root.child('users').child(auth.uid).exists() || (data.exists() || ($lotId.matches(/^[a-z0-9]+$/) && $lotId.length <= 80 && newData.hasChildren(['name', 'totalSpots', 'openSpots', 'siteId']) && newData.child('openSpots').val() === newData.child('totalSpots').val()))",
+          ".validate": "auth != null && root.child('users').child(auth.uid).exists() || (data.exists() || ($lotId.matches(/^[a-z0-9]+$/) && $lotId.length <= 80 && newData.hasChildren(['name', 'siteId'])))",
           // After that they change only name, totalSpots, latitude and longitude.
           "name": {
             ".write": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true && data.parent().exists() && newData.exists()",
@@ -362,7 +365,8 @@
             ".write": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true && data.parent().exists()",
             ".validate": "auth != null && root.child('users').child(auth.uid).exists() || (newData.isNumber() && newData.val() >= -180 && newData.val() <= 180)"
           },
-          // Set by a platform admin only when creating the lot; then it belongs to the hardware.
+          // Optional when a platform admin creates the lot, and then only equal to totalSpots;
+          // after that it belongs to the hardware.
           "openSpots": { ".validate": "auth != null && root.child('users').child(auth.uid).exists() || (data.exists() || newData.val() === newData.parent().child('totalSpots').val())" },
           // No other field on a new lot (units and the rest come from the hardware).
           "$other": { ".validate": "auth != null && root.child('users').child(auth.uid).exists() || (data.exists() || data.parent().exists())" },

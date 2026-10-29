@@ -1,7 +1,7 @@
 // Views of the dashboard's live data (units/, lots/) for the assistant's answers.
 // Same definitions as the dashboard pages: a spot is free when its curb is online
 // and not occupied, and "needs attention" is unitIssues() from unitStatus.js.
-import { formatAgo } from "../unitStatus.js";
+import { formatAgo, lotCounts } from "../unitStatus.js";
 
 const byId = (a, b) => a.localeCompare(b, undefined, { numeric: true });
 
@@ -16,18 +16,19 @@ export function lotViews({ lots, units }) {
   return Object.keys(lots || {})
     .map((id) => {
       const curbs = entries.filter(([, u]) => u.lot === id);
-      const online = curbs.filter(([, u]) => u.online);
-      const occupied = online.filter(([, u]) => u.occupied).length;
+      // Same counts as every page (lotCounts): total is the capacity, the curbs that
+      // report; offline curbs are counted on their own, never in "of N".
+      const c = lotCounts(curbs.map(([, u]) => u));
       return {
         id,
         name: lotName(lots, id),
         curbs,
-        total: curbs.length,
-        open: online.length - occupied,
-        occupied,
-        offline: curbs.length - online.length,
-        // Share of reporting curbs that are occupied, as on Analytics.
-        pctFull: online.length ? Math.round((occupied / online.length) * 100) : null,
+        curbCount: c.curbs,
+        total: c.capacity,
+        open: c.free,
+        occupied: c.occupied,
+        offline: c.offline,
+        pctFull: c.pctFull,
       };
     })
     .sort((a, b) => byId(a.name, b.name));

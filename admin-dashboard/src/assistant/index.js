@@ -7,9 +7,10 @@ import { INTENT_BY_ID, SOMETHING_ELSE, menuChips } from "./intents.js";
 import { match } from "./matcher.js";
 import { findCurb, findLot, missingLot, numberWords, pointsBack, pointsToCurb, pointsToLot } from "./entities.js";
 import { lotViews } from "./data.js";
-import { parseMath } from "./math.js";
+import { parseMath } from "./engine/math.js";
 import { normalize } from "./text.js";
 import { simTokens } from "./similarity.js";
+import { fallbackReply, pickReply, respondParts } from "./engine/conversation.js";
 
 export { INTENTS, GROUPS, INTENT_BY_ID, menuChips, SOMETHING_ELSE } from "./intents.js";
 export { match, rank, THRESHOLD } from "./matcher.js";
@@ -39,22 +40,8 @@ function entityOnly(raw, ent, ctx) {
   return words.every((w) => FILLER.has(w) || /^\d+$/.test(w) || lot.includes(w) || lot.some((l) => l.startsWith(w) && w.length >= 3));
 }
 
-// Picks a variant, avoiding the most recent ones for this intent (never the last one).
-function choose(variants, recent = [], random = Math.random) {
-  const avoid = recent.slice(-Math.min(variants.length - 1, Math.max(1, Math.floor(variants.length / 2))));
-  const open = variants.map((_, i) => i).filter((i) => !avoid.includes(i));
-  const pool = open.length ? open : variants.map((_, i) => i);
-  return pool[Math.floor(random() * pool.length) % pool.length];
-}
-
 function finish(intent, out, ctx, state, ent) {
-  const reply = Array.isArray(out) ? { variants: out } : typeof out === "string" ? { variants: [out] } : out;
-  const index = choose(reply.variants, state.recent?.[intent.id], ctx.random);
-  const text = reply.variants[index];
-  let chips = reply.chips || intent.next;
-  if (intent.id === "menu" || !chips?.length) chips = menuChips(ctx);
-  else if (!chips.includes(SOMETHING_ELSE)) chips = [...chips, SOMETHING_ELSE];
-  const recent = { ...(state.recent || {}), [intent.id]: [...(state.recent?.[intent.id] || []), index].slice(-25) };
+  const { text, chips, reply, recent } = pickReply(intent, out, ctx, state, { menuChips, somethingElse: SOMETHING_ELSE });
   const next = { ...state, recent, lastText: text, lastChips: chips };
   if (TOPICAL.has(intent.group)) next.lastIntentId = intent.id;
   if (REPEATABLE.has(intent.id)) next.lastFunId = intent.id;
@@ -127,43 +114,14 @@ function respondOne(raw, ctx, state) {
   // or give that lot's free spots or that curb's status.
   if (ent.curbId || ent.lotId) return run(followIntent(state, ent.curbId ? "curb" : "lot"), ctx, state, ent);
 
-  const index = choose(FALLBACK, state.recent?.fallback, ctx.random);
-  const recent = { ...(state.recent || {}), fallback: [...(state.recent?.fallback || []), index].slice(-25) };
-  return { intent: "fallback", group: null, text: FALLBACK[index], chips: menuChips(ctx), state: { ...state, recent }, fallback: true, entities: ent };
+  const fb = fallbackReply(FALLBACK, ctx, state);
+  return { intent: "fallback", group: null, text: fb.text, chips: menuChips(ctx), state: fb.state, fallback: true, entities: ent };
 }
 
 // "Offline curbs and low batteries": parts that each match get their own answer.
-const SPLIT = /\s+(?:and also|and then|and|also|plus|as well as)\s+|\s*[;&]\s*|\?\s+(?=\S)/i;
-
-// Joined answers share one source line, at the end, when they all have the same one.
-const SOURCE = /\n\n(From [^\n]*)$/;
-function joinAnswers(texts) {
-  const sources = texts.map((t) => t.match(SOURCE)?.[1]);
-  if (!sources[0] || sources.some((x) => x !== sources[0])) return texts.join("\n\n");
-  return `${texts.map((t) => t.replace(SOURCE, "")).join("\n\n")}\n\n${sources[0]}`;
-}
-
-export function respond(raw, ctx, state = {}) {
-  const parts = String(raw || "").split(SPLIT).map((p) => p.trim()).filter(Boolean);
-  if (parts.length > 1 && !parseMath(raw)) {
-    let st = state;
-    const answers = [];
-    for (const p of parts) {
-      const r = respondOne(p, ctx, st);
-      st = r.state;
-      // A part needs two telling words of its own ("manager" alone isn't a question),
-      // unless it names a lot or curb or is small talk ("thanks").
-      const enough = simTokens(p).length >= 2 || r.entities?.lotId || r.entities?.curbId || r.group === "smalltalk";
-      if (!r.fallback && enough) answers.push(r);
-    }
-    const distinct = new Set(answers.map((a) => `${a.intent}|${a.entities?.lotId || ""}|${a.entities?.curbId || ""}`));
-    if (answers.length >= 2 && distinct.size >= 2) {
-      const last = answers[answers.length - 1];
-      return { ...last, intent: answers.map((a) => a.intent).join("+"), intents: answers.map((a) => a.intent), text: joinAnswers(answers.map((a) => a.text)), state: st };
-    }
-  }
-  return respondOne(raw, ctx, state);
-}
+export const respond = (raw, ctx, state = {}) => respondParts(raw, ctx, state, {
+  respondOne, entityKeys: ["lotId", "curbId"], simTokens, isMath: parseMath,
+});
 
 // The opening message: greeting by time of day and name, and the topic menu.
 export function welcome(ctx) {

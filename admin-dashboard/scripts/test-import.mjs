@@ -31,7 +31,9 @@ test("parses quoted values with commas, quotes and newlines, CRLF, a BOM and bla
 
 test("the header may be in any order and any case; missing, unknown or doubled columns are refused", () => {
   assert.deepEqual(parseCsv("Total Spots,ID,Name,Customer\n5,a,A,Harbor Mall").header, ["totalSpots", "id", "name", "customer"]);
-  assert.match(parseCsv("id,name,customer\na,A,Harbor Mall").error, /needs totalSpots/);
+  // totalSpots is optional, so its column may be left out; id, name and customer may not.
+  assert.deepEqual(parseCsv("id,name,customer\na,A,Harbor Mall").header, ["id", "name", "customer"]);
+  assert.match(parseCsv("name,customer\nA,Harbor Mall").error, /needs id/);
   assert.match(parseCsv(`${HEADER},colour\n`).error, /Unknown column "colour"/);
   assert.match(parseCsv("id,name,customer,totalSpots,id\n").error, /"id" twice/);
   assert.match(parseCsv("").error, /Paste CSV text/);
@@ -46,7 +48,7 @@ test("a clean paste: new lots and updates, with the right fields", () => {
   const p = plan(csv("newlot,New Lot,Harbor Mall,30,10.5,-20.25", "lot14,Lot 14,Northfield University,45,,", "lot6,Lot 6,Northfield University,20,3,4"));
   const r = byId(p);
   assert.equal(r.newlot.status, "new");
-  assert.deepEqual(r.newlot.fields, { name: "New Lot", totalSpots: 30, openSpots: 30, siteId: "s2", latitude: 10.5, longitude: -20.25 });
+  assert.deepEqual(r.newlot.fields, { name: "New Lot", totalSpots: 30, siteId: "s2", latitude: 10.5, longitude: -20.25 });
   assert.equal(r.lot14.status, "update");
   // A blank location keeps the current one: only totalSpots changes.
   assert.deepEqual(r.lot14.fields, { totalSpots: 45 });
@@ -54,9 +56,12 @@ test("a clean paste: new lots and updates, with the right fields", () => {
   assert.ok(p.rows.every((x) => x.status !== "error"));
 });
 
-test("a new lot without a location has none; openSpots always equals totalSpots", () => {
-  const r = byId(plan(csv("nolocation,No Location,Harbor Mall,7,,")));
-  assert.deepEqual(r.nolocation.fields, { name: "No Location", totalSpots: 7, openSpots: 7, siteId: "s2" });
+test("a new lot gets only what the row gives: never openSpots, and no totalSpots or location when blank", () => {
+  const r = byId(plan(csv("nolocation,No Location,Harbor Mall,7,,", "nosize,No Size,Harbor Mall,,1,2", "bare,Bare,Harbor Mall,,,")));
+  assert.deepEqual(r.nolocation.fields, { name: "No Location", totalSpots: 7, siteId: "s2" });
+  assert.deepEqual(r.nosize.fields, { name: "No Size", siteId: "s2", latitude: 1, longitude: 2 });
+  assert.deepEqual(r.bare.fields, { name: "Bare", siteId: "s2" });
+  assert.ok(Object.values(r).every((x) => x.status === "new" && !("openSpots" in x.fields)));
 });
 
 test("ids: lowercase letters and numbers only, at most 80, and not twice in one paste", () => {
@@ -79,15 +84,21 @@ test("names: 1 to 80 characters", () => {
   assert.equal(a3.status, "new");
 });
 
-test("totalSpots: required, a whole number from 1 to 5000", () => {
-  for (const bad of ["", "0", "5001", "1.5", "-3", "ten", "12.0", "1e3"]) {
+test("totalSpots: optional (capacity comes from the curbs), and a whole number from 1 to 5000 when given", () => {
+  for (const bad of ["0", "5001", "1.5", "-3", "ten", "12.0", "1e3"]) {
     const [row] = plan(csv(`t,T,Harbor Mall,${bad},,`)).rows;
     assert.equal(row.status, "error", `"${bad}"`);
-    assert.match(row.errors.join(" "), bad ? /whole number from 1 to 5,000/ : /totalSpots is missing/, `"${bad}"`);
+    assert.match(row.errors.join(" "), /whole number from 1 to 5,000/, `"${bad}"`);
   }
-  for (const good of ["1", "5000", "0042"]) assert.equal(plan(csv(`t,T,Harbor Mall,${good},,`)).rows[0].status, "new", good);
-  // A header without a totalSpots column can't be imported at all.
-  assert.match(plan("id,name,customer\nt,T,Harbor Mall").error, /needs totalSpots/);
+  for (const good of ["1", "5000", "0042", ""]) assert.equal(plan(csv(`t,T,Harbor Mall,${good},,`)).rows[0].status, "new", good);
+  // A header without a totalSpots column imports too: new lots get no totalSpots.
+  const p = plan("id,name,customer\nt,T,Harbor Mall\nlot6,Lot 6,Northfield University");
+  assert.equal(p.error, undefined);
+  const r = byId(p);
+  assert.deepEqual(r.t.fields, { name: "T", siteId: "s2" });
+  // An existing lot keeps its totalSpots when the row has none.
+  assert.equal(r.lot6.status, "update");
+  assert.deepEqual(r.lot6.fields, {});
 });
 
 test("latitude -90..90 and longitude -180..180, both or neither", () => {
@@ -139,7 +150,7 @@ test("existing lots: only totalSpots and location change, never the name, siteId
 
 test("the paths written: one whole new lot, or single fields of an existing one", () => {
   const r = byId(plan(csv("newlot,New,Harbor Mall,5,1,2", "lot14,Lot 14,Northfield University,41,5,6", "lot6,Lot 6,Northfield University,20,,")));
-  assert.deepEqual(rowUpdates(r.newlot), { "lots/newlot": { name: "New", totalSpots: 5, openSpots: 5, siteId: "s2", latitude: 1, longitude: 2 } });
+  assert.deepEqual(rowUpdates(r.newlot), { "lots/newlot": { name: "New", totalSpots: 5, siteId: "s2", latitude: 1, longitude: 2 } });
   assert.deepEqual(rowUpdates(r.lot14), { "lots/lot14/totalSpots": 41, "lots/lot14/latitude": 5, "lots/lot14/longitude": 6 });
   assert.deepEqual(rowUpdates(r.lot6), {});
   for (const path of Object.keys(rowUpdates(r.lot14))) assert.match(path, /^lots\/lot14\/(totalSpots|latitude|longitude)$/);
@@ -147,8 +158,8 @@ test("the paths written: one whole new lot, or single fields of an existing one"
 
 // ---------- Writing in batches ----------
 
-// A fake database with the lot rules: a new lot only where none exists and with
-// openSpots = totalSpots; an existing lot only gets totalSpots, latitude and
+// A fake database with the lot rules: a new lot only where none exists, with name
+// and siteId, and openSpots only alongside an equal totalSpots; an existing lot only gets totalSpots, latitude and
 // longitude; nothing is deleted; siteId must be an existing customer. A multi-path
 // write is all or nothing, like the Realtime Database.
 function fakeDb(lots, { refuse = () => false } = {}) {
@@ -163,7 +174,7 @@ function fakeDb(lots, { refuse = () => false } = {}) {
       if (root !== "lots" || rest.length || value === null || refuse(id)) fail("refused");
       if (!field) {
         if (db[id]) fail("exists");
-        if (value.openSpots !== value.totalSpots || !SITES[value.siteId]) fail("invalid");
+        if (!value.name || ("openSpots" in value && value.openSpots !== value.totalSpots) || !SITES[value.siteId]) fail("invalid");
         next[id] = value;
       } else {
         if (!db[id]) fail("missing");
@@ -187,7 +198,7 @@ test(`51+ rows go in batches of ${BATCH_SIZE}, and every lot lands`, async () =>
   assert.deepEqual(progress.map((x) => x.done), [25, 50, 61]);
   assert.deepEqual(summary, { created: 60, updated: 1, unchanged: 0, failed: 0, skipped: 0, notWritten: 0 });
   assert.equal(Object.keys(db).length, Object.keys(LOTS).length + 60);
-  assert.deepEqual(db.bulk59, { name: "Bulk 59", totalSpots: 69, openSpots: 69, siteId: "s2" });
+  assert.deepEqual(db.bulk59, { name: "Bulk 59", totalSpots: 69, siteId: "s2" });
   assert.ok(results.every((x) => x.outcome === "created" || x.outcome === "updated"));
 });
 

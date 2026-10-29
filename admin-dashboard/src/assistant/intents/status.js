@@ -6,6 +6,9 @@ import { alertsOf, canOperate, needOperator, noData, plural, sourced, vary } fro
 import { DAY_NAMES, HOURS_LONG, dayAverage, dayKey, historySource, hourSlot, liveSeries, pct, weekOf, weekStats } from "../history.js";
 
 const spots = (n) => plural(n, "free spot");
+// One lot's line in a site-wide answer: "3 of 4" free (capacity is the curbs that
+// report, as lotCounts), its offline curbs, or why it has no count yet.
+const lotLine = (l) => (!l.curbCount ? "no curbs yet" : !l.total ? "no curbs reporting" : `${l.open} of ${l.total}${l.offline ? ` (${l.offline} offline)` : ""}`);
 const ISSUE_TEXT = { offline: "offline", stale: "stopped reporting", lowBattery: "low battery" };
 const STATE = (u) => (!u.online ? "offline" : u.occupied ? "occupied" : "free");
 
@@ -74,7 +77,7 @@ export const STATUS_INTENTS = [
       const lots = lotViews(ctx);
       const open = lots.reduce((s, l) => s + l.open, 0);
       const total = lots.reduce((s, l) => s + l.total, 0);
-      const body = `\n${lots.map((l) => `• ${l.name}: ${l.open} of ${l.total}`).join("\n")}`;
+      const body = `\n${lots.map((l) => `• ${l.name}: ${lotLine(l)}`).join("\n")}`;
       return sourced(ctx, vary([
         `${open} of ${total} spots are free across ${plural(lots.length, "lot")}:`,
         `Right now there are ${spots(open)} out of ${total}:`,
@@ -90,7 +93,8 @@ export const STATUS_INTENTS = [
     say: withData((ctx, ent) => {
       const lot = lotViews(ctx).find((l) => l.id === ent.lotId);
       if (!lot) return STATUS_BY_ID.free_by_lot.say(ctx, ent);
-      if (lot.total === 0) return sourced(ctx, [`${lot.name} has no curbs reporting yet, so I can't count its spots.`, `No curbs report into ${lot.name} yet, so I can't tell.`, `I can't count ${lot.name}'s spots: none of its curbs report yet.`], lot.curbs);
+      if (lot.curbCount === 0) return sourced(ctx, [`${lot.name} has no curbs yet, so it has no spots to count.`, `No curbs yet in ${lot.name}, so there's nothing to count.`, `${lot.name} has no curbs yet: its spots come from its curbs.`], lot.curbs);
+      if (lot.total === 0) return sourced(ctx, [`None of ${lot.name}'s ${plural(lot.curbCount, "curb")} ${lot.curbCount === 1 ? "is" : "are"} reporting, so I can't count its spots.`, `${lot.name}'s curbs are all offline right now, so I can't tell.`, `I can't count ${lot.name}'s spots: none of its curbs is reporting.`], lot.curbs);
       const off = lot.offline ? ` (${lot.offline} offline)` : "";
       if (lot.open === 0) return sourced(ctx, [`${lot.name} is full: none of its ${lot.total} spots are free${off}.`, `No luck in ${lot.name}, it's full right now${off}.`, `${lot.name} has no free spots at the moment${off}.`], lot.curbs);
       return sourced(ctx, [
@@ -106,7 +110,7 @@ export const STATUS_INTENTS = [
     keys: [["free", 1.5], ["spot", 0.5], ["each", 2], ["per", 2], ["every lot", 2], ["by lot", 2], ["breakdown", 2.5], ["all lots", 1.5], ["lot by lot", 2]],
     next: ["Where should I park?", "Which lot is busiest?", "How full is the site?"],
     say: withData((ctx) => {
-      const body = `\n${lotViews(ctx).map((l) => `• ${l.name}: ${l.open} free, ${l.occupied} occupied${l.offline ? `, ${l.offline} offline` : ""}`).join("\n")}`;
+      const body = `\n${lotViews(ctx).map((l) => `• ${l.name}: ${l.curbCount ? `${l.open} free, ${l.occupied} occupied${l.offline ? `, ${l.offline} offline` : ""}` : "no curbs yet"}`).join("\n")}`;
       return sourced(ctx, vary(["Free spots in each lot:", "Here's the lot-by-lot picture:", "Lot by lot, right now:", "Here's how each lot looks:"], body));
     }),
   },
@@ -351,7 +355,7 @@ export const STATUS_INTENTS = [
       if (!lot) return { variants: ["Which lot? Say its name, like Lot 6.", "Sure, which lot are you asking about?", "Tell me the lot's name and I'll pull it up."], chips: lotViews(ctx).slice(0, 3).map((l) => `Tell me about ${l.name}`) };
       const alerts = alertsOf(ctx);
       const low = lot.curbs.filter(([, u]) => isLowBattery(u, alerts)).length;
-      const body = `\n• ${plural(lot.total, "curb")}: ${lot.open} free, ${lot.occupied} occupied, ${lot.offline} offline\n• ${lot.pctFull === null ? "No occupancy yet" : `${lot.pctFull}% full`}\n• ${plural(low, "low battery", "low batteries")}`;
+      const body = `\n• ${plural(lot.curbCount, "curb")}: ${lot.open} free, ${lot.occupied} occupied, ${lot.offline} offline\n• ${lot.pctFull === null ? "No occupancy yet" : `${lot.pctFull}% full`}\n• ${plural(low, "low battery", "low batteries")}`;
       return sourced(ctx, vary([`Here's ${lot.name}:`, `${lot.name} at a glance:`, `The rundown on ${lot.name}:`], body), lot.curbs);
     }),
   },
@@ -363,7 +367,7 @@ export const STATUS_INTENTS = [
       const lot = lotViews(ctx).find((l) => l.id === ent.lotId);
       if (!lot) return { variants: ["Which lot's curbs should I list?", "Sure, which lot?", "Name a lot and I'll list its curbs."], chips: lotViews(ctx).slice(0, 3).map((l) => `Curbs in ${l.name}`) };
       return curbList(ctx, ent, lot.curbs,
-        [`${lot.name} has ${plural(lot.total, "curb")}:`, `Curbs in ${lot.name}:`, `Here are ${lot.name}'s curbs:`],
+        [`${lot.name} has ${plural(lot.curbCount, "curb")}:`, `Curbs in ${lot.name}:`, `Here are ${lot.name}'s curbs:`],
         [`${lot.name} has no curbs yet.`, `No curbs report into ${lot.name} yet.`, `${lot.name} is empty of curbs for now.`],
         (u) => STATE(u));
     }),
@@ -475,7 +479,7 @@ export const STATUS_INTENTS = [
     say: withData((ctx) => {
       const lots = lotViews(ctx);
       if (!lots.length) return sourced(ctx, ["There are no lots yet.", "No lots so far.", "I don't see any lots yet."]);
-      const body = `\n${lots.map((l) => `• ${l.name}: ${plural(l.total, "curb")}`).join("\n")}`;
+      const body = `\n${lots.map((l) => `• ${l.name}: ${plural(l.curbCount, "curb")}`).join("\n")}`;
       return sourced(ctx, vary([`There ${lots.length === 1 ? "is 1 lot" : `are ${lots.length} lots`}:`, "Here are the lots:", `The site has ${plural(lots.length, "lot")}:`], body));
     }),
   },

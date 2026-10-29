@@ -161,8 +161,8 @@ The security rules are not part of `firebase.json`, so `firebase deploy` can't p
 ```
 lots/<lotId>
     name           "Lot 6"
-    openSpots      7
-    totalSpots     20
+    openSpots      7        optional, legacy (see below)
+    totalSpots     20       optional, legacy (see below)
     units/         { "C-001": true, ... }
 
 units/<curbId>
@@ -183,7 +183,8 @@ A few rules keep everything in sync:
 
 - A curb's `lot` must match its lot's ID **exactly**, including upper and lower case.
 - Lot IDs are zero-padded (`lot06`, `lot07`) so they sort in the right order.
-- Whoever changes a curb also updates that lot's `openSpots` and `totalSpots` **in the same write**, so the counts can never disagree with the curbs.
+- A lot's **capacity is its curbs that aren't offline**, and its free spots are the ones of those that report free; offline curbs count in neither. A lot with no curbs has no capacity yet ("No curbs yet"). The dashboard, lot sign, company console, both Assistants and the driver app all count this way from `units/` (`lotCounts()` in `admin-dashboard/src/unitStatus.js`).
+- `openSpots` and `totalSpots` are optional and nothing on the dashboard reads them. New lots from the console don't get them; existing lots keep theirs, and the Simulation keeps its simulated lots' values in step with the curbs.
 
 ## Live and Simulation data
 

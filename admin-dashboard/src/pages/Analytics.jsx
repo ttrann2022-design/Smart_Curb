@@ -7,6 +7,7 @@ import { StallMark } from "../components/LotPlan";
 import LatencySection from "../components/LatencySection";
 import useWidth from "../useWidth";
 import { PageHeader, EmptyState, Button } from "../components/ui";
+import { lotCounts } from "../unitStatus";
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const HOURS = ["7a", "8a", "9a", "10a", "11a", "12p", "1p", "2p", "3p", "4p", "5p", "6p", "7p", "8p"];
@@ -195,8 +196,8 @@ function Analytics() {
   }, []);
 
   // Right now comes straight from the curbs, not from the last history point.
-  const reporting = Object.values(units).filter((u) => u.online);
-  const nowPct = reporting.length ? Math.round((reporting.filter((u) => u.occupied).length / reporting.length) * 100) : null;
+  // Occupied share of the curbs that report (lotCounts), as everywhere else.
+  const nowPct = lotCounts(Object.values(units)).pctFull;
 
   const hasWeek = !!week && DAYS.every((d) => Array.isArray(week[d]) && week[d].length === HOURS.length);
   let insight = null;

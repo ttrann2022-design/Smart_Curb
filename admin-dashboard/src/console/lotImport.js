@@ -6,13 +6,15 @@
 //   planImport(text, lots, sites)  -> { error } or { rows: [{ line, id, status, ... }] }
 //   runImport(rows, write, opts)   -> { results, summary }
 //
-// The checks are the rules' (database.rules.json) in the page's words. A new lot gets
-// name, totalSpots, openSpots = totalSpots, siteId and an optional location. An
-// existing lot only ever gets totalSpots, latitude and longitude: never its name,
-// openSpots, siteId or anything else, and nothing is ever deleted.
+// The checks are the rules' (database.rules.json) in the page's words. A lot's
+// capacity comes from its curbs, so totalSpots is optional (the column too), and
+// checked only when given. A new lot gets name, siteId, an optional location and
+// totalSpots only if the row has one; never openSpots. An existing lot only ever gets
+// totalSpots, latitude and longitude, and only when the row gives them: never its
+// name, openSpots, siteId or anything else, and nothing is ever deleted.
 
 export const COLUMNS = ["id", "name", "customer", "totalSpots", "latitude", "longitude"];
-const REQUIRED = ["id", "name", "customer", "totalSpots"];
+const REQUIRED = ["id", "name", "customer"];
 export const IMPORT_LIMITS = { name: 80, idLength: 80, minSpots: 1, maxSpots: 5000, rows: 2000 };
 export const BATCH_SIZE = 25;
 
@@ -105,8 +107,8 @@ export function planImport(text, lots = {}, sites = {}) {
     if (!row.name) errors.push("name is missing.");
     else if (row.name.length > IMPORT_LIMITS.name) errors.push(`name is longer than ${IMPORT_LIMITS.name} characters.`);
 
-    let spots = NaN;
-    if (!row.totalSpots) errors.push("totalSpots is missing.");
+    let spots = null;
+    if (!row.totalSpots) { /* optional: capacity comes from the curbs */ }
     else if (!/^\d+$/.test(row.totalSpots) || Number(row.totalSpots) < IMPORT_LIMITS.minSpots || Number(row.totalSpots) > IMPORT_LIMITS.maxSpots) {
       errors.push(`totalSpots must be a whole number from ${IMPORT_LIMITS.minSpots} to ${IMPORT_LIMITS.maxSpots.toLocaleString()}.`);
     } else spots = Number(row.totalSpots);
@@ -134,11 +136,12 @@ export function planImport(text, lots = {}, sites = {}) {
 
     const location = row.latitude ? { latitude: lat, longitude: lng } : {};
     if (!existing) {
-      return { ...row, status: "new", siteId, fields: { name: row.name, totalSpots: spots, openSpots: spots, siteId, ...location }, notes: [] };
+      const size = spots === null ? {} : { totalSpots: spots };
+      return { ...row, status: "new", siteId, fields: { name: row.name, ...size, siteId, ...location }, notes: [] };
     }
-    // Existing: only what changes, of totalSpots and the location. A blank location keeps the current one.
+    // Existing: only what changes, of totalSpots and the location. A blank one keeps the current value.
     const fields = {};
-    if (!sameNumber(existing.totalSpots, spots)) fields.totalSpots = spots;
+    if (spots !== null && !sameNumber(existing.totalSpots, spots)) fields.totalSpots = spots;
     if (row.latitude && !(sameNumber(existing.latitude, lat) && sameNumber(existing.longitude, lng))) Object.assign(fields, location);
     const notes = [];
     if (existing.name && existing.name !== row.name) notes.push(`Name stays "${existing.name}".`);

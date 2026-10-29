@@ -1,8 +1,8 @@
 // Small talk, help, navigation (menu, more, repeat) and the fun side: jokes,
 // facts, stories, a calculator, compliments and polite handling of rude or
 // off-topic messages.
-import { FACTS, JOKES, STORIES } from "../content.js";
-import { formatNumber } from "../math.js";
+import { FACTS, JOKES, STORIES } from "../engine/content.js";
+import { formatNumber } from "../engine/math.js";
 
 function partOfDay(now) {
   const h = new Date(now).getHours();

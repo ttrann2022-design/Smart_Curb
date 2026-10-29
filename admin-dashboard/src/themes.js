@@ -21,22 +21,26 @@ export const THEME_CACHE_KEY = "sws-theme";
 const FADE_MS = 400;
 let fadeTimer = null;
 
-// Sets data-theme on <html> for the staff dashboard. Switching from one theme to
-// another gives #root a short opacity fade (none with reduced motion, see index.css).
-export function applyTheme(id) {
+// Sets data-theme on <html> for the staff dashboard (the company console passes its
+// own cacheKey). Switching from one theme to another gives #root a short opacity
+// fade (none with reduced motion, see index.css). Returns false if the browser
+// wouldn't store the choice.
+export function applyTheme(id, cacheKey = THEME_CACHE_KEY) {
   const root = document.documentElement;
   const next = normalizeTheme(id);
-  try { localStorage.setItem(THEME_CACHE_KEY, next); } catch { /* private window: the next load just isn't pre-themed */ }
-  if (root.getAttribute("data-theme") === next) return;
+  let stored = true;
+  try { localStorage.setItem(cacheKey, next); } catch { stored = false; /* private window: the next load just isn't pre-themed */ }
+  if (root.getAttribute("data-theme") === next) return stored;
   const switching = root.hasAttribute("data-theme");
   root.setAttribute("data-theme", next);
   syncThemeColor();
-  if (!switching) return;
+  if (!switching) return stored;
   root.classList.remove("sws-theme-fade");
   void root.offsetWidth; // restart the animation if themes change in quick succession
   root.classList.add("sws-theme-fade");
   clearTimeout(fadeTimer);
   fadeTimer = setTimeout(() => root.classList.remove("sws-theme-fade"), FADE_MS);
+  return stored;
 }
 
 // Public pages (landing, sign-in, the lot sign) always use the default look.
@@ -46,7 +50,7 @@ export function clearTheme() {
 }
 
 // The browser chrome colour on phones follows the page background.
-function syncThemeColor() {
+export function syncThemeColor() {
   const meta = document.querySelector('meta[name="theme-color"]');
   const bg = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim();
   if (meta && bg) meta.setAttribute("content", bg);

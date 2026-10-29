@@ -37,6 +37,34 @@ export function statusKey(u) {
 
 export const STATUS_LABEL = { open: "Open", occupied: "Occupied", offline: "Offline" };
 
+// A lot's numbers, from its curbs (units whose lot is the lot's ID). Every page,
+// the console and both Assistants count with this, so they always agree:
+//   capacity  curbs that aren't offline
+//   free      capacity curbs that report free
+//   occupied  capacity curbs that report a car
+//   offline   curbs that aren't reporting: counted in neither of the above
+//   pctFull   occupied / capacity as a whole percent, or null with no capacity
+// lots/<id>/totalSpots and openSpots are not used: capacity comes from the curbs.
+export function lotCounts(units) {
+  const counts = { curbs: 0, capacity: 0, free: 0, occupied: 0, offline: 0, pctFull: null };
+  for (const u of units) {
+    counts.curbs += 1;
+    if (!u?.online) counts.offline += 1;
+    else if (u.occupied) counts.occupied += 1;
+    else counts.free += 1;
+  }
+  counts.capacity = counts.free + counts.occupied;
+  if (counts.capacity) counts.pctFull = Math.round((counts.occupied / counts.capacity) * 100);
+  return counts;
+}
+
+// "3 free of 4", or why there's no count: no curbs at all, or none reporting.
+export function freeText(counts) {
+  if (!counts.curbs) return "No curbs yet";
+  if (!counts.capacity) return "No curbs reporting";
+  return `${counts.free} free of ${counts.capacity}`;
+}
+
 // Overview lot plans say "free" for an open spot.
 export const STALL_WORD = { open: "Free", occupied: "Occupied", offline: "Offline" };
 

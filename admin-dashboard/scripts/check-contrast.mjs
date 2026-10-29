@@ -9,6 +9,8 @@
 //     4.5:1 where used as text (free counts, attention text)
 //   - message tones (success, error, warning) and Simulation colours (4.5:1)
 //   - small labels listed in LABELS, using the colour their rule in index.css sets (4.5:1)
+//   - the company console's text, badges and chips (CONSOLE_RULES, read from
+//     src/console/console.css), and that its curb status marks are inset or ringed on Paper
 // Status colours are fixed on :root and may not be overridden by any theme. A theme
 // whose own surfaces can't carry them (Paper) declares dark "status insets" with
 // [data-theme="x"] :is(...), and the status checks run against those instead.
@@ -26,6 +28,60 @@ const LABELS = [
   { selector: ".lp-readout-k", name: "lot plan Last change", surfaces: ["--bg", "--panel", "--panel-2", "--card"], inset: true },
   { selector: ".un-meta", name: "units count", surfaces: ["--bg", "--panel", "--panel-2", "--card"], inset: true },
 ];
+// The company console (src/console/console.css) uses the same themes. Each rule
+// below is read from that file: its colour is checked on its own background if it
+// sets one, otherwise on the surfaces listed. Swapping a token for a fainter one fails.
+const CONSOLE_CSS = new URL("../src/console/console.css", import.meta.url);
+const PANELS = ["--panel", "--panel-2", "--card"];
+const PAGE = ["--bg", ...PANELS];
+const CONSOLE_RULES = [
+  // Text
+  { selector: ".cn-dim", surfaces: PAGE },
+  { selector: ".cn-warn", surfaces: PAGE },
+  { selector: ".cn-issue-off", surfaces: PANELS },
+  { selector: ".cn-k", surfaces: PANELS },
+  { selector: ".cn-cc-type", surfaces: ["--panel"] },
+  { selector: ".cn-cc-foot", surfaces: ["--panel"] },
+  { selector: ".cn-hero-line", surfaces: ["--bg"] },
+  { selector: ".cn-hero-facts", surfaces: ["--bg"] },
+  { selector: ".cn-pipe-s", surfaces: ["--panel"] },
+  { selector: ".cn-health.is-empty", surfaces: PANELS },
+  { selector: ".cn-health-key", surfaces: PANELS },
+  { selector: ".cn-lot-meta", surfaces: ["--panel-2"] },
+  { selector: ".cn-lot-empty", surfaces: PAGE },
+  { selector: ".cn-empty-text", surfaces: ["--panel"] },
+  { selector: ".rq-when", surfaces: ["--panel"] },
+  { selector: ".rq-meta", surfaces: ["--panel"] },
+  { selector: ".rq-msg", surfaces: [] },
+  { selector: ".rq-msg.is-empty", surfaces: ["--panel"] },
+  { selector: ".rq-seg-opt", surfaces: ["--bg"] },
+  { selector: ".cn-more > summary", surfaces: PANELS },
+  // Badges, chips and tinted marks (colour on their own background)
+  { selector: ".cn-status.is-prospect" },
+  { selector: ".cn-status.is-active" },
+  { selector: ".cn-status.is-paused" },
+  { selector: ".cn-call.is-off" },
+  { selector: ".cn-call.is-low" },
+  { selector: ".cn-call.is-ok" },
+  { selector: ".rq-badge.is-won" },
+  { selector: ".rq-badge.is-contacted" },
+  { selector: ".rq-badge.is-closed" },
+  { selector: ".im-badge.is-new" },
+  { selector: ".im-badge.is-update" },
+  { selector: ".im-badge.is-error" },
+  { selector: ".im-badge.is-plain" },
+  { selector: ".sws-nav-badge.is-count" },
+  { selector: ".cn-sim-badge" },
+  { selector: ".cn-empty-icon" },
+  { selector: ".cn-empty.is-ok .cn-empty-icon" },
+  { selector: ".rq-seg-opt.is-new:has(input:checked)" },
+  // A highlighted curb row: body text on the selection tint.
+  { selector: ".cn-curb.is-sel", fg: "--text" },
+];
+// Console parts that draw curb status in the fixed colours. Paper must either turn
+// them into a dark status inset (themes.css) or ring them with --status-ring (console.css).
+const CONSOLE_STATUS_INSETS = [".cn-health-bar", ".cn-dots"];
+const CONSOLE_STATUS_RINGED = [".cn-dot"];
 const STATUS = ["--free", "--occupied", "--attention", "--offline", "--offline-mark"];
 const SURFACES = ["--bg", "--side", "--panel", "--panel-2", "--card"];
 const DATA_SURFACES = ["--bg", "--panel", "--panel-2", "--card"];
@@ -55,7 +111,7 @@ export function contrast(a, b) {
 }
 
 // Every check for one theme: [group, fgToken, bgToken, minimum, tokens to read from].
-function checksFor(theme, tokens, inset, labels = []) {
+function checksFor(theme, tokens, inset, labels = [], consoleRules = []) {
   const out = [];
   const add = (group, fg, bgs, min, t = tokens) => bgs.forEach((bg) => out.push({ group, fg, bg, min, t }));
 
@@ -93,7 +149,48 @@ function checksFor(theme, tokens, inset, labels = []) {
 
   for (const l of labels) add("Labels", l.token, l.surfaces, 4.5, l.inset && inset ? inset : tokens);
 
-  return out.map((c) => ({ ...c, theme, ratio: contrast(c.t[c.fg], c.t[c.bg]) }));
+  for (const r of consoleRules) add(r.own ? "Console badges" : "Console text", r.fg, r.surfaces, 4.5);
+
+  return out.map((c) => ({ ...c, theme, ratio: contrast(hex(c.t, c.fg), hex(c.t, c.bg)) }));
+}
+
+// A token's colour, following aliases such as --nav-active-bg: var(--brand-bg).
+function hex(tokens, name) {
+  let value = tokens[name];
+  for (let i = 0; i < 5 && /^var\(/.test(value || ""); i++) value = tokens[value.slice(4, -1).trim()];
+  return value;
+}
+
+// Every rule in a stylesheet as { selectors, body }, comments removed. Rules inside
+// @media come after the base rule, so the first match is the base one.
+function rules(css) {
+  css = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  return [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([, sel, body]) => ({ selectors: sel.split(",").map((x) => x.trim().replace(/\s+/g, " ")), body }));
+}
+
+// The console rules to check, each with the colour and background its rule in
+// console.css sets, plus the structural rules for curb status on Paper.
+function consoleChecks(consoleCss, themesCss, problems) {
+  const all = rules(consoleCss);
+  const checks = CONSOLE_RULES.flatMap((c) => {
+    const rule = all.find((r) => r.selectors.includes(c.selector));
+    if (!rule) { problems.push(`console.css has no "${c.selector}" rule.`); return []; }
+    const fg = c.fg || /(?<![-\w])color:\s*var\((--[\w-]+)\)/.exec(rule.body)?.[1];
+    const bg = /(?<![-\w])background(?:-color)?:\s*var\((--[\w-]+)\)/.exec(rule.body)?.[1];
+    if (!fg) { problems.push(`console.css "${c.selector}" has no "color: var(--…)".`); return []; }
+    const surfaces = bg ? [bg] : c.surfaces || [];
+    if (!surfaces.length) { problems.push(`console.css "${c.selector}" sets no background and the check lists no surfaces.`); return []; }
+    return [{ selector: c.selector, fg, surfaces, own: !!bg && !c.surfaces }];
+  });
+  const insetList = /\[data-theme="paper"\] :is\(([^)]*)\)/.exec(themesCss.replace(/\/\*[\s\S]*?\*\//g, ""))?.[1].split(",").map((x) => x.trim()) || [];
+  for (const sel of CONSOLE_STATUS_INSETS) {
+    if (!insetList.includes(sel)) problems.push(`${sel} draws curb status but isn't one of Paper's status insets in themes.css.`);
+  }
+  for (const sel of CONSOLE_STATUS_RINGED) {
+    const ringed = all.some((r) => r.selectors.some((x) => x.includes('[data-theme="paper"]') && x.endsWith(sel)) && r.body.includes("var(--status-ring)"));
+    if (!ringed) problems.push(`${sel} draws curb status on light rows but has no Paper --status-ring rule in console.css.`);
+  }
+  return checks;
 }
 
 // The colour token each label's base rule uses in index.css.
@@ -108,11 +205,13 @@ function labelTokens(appCss, problems) {
   });
 }
 
-export function checkContrast(css = readFileSync(CSS, "utf8"), appCss = readFileSync(APP_CSS, "utf8")) {
+export function checkContrast(css = readFileSync(CSS, "utf8"), appCss = readFileSync(APP_CSS, "utf8"), consoleCss = readFileSync(CONSOLE_CSS, "utf8")) {
   const blocks = parse(css);
   const problems = [];
   const labels = labelTokens(appCss, problems);
+  const consoleRules = consoleChecks(consoleCss, css, problems);
   const fixed = Object.assign({}, ...blocks.filter((b) => b.selector === ":root").map((b) => b.tokens));
+  const aliases = blocks.find((b) => b.selector === ":root, [data-theme]")?.tokens || {};
   const lime = blocks.find((b) => b.selector.split(",").map((s) => s.trim()).includes('[data-theme="lime"]'));
   if (!lime) problems.push("themes.css has no lime block.");
 
@@ -126,10 +225,10 @@ export function checkContrast(css = readFileSync(CSS, "utf8"), appCss = readFile
   for (const theme of THEME_IDS) {
     const own = theme === "lime" ? lime : blocks.find((b) => b.selector === `[data-theme="${theme}"]`);
     if (!own) { problems.push(`themes.css has no [data-theme="${theme}"] block.`); continue; }
-    const tokens = { ...fixed, ...lime.tokens, ...own.tokens };
+    const tokens = { ...fixed, ...aliases, ...lime.tokens, ...own.tokens };
     const insetBlock = blocks.find((b) => b.selector.startsWith(`[data-theme="${theme}"] :is(`));
     const inset = insetBlock ? { ...tokens, ...insetBlock.tokens } : null;
-    results.push(...checksFor(theme, tokens, inset, labels));
+    results.push(...checksFor(theme, tokens, inset, labels, consoleRules));
   }
   const failures = results.filter((r) => r.ratio < r.min);
   return { results, failures, problems };

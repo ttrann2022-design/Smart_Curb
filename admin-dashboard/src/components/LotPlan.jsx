@@ -1,7 +1,7 @@
 import { useId, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useFlash } from "../motion";
-import { statusKey, hasBattery, isLowBattery, formatAgo, STALL_WORD, ROOMY_MAX, planLayout } from "../units";
+import { statusKey, hasBattery, isLowBattery, formatAgo, STALL_WORD, ROOMY_MAX, planLayout, lotCounts, freeText } from "../units";
 
 // Top-down plan of one lot: every curb is a stall block, laid out in rows that
 // face each other across a drive aisle. Free = lime, occupied = red,
@@ -78,7 +78,7 @@ function LotPlan({ name, lotId, units, alerts, now, size = "large", columns, ind
   const compact = size === "compact";
   const roomy = !compact && n <= ROOMY_MAX;
   const to = lotId ? `/lots?lot=${encodeURIComponent(lotId)}` : "/units";
-  const free = units.filter(([, u]) => statusKey(u) === "open").length;
+  const counts = lotCounts(units.map(([, u]) => u));
   const focusIndex = Math.min(cursor, n - 1);
 
   const onKeyDown = (e, i) => {
@@ -143,8 +143,10 @@ function LotPlan({ name, lotId, units, alerts, now, size = "large", columns, ind
           ) : (
             <span className="lp-name">{name}</span>
           )}
+          {/* Free of the curbs that report (lotCounts); offline curbs are counted on their own. */}
           <span className="lp-count">
-            <span className="lp-free-n">{free}</span> free of {n}
+            {counts.capacity ? <><span className="lp-free-n">{counts.free}</span> free of {counts.capacity}</> : freeText(counts)}
+            {counts.offline > 0 && counts.capacity > 0 && <> · {counts.offline} offline</>}
           </span>
         </header>
         <div
