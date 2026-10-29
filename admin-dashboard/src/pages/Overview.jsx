@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { Link, useOutletContext } from "react-router-dom";
 import { ref, onValue } from "firebase/database";
 import { database } from "../firebase";
@@ -57,6 +57,35 @@ function HardwareCard({ unit, lots, alerts, now }) {
         {lot && <div><dt className="ov-k">Lot</dt><dd><Link to={`/lots?lot=${encodeURIComponent(unit.lot)}`} className="sws-link">{lot.name} <span aria-hidden="true">→</span></Link></dd></div>}
       </dl>
     </section>
+  );
+}
+
+// Lots with no curbs yet. Up to EMPTY_LOTS_SHOWN are listed; more collapse into
+// "N lots have no curbs yet" with a Show/Hide button that controls the list.
+const EMPTY_LOTS_SHOWN = 8;
+function EmptyLots({ lots }) {
+  const [open, setOpen] = useState(false);
+  const listId = useId();
+  const many = lots.length > EMPTY_LOTS_SHOWN;
+  const sorted = [...lots].sort(([, a], [, b]) => (a.name || "").localeCompare(b.name || "", undefined, { numeric: true }));
+  return (
+    <div className="ov-empty-lots">
+      {many ? (
+        <div className="ov-empty-head">
+          <span className="ov-k">{lots.length} lots have no curbs yet</span>
+          <button type="button" className="ov-empty-toggle" aria-expanded={open} aria-controls={listId} onClick={() => setOpen((o) => !o)}>
+            {open ? "Hide" : "Show"}<span className="sws-sr-only"> the {lots.length} lots with no curbs</span>
+          </button>
+        </div>
+      ) : (
+        <span className="ov-k">No curbs yet</span>
+      )}
+      <ul id={listId} hidden={many && !open}>
+        {sorted.map(([id, lot]) => (
+          <li key={id}><Link to={`/lots?lot=${encodeURIComponent(id)}`} className="sws-link">{lot.name}</Link></li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -254,16 +283,7 @@ function Overview() {
                     {unassigned.length > 0 && (
                       <LotPlan index={plannedLots.length} columns={maxCols} name="Unassigned curbs" units={unassigned} alerts={alertSettings} now={now} />
                     )}
-                    {emptyLots.length > 0 && (
-                      <div className="ov-empty-lots">
-                        <span className="ov-k">No curbs yet</span>
-                        <ul>
-                          {emptyLots.map(([id, lot]) => (
-                            <li key={id}><Link to={`/lots?lot=${encodeURIComponent(id)}`} className="sws-link">{lot.name}</Link></li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
+                    {emptyLots.length > 0 && <EmptyLots lots={emptyLots} />}
                   </div>
                 )}
 
