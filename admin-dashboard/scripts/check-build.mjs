@@ -128,6 +128,8 @@ if (expected === "console") {
   if (ownAssistant.length) fail(`the ${expected} bundle is missing the dashboard Assistant's text: ${ownAssistant.map((m) => `"${m}"`).join(", ")}. If you changed that text, update DASHBOARD_ASSISTANT_MARKERS in scripts/check-build.mjs.`);
   // The Assistant ships in this bundle: its phrasing tests take well under a second.
   runTests("./test-assistant.mjs", "the Assistant's", "test:assistant");
+  // Customer scoping decides which customer's lots and curbs each account sees.
+  runTests("./test-scope.mjs", "the customer scoping", "test:scope");
 }
 
 if (!report(checkContrast())) {
