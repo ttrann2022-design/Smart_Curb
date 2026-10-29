@@ -1,10 +1,9 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useOutletContext } from "react-router-dom";
 import { PageHeader, Card, Chips, Button, Notice } from "../components/ui";
-import Icon from "../components/Icon";
 import { sortedSites, writeLotImport } from "./data";
 import { BATCH_SIZE, COLUMNS, IMPORT_LIMITS, planImport, runImport } from "./lotImport";
-import { LoadError, LoadingCard } from "./parts";
+import { ConsoleEmpty, LoadError, LoadingCard } from "./parts";
 
 const STATUS_LABEL = { new: "New", update: "Update", error: "Error" };
 const OUTCOME = {
@@ -150,7 +149,7 @@ function ImportLots() {
     <>
       {head}
       <div className="sws-page-body">
-        <Card title="Paste CSV" subtitle="Nothing is written until you press Import.">
+        <Card title="Paste CSV" subtitle="Nothing is written until you press Import." className="im-paste">
           <div className="cn-field">
             <label htmlFor="im-csv" className="sws-field-label">CSV text</label>
             <textarea
@@ -160,9 +159,12 @@ function ImportLots() {
               placeholder={`${COLUMNS.join(",")}\nnorthgarage,North Garage,${firstSite || "Customer name"},120,40.7128,-74.006`}
             />
             <div id="im-csv-hint" className="sws-field-hint im-hint">
-              First line:<code translate="no" className="im-cols">{COLUMNS.join(", ")}</code>IDs use lowercase letters and numbers; customer is a customer's exact name;
-              totalSpots is 1 to {IMPORT_LIMITS.maxSpots.toLocaleString()}; give latitude and longitude together or leave both empty.
-              Existing lots only get totalSpots and location; their name and customer never change, and nothing is deleted.
+              First line:<code translate="no" className="im-cols">{COLUMNS.join(", ")}</code>
+              <ul className="im-rules">
+                <li>IDs use lowercase letters and numbers; customer is a customer's exact name.</li>
+                <li>totalSpots is 1 to {IMPORT_LIMITS.maxSpots.toLocaleString()}; give latitude and longitude together or leave both empty.</li>
+                <li>Existing lots only get totalSpots and location; their name and customer never change, and nothing is deleted.</li>
+              </ul>
             </div>
           </div>
         </Card>
@@ -196,7 +198,9 @@ function ImportLots() {
         )}
 
         {!rows.length && !plan?.error && (
-          <p className="sws-note"><Icon name="info" size={13} /> Paste rows above to see a preview. Up to {IMPORT_LIMITS.rows.toLocaleString()} rows at a time.</p>
+          <ConsoleEmpty icon="lots" title="Paste rows to see a preview">
+            Each row is marked new, update or error before anything is written. Up to {IMPORT_LIMITS.rows.toLocaleString()} rows at a time.
+          </ConsoleEmpty>
         )}
       </div>
     </>
