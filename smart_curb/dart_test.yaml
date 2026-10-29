@@ -1,0 +1,6 @@
+# Test tags. "online" tests reach the real services (Firebase, the OSRM
+# road router, Gemini). Skip them when offline with:
+#   flutter test --exclude-tags online
+tags:
+  online:
+    timeout: 60s
