@@ -3,7 +3,7 @@ import { Link, useOutletContext } from "react-router-dom";
 import { ref, onValue } from "firebase/database";
 import { database } from "../firebase";
 import { dataPath } from "../dataMode";
-import { useAlertSettings, useNow, unitIssues, formatAgo, formatExact, statusKey, hasBattery, isLowBattery, STALL_WORD, ROOMY_MAX, planLayout } from "../units";
+import { useAlertSettings, useNow, unitIssues, formatAgo, formatExact, statusKey, hasBattery, isLowBattery, STALL_WORD, ROOMY_MAX, planLayout, lotCounts } from "../units";
 import LotPlan, { StallMark } from "../components/LotPlan";
 import { PageHeader, Notice, Button } from "../components/ui";
 
@@ -159,11 +159,10 @@ function Overview() {
   // Widest row on the page; every lot sizes its stalls from it so they all match.
   const maxCols = Math.max(1, planLayout(unassigned.length).perRow, ...plannedLots.map(([id]) => planLayout(unitsByLot[id].length).perRow));
 
-  const total = entries.length;
-  const reporting = entries.filter(([, u]) => u.online).length;
-  const offline = total - reporting;
-  const free = entries.filter(([, u]) => u.online && !u.occupied).length;
-  const occupiedPct = reporting ? Math.round(((reporting - free) / reporting) * 100) : 0;
+  // Capacity is the curbs that report; offline ones count in neither free nor occupied.
+  const counts = lotCounts(entries.map(([, u]) => u));
+  const { curbs: total, free, offline } = counts;
+  const occupiedPct = counts.pctFull ?? 0;
   const alerts = entries
     .map(([id, u]) => [id, u, unitIssues(u, alertSettings, now)[0]])
     .filter(([, , issue]) => issue)

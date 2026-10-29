@@ -178,13 +178,33 @@ test("status answers name lots and curbs and say how fresh the data is", () => {
   const offline = respond("which curbs are offline", ctx()).text;
   assert.match(offline, /C-003 in Lot 6/);
   assert.match(offline, /From live data · latest reading 1 min ago\./);
-  assert.match(respond("how many spots are free", ctx()).text, /3 of 7|3 free spots out of 7|3 of 7 spots/);
+  // Capacity is the curbs that report: C-003 in Lot 6 is offline, so 6, not 7.
+  assert.match(respond("how many spots are free", ctx()).text, /3 of 6|3 free spots out of 6|3 of 6 spots/);
   assert.match(respond("is lot 14 full", ctx()).text, /Lot 14/);
   assert.match(respond("status of c41", ctx()).text, /C-041[\s\S]*Lot 14[\s\S]*Status: occupied[\s\S]*LED: red/);
   assert.match(respond("C-999", ctx()).text, /C-999/);
   for (const q of ["how many spots are free", "which curbs are offline", "status of C-041", "what needs attention", "give me a summary"]) {
     assert.match(respond(q, ctx({ mode: "sim" })).text, /From simulated data, not the real curbs/, q);
   }
+});
+
+test("lot capacity is the curbs that report: offline curbs are never in \"of N\"", () => {
+  const total = respond("how many spots are free", ctx()).text;
+  assert.match(total, /• Lot 6: 1 of 2 \(1 offline\)/);
+  assert.doesNotMatch(total, /Lot 6: \d+ of 3/);
+  assert.match(respond("free spots in lot 6", ctx()).text, /1 (free spot )?(out )?of 2|1 free spot right now/);
+  assert.doesNotMatch(respond("free spots in lot 6", ctx()).text, /of 3/);
+  // A lot with no curbs says so; one whose curbs are all offline says none report.
+  const c = ctx();
+  const lots = { ...c.lots, lot20: { name: "Lot 20" }, lot21: { name: "Lot 21" } };
+  const units = { ...c.units, "C-201": { lot: "lot21", online: false, occupied: false, lastUpdated: c.now - 60000 } };
+  const bare = respond("how many spots are free", { ...c, lots, units }).text;
+  assert.match(bare, /• Lot 20: no curbs yet/);
+  assert.match(bare, /• Lot 21: no curbs reporting/);
+  assert.doesNotMatch(bare, /Lot 2[01]: 0 of 0/);
+  assert.match(respond("free spots in lot 20", { ...c, lots, units }).text, /Lot 20 has no curbs yet|No curbs yet in Lot 20/);
+  assert.match(respond("free spots in lot 21", { ...c, lots, units }).text, /reporting|offline/);
+  assert.match(respond("free spots in each lot", { ...c, lots, units }).text, /• Lot 20: no curbs yet/);
 });
 
 test("a lot that doesn't exist gets \"couldn't find\" and the real lots, not the site total", () => {
