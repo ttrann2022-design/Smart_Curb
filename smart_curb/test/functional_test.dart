@@ -8,16 +8,14 @@ import 'package:maplibre_gl/maplibre_gl.dart';
 import 'package:smart_curb/assistant.dart';
 import 'package:smart_curb/main.dart';
 
-import 'assistant_test.dart' show FakeData;
+import 'assistant_test.dart' show FakeData, openLots, testLots, useTestLots;
 import 'gemini_chat_test.dart' show FakeGoogle, ok, limited;
 import 'performance_test.dart' show perf;
 
 /// Lot 14's curbs as the database reports them: C-095 taken, C-077 open,
 /// C-001 offline.
 Map<String, Map<String, dynamic>> liveLots({bool c077Taken = false}) =>
-    parseLiveLots(fauBoca, {
-      'lot14': {'name': 'Lot 14'},
-    }, {
+    parseLiveLots(fauBoca, testLots, {
       'C-095': {'lot': 'lot14', 'occupied': true, 'online': true},
       'C-077': {'lot': 'lot14', 'occupied': c077Taken, 'online': true},
       'C-001': {'lot': 'lot14', 'occupied': false, 'online': false},
@@ -48,6 +46,7 @@ double mismatches(Map<String, dynamic>? actual, Map<String, Object?> expected) =
     expected.keys.where((k) => actual?[k] != expected[k]).length.toDouble();
 
 void main() {
+  useTestLots();
   TestWidgetsFlutterBinding.ensureInitialized();
   setUpAll(() async {
     for (final p in Place.all) {
@@ -181,6 +180,27 @@ void main() {
       expect(lots['lot06']!['sensors'], isFalse);
     });
 
+    test('each place shows its own lots from the database, where they are', () {
+      var wrongSite = 0, misplaced = 0, count = 0;
+      for (final p in Place.all) {
+        for (final e in parseLiveLots(p, testLots, null).entries) {
+          count++;
+          final db = testLots[e.key] as Map;
+          if (db['siteId'] != p.siteId) wrongSite++;
+          final at = LatLng(db['latitude'], db['longitude']);
+          if (Geo.meters(e.value['position'], at) > 0.01) misplaced++;
+        }
+      }
+      perf('Correctness', "Lots shown at another site's map", wrongSite.toDouble(), 0,
+          'of $count', 'lots matched by siteId');
+      perf('Accuracy', 'Lots away from their database position', misplaced.toDouble(), 0,
+          'of $count', 'positions from lots/');
+      expect(count, (testLots.values).where((l) => l['siteId'] != null).length);
+      // Names exactly as the database has them.
+      expect(staticLots(browardMall)['broward1']!['name'], 'Broward Mall - Parking Lot 1');
+      expect(staticLots(fauBoca)['lot14']!['name'], 'Lot 14 — Blue Permit');
+    });
+
     test('each curb\'s live status is read correctly', () async {
       final bot = SmartCurbAssistant(FakeData());
       var wrong = 0;
@@ -234,18 +254,43 @@ void main() {
       expect(best.lotId, 'lot14');
     });
 
-    test('when that spot is taken, the next best lot is chosen instead', () {
-      final best = bestParkingFor(fauBoca, curbBuilding(), liveLots(c077Taken: true))!;
-      perf('Correctness', 'Sent to a taken spot', best.unitId == 'C-077' ? 1 : 0, 0, '',
-          'full spots skipped');
-      expect(best.lotId, isNot('lot14'));
+    test('a full lot is skipped for the closest lot with a free space', () {
+      // Lot 14 full (2/2); Lot 12 has a free curb, farther away.
+      final lots = parseLiveLots(fauBoca, testLots, {
+        'C-095': {'lot': 'lot14', 'occupied': true, 'online': true},
+        'C-077': {'lot': 'lot14', 'occupied': true, 'online': true},
+        'C-500': {'lot': 'lot12', 'occupied': false, 'online': true},
+      });
+      final best = bestParkingFor(fauBoca, curbBuilding(), lots)!;
+      perf('Correctness', 'Sent to a full lot', best.lotId == 'lot14' ? 1 : 0, 0, '',
+          'full lots skipped');
+      expect(best.lotId, 'lot12');
+    });
+
+    test('lots without sensors are never recommended where curbs report', () {
+      var sent = 0;
+      // Lot 14 open: every building goes there, not to a closer plain lot.
+      for (final b in fauBoca.buildings) {
+        final best = bestParkingFor(fauBoca, b, liveLots());
+        if (liveLots()[best!.lotId]!['sensors'] == false) sent++;
+      }
+      // Lot 14 full too, and every mall building (no sensors there yet):
+      // nothing is recommended, and the map says no available parking.
+      final none = [
+        bestParkingFor(fauBoca, curbBuilding(), liveLots(c077Taken: true)),
+        for (final b in browardMall.buildings)
+          bestParkingFor(browardMall, b, parseLiveLots(browardMall, testLots, null)),
+      ];
+      sent += none.whereType<PathResult>().length;
+      perf('Correctness', 'Sent to a full lot or one without sensors', sent.toDouble(), 0,
+          'of ${fauBoca.buildings.length + none.length}', 'only lots with a counted space');
     });
 
     test('every building gets a reachable lot with a sensible walk', () {
       var unreachable = 0;
       var worstDetour = 0.0;
       for (final p in Place.all) {
-        final lots = staticLots(p);
+        final lots = openLots(p);
         for (final b in p.buildings) {
           final best = bestParkingFor(p, b, lots);
           if (best == null) {
@@ -328,7 +373,7 @@ void main() {
         // time the lookup, not A*.
         final fresh = CampusPathfinder(p.pathfinder.asset);
         await fresh.load();
-        final lots = staticLots(p);
+        final lots = openLots(p);
         final sw = Stopwatch()..start();
         var worst = Duration.zero;
         for (final b in p.buildings) {
@@ -351,7 +396,7 @@ void main() {
       final times = <double>[];
       var misunderstood = 0;
       for (final (ask, answer) in [
-        ('is lot 14 full?', 'Lot 14 has 1 of 2'),
+        ('is lot 14 full?', 'Lot 14 — Blue Permit has 1 of 2'),
         ('parking for the gym', 'RC-91'),
         ('how do I choose a building?', 'Search for destination'),
         ('where should I park for ED-47', 'ED-47'),

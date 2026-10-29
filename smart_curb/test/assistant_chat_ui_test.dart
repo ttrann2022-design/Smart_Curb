@@ -4,12 +4,13 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:smart_curb/assistant.dart';
 import 'package:smart_curb/gemini_chat.dart';
 
-import 'assistant_test.dart' show FakeData;
+import 'assistant_test.dart' show FakeData, useTestLots;
 
 /// The screen's behaviour, without the language model (tests have no network).
 GeminiChat get noAi => GeminiChat(apiKey: '');
 
 void main() {
+  useTestLots();
   setUpAll(() => GoogleFonts.config.allowRuntimeFetching = false);
 
   Future<void> say(WidgetTester tester, String text) async {

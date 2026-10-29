@@ -157,8 +157,10 @@ class CampusPathfinder {
     LatLng buildingPos, {
     String? unitId,
   }) {
-    final key =
-        '$lotId|${unitId ?? ''}|${buildingPos.latitude},${buildingPos.longitude}';
+    // Keyed by where the walk starts too: a lot moved in `lots/` gets a
+    // fresh route, not the one from its old spot.
+    final key = '$lotId|${unitId ?? ''}|${from.latitude},${from.longitude}'
+        '|${buildingPos.latitude},${buildingPos.longitude}';
     return _cache.putIfAbsent(key, () {
       final path = findPath(from, buildingPos);
       return PathResult(
@@ -170,10 +172,10 @@ class CampusPathfinder {
     });
   }
 
-  /// Closest non-full lot by real walking distance. Lots whose sensors
-  /// report nothing (capacity 0) are treated as unknown and skipped; lots
-  /// with no sensors at all (`sensors: false`, see [Place.liveParking])
-  /// can't be counted, so they always qualify.
+  /// Closest lot with a free space, by real walking distance. Full lots,
+  /// lots whose sensors report nothing (capacity 0), and lots with no
+  /// sensors at all (`sensors: false`, nobody can say they have space) are
+  /// skipped. Null when no lot is left: there is no available parking.
   PathResult? findBestAvailableRoute({
     required LatLng buildingPos,
     required Map<String, Map<String, dynamic>> lots,
@@ -182,8 +184,8 @@ class CampusPathfinder {
     for (final entry in lots.entries) {
       final occupied = (entry.value['occupied'] as num?)?.toInt() ?? 0;
       final capacity = (entry.value['capacity'] as num?)?.toInt() ?? 0;
-      final sensors = entry.value['sensors'] != false;
-      if (sensors && (capacity <= 0 || occupied >= capacity)) continue;
+      if (entry.value['sensors'] == false) continue;
+      if (capacity <= 0 || occupied >= capacity) continue;
 
       final lotPos = entry.value['position'] as LatLng?;
       if (lotPos == null) continue;

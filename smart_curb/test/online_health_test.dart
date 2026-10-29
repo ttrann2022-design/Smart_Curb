@@ -12,7 +12,10 @@ import 'package:smart_curb/firebase_options.dart';
 import 'package:smart_curb/gemini_chat.dart';
 import 'package:smart_curb/main.dart';
 
+import 'assistant_test.dart' show useTestLots;
+
 void main() {
+  useTestLots();
   TestWidgetsFlutterBinding.ensureInitialized();
   // Tests block the network by default; these checks need it (only these:
   // it's put back afterwards, for when all tests run together).
@@ -33,6 +36,28 @@ void main() {
         reason: 'Firebase answered ${res.statusCode}: ${res.body}');
     // ignore: avoid_print
     print('Firebase database: HTTP ${res.statusCode}');
+  });
+
+  test('every place gets its parking lots from the database', () async {
+    final url = DefaultFirebaseOptions.android.databaseURL!;
+    final res = await http
+        .get(Uri.parse('$url/lots.json'))
+        .timeout(const Duration(seconds: 15));
+    expect(res.statusCode, 200, reason: 'lots/ answered ${res.statusCode}');
+    final raw = jsonDecode(res.body);
+    final counts = <String>[];
+    for (final p in Place.all) {
+      p.applyLots(raw);
+      expect(p.lotPositions, isNotEmpty,
+          reason: '${p.nickname}: no lots with siteId ${p.siteId}');
+      for (final e in p.lotPositions.entries) {
+        expect(p.contains(e.value), isTrue,
+            reason: '${e.key} is outside ${p.nickname}');
+      }
+      counts.add('${p.nickname} ${p.lotPositions.length}');
+    }
+    // ignore: avoid_print
+    print('Database lots: ${counts.join(', ')}');
   });
 
   test('OSRM road routing gives a real driving route', () async {

@@ -52,16 +52,21 @@ class Place {
   /// Destinations: tap one on the map or search for it.
   final List<PlaceBuilding> buildings;
 
-  /// Where each parking lot is (lots are not graph nodes; like buildings,
-  /// they are snapped onto the nearest walkway when routing).
-  final Map<String, LatLng> lotPositions;
+  /// This place's customer site in the dashboard (`sites/<siteId>`): its
+  /// parking lots are the ones in `lots/` with this `siteId`.
+  final String siteId;
 
-  /// True: lot occupancy comes live from the curbs in `units/` (names from
-  /// `lots/`). False: no curbs here yet, so the lots in [lotPositions] are
-  /// plain map points named by [lotNames], and the closest one to the
-  /// destination by walking distance is recommended.
+  /// Where each parking lot is, and its name on the map, by lot id: read
+  /// from `lots/` (see [applyLots]), empty until it first arrives. Lots
+  /// are not graph nodes; like buildings, they are snapped onto the
+  /// nearest walkway when routing.
+  final Map<String, LatLng> lotPositions = {};
+  final Map<String, String> lotNames = {};
+
+  /// True: lot occupancy comes live from the curbs in `units/`. False: no
+  /// curbs here yet, so the lots are plain map points, and the closest one
+  /// to the destination by walking distance is recommended.
   final bool liveParking;
-  final Map<String, String> lotNames;
 
   /// Rows of parking spaces with a curb unit in each (see [CurbSpotRow]).
   final List<CurbSpotRow> spotRows;
@@ -87,9 +92,8 @@ class Place {
     required this.ne,
     required this.minZoom,
     required this.buildings,
-    required this.lotPositions,
+    required this.siteId,
     required this.liveParking,
-    this.lotNames = const {},
     this.spotRows = const [],
     required this.pathfinder,
   });
@@ -117,6 +121,51 @@ class Place {
       if (p.id == id) return p;
     }
     return null;
+  }
+
+  /// This place's lots in a raw `lots/` snapshot (those with its
+  /// [siteId] and a position), by lot id.
+  Map<String, Map<String, dynamic>> siteLots(Object? rawLots) => {
+        if (rawLots is Map)
+          for (final e in rawLots.entries)
+            if (e.value is Map &&
+                (e.value as Map)['siteId'] == siteId &&
+                _readLatLng(Map<String, dynamic>.from(e.value as Map)) != null)
+              e.key.toString(): Map<String, dynamic>.from(e.value as Map),
+      };
+
+  /// Takes this place's lots, positions and names from a raw `lots/`
+  /// snapshot. Anything but a map (no data yet, or no connection) keeps
+  /// the lots it already has.
+  void applyLots(Object? rawLots) {
+    if (rawLots is! Map) return;
+    final lots = siteLots(rawLots);
+    lotPositions
+      ..clear()
+      ..addAll({for (final e in lots.entries) e.key: _readLatLng(e.value)!});
+    lotNames
+      ..clear()
+      ..addAll({
+        for (final e in lots.entries)
+          e.key: e.value['name']?.toString() ?? prettyLotName(e.key),
+      });
+  }
+
+  static StreamSubscription<DatabaseEvent>? _lotsSub;
+
+  /// Keeps every place's lots in step with `lots/` while the app runs, so
+  /// a lot the dashboard adds or moves shows up without an update.
+  static void watchLots() {
+    _lotsSub ??= FirebaseDatabase.instance.ref('lots').onValue.listen(
+          (event) => applyLotsToAll(event.snapshot.value),
+          onError: (_) {}, // keeps the lots it has
+        );
+  }
+
+  static void applyLotsToAll(Object? rawLots) {
+    for (final p in all) {
+      p.applyLots(rawLots);
+    }
   }
 }
 

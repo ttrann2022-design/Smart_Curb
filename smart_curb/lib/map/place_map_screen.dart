@@ -1742,19 +1742,21 @@ class _PlaceMapScreenState extends State<PlaceMapScreen>
   bool _gotLots = false;
   bool _gotUnits = false;
 
-  /// Live curb data: every unit in `units/` (each names its lot) and the
-  /// lot names in `lots/`. Recomputed whenever either one changes.
+  /// The place's lots in `lots/` (positions and names) and, where there
+  /// are curbs, every unit in `units/` (each names its lot). Recomputed
+  /// whenever either one changes.
   void _listenToFirebaseParking() {
-    if (!_place.liveParking) {
-      _liveLots = _staticLots(); // nothing live to listen to
-      return;
-    }
     final db = FirebaseDatabase.instance;
-    _unitsSub = db.ref('units').onValue.listen((event) {
-      _rawUnits = event.snapshot.value;
-      _gotUnits = true;
-      _onParkingData();
-    });
+    if (_place.liveParking) {
+      _unitsSub = db.ref('units').onValue.listen((event) {
+        _rawUnits = event.snapshot.value;
+        _gotUnits = true;
+        _onParkingData();
+      });
+    } else {
+      _liveLots = _staticLots(); // the lots known so far, until `lots/` arrives
+      _gotUnits = true; // no curbs to wait for
+    }
     _lotsSub = db.ref('lots').onValue.listen((event) {
       _rawLots = event.snapshot.value;
       _gotLots = true;
@@ -1769,6 +1771,7 @@ class _PlaceMapScreenState extends State<PlaceMapScreen>
     setState(() => _liveLots = lots);
 
     final building = _selectedBuilding;
+    if (_checkParkingOnLoad && building != null) _warnIfNoParking(building);
     // Parked, or nearly at the curb: keep it. A curb that fills up now is
     // almost certainly you pulling into it.
     if (building == null || _arrived || _closeToTargetCurb) {
@@ -2013,6 +2016,7 @@ class _PlaceMapScreenState extends State<PlaceMapScreen>
     _pushOverlays();
     _pushRoute();
     _updateNavigationRoute();
+    _warnIfNoParking(building);
 
     final m = _map;
     if (m == null || _navTracking) return; // already following you
@@ -2032,9 +2036,47 @@ class _PlaceMapScreenState extends State<PlaceMapScreen>
         ));
   }
 
+  /// Set when a building is picked before the lots have loaded: the check
+  /// in [_warnIfNoParking] runs when they arrive.
+  bool _checkParkingOnLoad = false;
+
+  /// Each time a building is picked: when none of its lots has a free
+  /// space (all full, or without sensors to say), tells the user there's
+  /// no available parking right now.
+  void _warnIfNoParking(PlaceBuilding building) {
+    if (_liveLots.isEmpty) {
+      _checkParkingOnLoad = true;
+      return;
+    }
+    _checkParkingOnLoad = false;
+    if (_bestParking(building) != null || _noParkingOpen) return;
+    // Only OK closes it: not a tap outside, nor the back button. The map
+    // is locked meanwhile (see [_noParkingOpen]).
+    setState(() => _noParkingOpen = true);
+    showAppDialog(
+      context: context,
+      barrierDismissible: false,
+      // Full screen: on web the map is a separate browser element, which
+      // would otherwise still get drags and taps through the barrier.
+      builder: (ctx) => PointerInterceptor(
+        child: PopScope(
+          canPop: false,
+          child: _NoParkingDialog(building: building),
+        ),
+      ),
+    ).then((_) {
+      if (mounted) setState(() => _noParkingOpen = false);
+    });
+  }
+
+  /// True while the "no available parking" window is up: the map can't be
+  /// dragged, zoomed, turned or tapped until OK is pressed.
+  bool _noParkingOpen = false;
+
   void _clearDestination() {
     _stopSimulation();
     _routeRequestId++; // cancel any in-flight route request
+    _checkParkingOnLoad = false;
     _searchCtrl.clear();
     setState(() {
       _selectedBuilding = null;
@@ -2054,6 +2096,7 @@ class _PlaceMapScreenState extends State<PlaceMapScreen>
   // ==========================================
 
   void _onMapClick(math.Point<double> point, LatLng latLng) {
+    if (_noParkingOpen) return;
     // A press on one of our buttons/cards also reaches the map on web;
     // ignore that echo so buttons never move the arrow or pick a building.
     if (DateTime.now().difference(_lastOverlayPressAt) <
@@ -2783,8 +2826,12 @@ class _PlaceMapScreenState extends State<PlaceMapScreen>
             _freeRoam ? CameraTargetBounds.unbounded : _cameraBounds,
         minMaxZoomPreference: _freeRoam ? _freeRoamZoom : _campusZoom,
         compassEnabled: false,
-        rotateGesturesEnabled: true,
-        tiltGesturesEnabled: true,
+        // All off while the "no available parking" window is up.
+        scrollGesturesEnabled: !_noParkingOpen,
+        zoomGesturesEnabled: !_noParkingOpen,
+        rotateGesturesEnabled: !_noParkingOpen,
+        tiltGesturesEnabled: !_noParkingOpen,
+        doubleClickZoomEnabled: !_noParkingOpen,
         myLocationEnabled: false,
         trackCameraPosition: true, // needed for onCameraMove
         onCameraMove: _onCameraMove,
@@ -3355,10 +3402,10 @@ class _PlaceMapScreenState extends State<PlaceMapScreen>
       phase = _userPos == null ? 'gps' : (onCampus ? 'on' : 'off');
     } else if (walk == null) {
       title =
-          _liveLots.isEmpty ? 'Loading live parking data...' : 'No open lot';
+          _liveLots.isEmpty ? 'Loading live parking data...' : 'No available parking';
       subtitle = _liveLots.isEmpty
           ? 'Waiting for sensor data'
-          : 'All nearby lots are currently full';
+          : 'Every lot is full or has no sensors';
       phase = 'nolot';
     } else {
       final lot = _liveLots[walk.lotId];
@@ -3685,5 +3732,75 @@ class _PlaceMapScreenState extends State<PlaceMapScreen>
         _updateLotAnchor();
       }
     }
+  }
+}
+
+/// The "no available parking" notice: a square card with the message in
+/// the middle and OK at the bottom (the only way to close it).
+class _NoParkingDialog extends StatelessWidget {
+  final PlaceBuilding building;
+  const _NoParkingDialog({required this.building});
+
+  static const double _side = 300;
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      insetPadding: const EdgeInsets.all(24),
+      child: ConstrainedBox(
+        // Square, but taller if large text needs the room.
+        constraints: const BoxConstraints(
+          maxWidth: _side,
+          minHeight: _side,
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(22, 26, 22, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'OOPS!',
+                textAlign: TextAlign.center,
+                style: mono(
+                  fontSize: 34,
+                  fontWeight: FontWeight.w700,
+                  color: kAccent,
+                  letterSpacing: 2,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'NO AVAILABLE PARKING',
+                textAlign: TextAlign.center,
+                style: mono(fontSize: 15, letterSpacing: 1.2),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'There are no available parking lots for ${building.name} '
+                'at this moment.',
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: kText, fontSize: 14, height: 1.4),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Every lot nearby is full or has no Smart Curb sensors yet. '
+                'Please check again in a few minutes.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: kTextMuted, fontSize: 12.5, height: 1.4),
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                height: 44,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('OK'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }

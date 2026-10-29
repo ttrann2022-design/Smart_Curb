@@ -63,6 +63,8 @@ void main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+  // Each place's parking lots, kept up to date from `lots/`.
+  Place.watchLots();
   // Each place's walking network for A*.
   await Future.wait([for (final p in Place.all) p.pathfinder.load()]);
   runApp(const MyApp());

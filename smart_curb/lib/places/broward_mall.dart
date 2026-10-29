@@ -25,21 +25,10 @@ final Place browardMall = Place(
   ne: const LatLng(26.1250, -80.2470),
   minZoom: 15.0,
   buildings: _browardMallBuildings,
-  // The biggest surface lot on each side of the mall (OpenStreetMap),
-  // numbered clockwise from the north.
-  lotPositions: const {
-    'lot1': LatLng(26.119498, -80.256565), // north-west, by Dillard's
-    'lot2': LatLng(26.118063, -80.253161), // east, by Macy's
-    'lot3': LatLng(26.115663, -80.253942), // south, by Regal
-    'lot4': LatLng(26.116812, -80.256363), // west, by JCPenney
-  },
+  // Lots: the ones in `lots/` with this siteId (broward1-4, the biggest
+  // surface lot on each side of the mall, numbered clockwise from the north).
+  siteId: '-P52MJbV4GX-1cAesso6',
   liveParking: false,
-  lotNames: const {
-    'lot1': 'Parking Lot 1',
-    'lot2': 'Parking Lot 2',
-    'lot3': 'Parking Lot 3',
-    'lot4': 'Parking Lot 4',
-  },
   pathfinder: CampusPathfinder('assets/broward_walkways.json'),
 );
 
