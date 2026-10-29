@@ -28,7 +28,7 @@ export function numberWords(text, fuzzy = true) {
 }
 
 // How well a question word stands for a name word: exact, a prefix ("gar"), or a typo.
-function wordMatch(q, w) {
+export function wordMatch(q, w) {
   if (q === w) return w.length === 1 ? 0.6 : 1;
   if (/^\d+$/.test(q) || /^\d+$/.test(w)) return 0;
   if (q.length >= 3 && w.startsWith(q)) return 0.8;

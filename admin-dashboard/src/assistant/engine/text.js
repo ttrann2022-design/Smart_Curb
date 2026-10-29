@@ -125,5 +125,8 @@ export function createText({ joins = ENGLISH_JOINS, synonyms = {} } = {}) {
   // Not typo-corrected: keywords are spelled right.
   const canonicalPhrase = (text) => normalize(text).split(" ").filter((w) => w && !STOP.has(w)).map(canonical).join(" ");
 
-  return { normalize, tokens, canonicalPhrase, addVocabulary, editDistance };
+  // Whether a word is one the assistant knows (a keyword, an example's word, a synonym).
+  const isKnown = (w) => vocab.has(w) || canon.has(w);
+
+  return { normalize, tokens, canonicalPhrase, addVocabulary, editDistance, isKnown };
 }
