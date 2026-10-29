@@ -3,7 +3,7 @@ import { Link, useOutletContext } from "react-router-dom";
 import { ref, onValue } from "firebase/database";
 import { database } from "../firebase";
 import { dataPath } from "../dataMode";
-import { useAlertSettings, useNow, unitIssues, formatAgo, formatExact, statusKey, hasBattery, isLowBattery, STALL_WORD, ROOMY_MAX, planLayout, lotCounts, freeText } from "../units";
+import { useAlertSettings, useNow, unitIssues, formatAgo, formatExact, statusKey, hasBattery, isLowBattery, STALL_WORD, ROOMY_MAX, planLayout, lotCounts, lotsWithCapacity, freeText } from "../units";
 import LotPlan, { StallMark } from "../components/LotPlan";
 import { PageHeader, Notice, Button } from "../components/ui";
 import { useScope, useScoped } from "../useScope";
@@ -202,7 +202,8 @@ function Overview() {
     .filter(([, , issue]) => issue)
     .sort(([ida, a, ia], [idb, b, ib]) => (ISSUE_ORDER[ia] - ISSUE_ORDER[ib]) || ((a.battery ?? 0) - (b.battery ?? 0)) || ida.localeCompare(idb));
   const lotName = (u) => lots[u.lot]?.name || "Unassigned";
-  const lotCount = plannedLots.length + (unassigned.length ? 1 : 0);
+  // Only lots with capacity (lotsWithCapacity); unassigned curbs count as one group, as they show.
+  const lotCount = lotsWithCapacity([...plannedLots.map(([id]) => unitsByLot[id].map(([, u]) => u)), unassigned.map(([, u]) => u)]);
   const live = mode !== "sim";
   // The hardware curb belongs to one customer: its card shows only with every customer
   // in view, or for the customer whose lot it reports into.

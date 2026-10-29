@@ -234,6 +234,11 @@ test("lot capacity comes from the curbs that report, never from totalSpots or op
   assert.match(total, /2 offline curbs not counted/);
   assert.match(total, /1 lot with no curbs yet/);
   assert.doesNotMatch(total, /260|\b120\b|\b80\b/);
+  // "across N lots": only the 3 lots with capacity (not Lot 6, all offline, or Mall P2, no curbs).
+  for (let seed = 1; seed <= 12; seed++) {
+    const across = /across (\d+) lots?/.exec(respond("total spots across all lots", ctx({ random: seeded(seed) })).text);
+    if (across) assert.equal(across[1], "3");
+  }
   assert.match(respond("biggest lot", ctx()).text, /Lot 14/);
   assert.match(respond("tell me about lot 14", ctx()).text, /Capacity: 1 free of 3 \(from its curbs\)/);
   assert.match(respond("tell me about mall p1", ctx()).text, /Capacity: 1 free of 1/);

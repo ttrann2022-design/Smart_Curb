@@ -1,6 +1,6 @@
 // Status intents: answers from the live (or simulated) lots and units, and from
 // recorded history. Each `say` returns 3-5 variants of the same facts.
-import { batteryText, cleanText, formatAgo, hasBattery, isLowBattery, isStale, unitIssues } from "../../unitStatus.js";
+import { batteryText, cleanText, formatAgo, hasBattery, isLowBattery, isStale, lotsWithCapacity, unitIssues } from "../../unitStatus.js";
 import { curbEntries, curbsWithoutLot, hasMore, listCurbs, lotName, lotViews, sourceLine } from "../data.js";
 import { alertsOf, canOperate, needOperator, noData, plural, sourced, vary } from "../common.js";
 import { DAY_NAMES, HOURS_LONG, dayAverage, dayKey, historySource, hourSlot, liveSeries, pct, weekOf, weekStats } from "../history.js";
@@ -84,9 +84,11 @@ export const STATUS_INTENTS = [
       const lots = lotViews(ctx);
       const open = lots.reduce((s, l) => s + l.open, 0);
       const total = lots.reduce((s, l) => s + l.total, 0);
+      // "across N lots" counts only lots with capacity (lotsWithCapacity).
+      const withCapacity = lotsWithCapacity(lots.map((l) => l.curbs.map(([, u]) => u)));
       const body = `\n${lots.map((l) => `• ${l.name}: ${lotLine(l)}`).join("\n")}`;
       return sourced(ctx, vary([
-        `${open} of ${total} spots are free across ${plural(lots.length, "lot")}:`,
+        `${open} of ${total} spots are free across ${plural(withCapacity, "lot")}:`,
         `Right now there are ${spots(open)} out of ${total}:`,
         `Good question! ${open} of ${total} spots are open at the moment:`,
         `I count ${spots(open)} across the site (${total} in total):`,

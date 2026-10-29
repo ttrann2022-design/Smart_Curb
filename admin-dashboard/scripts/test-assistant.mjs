@@ -206,6 +206,12 @@ test("lot capacity is the curbs that report: offline curbs are never in \"of N\"
   assert.match(respond("free spots in lot 20", { ...c, lots, units }).text, /Lot 20 has no curbs yet|No curbs yet in Lot 20/);
   assert.match(respond("free spots in lot 21", { ...c, lots, units }).text, /reporting|offline/);
   assert.match(respond("free spots in each lot", { ...c, lots, units }).text, /• Lot 20: no curbs yet/);
+  // "across N lots" counts only the 4 lots with capacity, not Lot 20 (no curbs) or Lot 21 (all offline).
+  for (let seed = 1; seed <= 12; seed++) {
+    const t = respond("how many spots are free", { ...c, lots, units, random: seeded(seed) }).text;
+    const across = /across (\d+) lots?/.exec(t);
+    if (across) assert.equal(across[1], "4", t);
+  }
 });
 
 test("a lot that doesn't exist gets \"couldn't find\" and the real lots, not the site total", () => {

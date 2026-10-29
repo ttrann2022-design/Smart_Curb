@@ -58,6 +58,11 @@ export function lotCounts(units) {
   return counts;
 }
 
+// How many lots have capacity, for lines like "Spots open right now, across N lots".
+// Takes each lot's curbs (an array of unit arrays); lots with no curbs, or with
+// every curb offline, aren't counted.
+export const lotsWithCapacity = (lotsCurbs) => lotsCurbs.filter((curbs) => lotCounts(curbs).capacity > 0).length;
+
 // "3 free of 4", or why there's no count: no curbs at all, or none reporting.
 export function freeText(counts) {
   if (!counts.curbs) return "No curbs yet";

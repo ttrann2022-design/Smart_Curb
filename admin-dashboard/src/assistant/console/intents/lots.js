@@ -1,7 +1,7 @@
 // Lot, curb and deployment intents (lots/, units/): counts, lots without a customer,
 // a size or a location, one lot's details and curbs, offline curbs and low
 // batteries by customer, and one curb's status.
-import { batteryText, freeText } from "../../../unitStatus.js";
+import { batteryText, freeText, lotsWithCapacity } from "../../../unitStatus.js";
 import { ago, curbEntries, customerViews, isLow, isOnline, lotViews, plural, sourced, sourceLine, vary } from "../data.js";
 import { askLot, listing, poss, withData } from "../common.js";
 
@@ -203,7 +203,7 @@ export const LOT_INTENTS = [
       const notes = [offline && `${plural(offline, "offline curb")} not counted`, empty && `${plural(empty, "lot")} with no curbs yet`].filter(Boolean);
       const tail = notes.length ? ` (${notes.join("; ")})` : "";
       return sourced(ctx, [
-        `${plural(sum, "spot")} of capacity across ${plural(lots.length, "lot")}, ${free.toLocaleString()} free right now${tail}.`,
+        `${plural(sum, "spot")} of capacity across ${plural(lotsWithCapacity(lots.map((l) => l.curbs.map(([, u]) => u))), "lot")}, ${free.toLocaleString()} free right now${tail}.`,
         `All lots together: ${free.toLocaleString()} free of ${sum.toLocaleString()}${tail}.`,
         `Total capacity is ${plural(sum, "spot")} from the reporting curbs, ${free.toLocaleString()} of them free${tail}.`,
       ]);
