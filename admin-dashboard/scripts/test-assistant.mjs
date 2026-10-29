@@ -166,6 +166,29 @@ test("status answers name lots and curbs and say how fresh the data is", () => {
   }
 });
 
+test("a lot that doesn't exist gets \"couldn't find\" and the real lots, not the site total", () => {
+  const cases = [["how many free spots in lot 99", "Lot 99"], ["is lot 7 full", "Lot 7"], ["free spots in Garage Z", "Garage Z"],
+    ["spots in the Westfield lot", "Westfield"], ["free spots in the lot called Riverside", "Riverside"], ["lot ninety nine", "Lot 99"]];
+  for (const [q, name] of cases) {
+    const r = respond(q, ctx());
+    assert.equal(r.intent, "lot_not_found", q);
+    assert.match(r.text, new RegExp(`couldn't find a lot called ${name}\\.|no lot called ${name}\\.|${name} isn't one of the lots`), q);
+    assert.match(r.text, /Lots on this site:\n• Garage A, Level 2\n• Lot 6\n• Lot 12 — North\n• Lot 14/, q);
+    assert.doesNotMatch(r.text, /free spots? out of|spots are free across|of \d+ spots are open/, q);
+    assert.ok(r.chips.includes("What lots are there?"), q);
+  }
+  assert.match(respond("is lot 7 full", ctx({ mode: "sim" })).text, /Lots in the simulation:/);
+  // The topic carries on: "and Lot 6?" after a missing lot gets Lot 6's free spots.
+  const state = respond("how many free spots in lot 99", ctx()).state;
+  assert.equal(respond("and lot 6?", ctx(), state).intent, "free_lot");
+  assert.equal(respond("and lot 99?", ctx(), respond("free spots in lot 6", ctx()).state).intent, "lot_not_found");
+  // Real lots, typo'd and partial names, and everyday "lot" stay as they were.
+  for (const [q, want] of [["is lot 14 full", "free_lot"], ["garage 2", "free_lot"], ["lot 12", "free_lot"], ["most crowded lot right now", "busiest_lot"],
+    ["thanks a lot", "thanks"], ["A lot of curbs are offline", "offline_curbs"], ["which lot is busiest", "busiest_lot"], ["how do I add lot 7", "howto_add_lot"]]) {
+    assert.equal(intentOf(q), want, q);
+  }
+});
+
 test("answers are role-aware and point viewers to a manager", () => {
   const viewer = respond("how do I change an LED colour", ctx({ role: "viewer" })).text;
   assert.match(viewer, /You're a viewer, so you can see LED settings but not change it/);

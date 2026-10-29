@@ -5,7 +5,8 @@
 //   state: what the last turns were about (intent, lot, curb, recent variants, paged list)
 import { INTENT_BY_ID, SOMETHING_ELSE, menuChips } from "./intents.js";
 import { match } from "./matcher.js";
-import { findCurb, findLot, numberWords, pointsBack, pointsToCurb, pointsToLot } from "./entities.js";
+import { findCurb, findLot, missingLot, numberWords, pointsBack, pointsToCurb, pointsToLot } from "./entities.js";
+import { lotViews } from "./data.js";
 import { parseMath } from "./math.js";
 import { normalize } from "./text.js";
 import { simTokens } from "./similarity.js";
@@ -27,9 +28,10 @@ const TOPICAL = new Set(["status", "howto", "explain"]);
 const FOLLOW_UP = /^\s*(and|what about|how about|and what about|same for|also|then|ok and|so)\b/i;
 const FILLER = new Set(["and", "about", "how", "the", "for", "same", "then", "with", "in", "at", "is", "it", "its", "of", "ok", "so", "also", "please", "one", "there", "that", "this", "lot", "curb", "c", "unit", "sensor", "garage", "level"]);
 
-// Only the curb or lot was named ("and Lot 6?", "C-042"): no other words left.
+// Only the curb or lot was named ("and Lot 6?", "C-042", "lot 99"): no other words left.
 function entityOnly(raw, ent, ctx) {
-  const lot = ent.lotId ? numberWords(normalize(`${ctx.lots?.[ent.lotId]?.name || ""} ${ent.lotId}`)).split(" ") : [];
+  const lotText = ent.lotId ? `${ctx.lots?.[ent.lotId]?.name || ""} ${ent.lotId}` : ent.missingLot || "";
+  const lot = lotText ? numberWords(normalize(lotText)).split(" ") : [];
   const words = numberWords(normalize(raw.replace(FOLLOW_UP, " "))).split(" ").filter(Boolean);
   return words.every((w) => FILLER.has(w) || /^\d+$/.test(w) || lot.includes(w) || lot.some((l) => l.startsWith(w) && w.length >= 3));
 }
@@ -60,6 +62,22 @@ function finish(intent, out, ctx, state, ent) {
   return { intent: intent.id, group: intent.group, text, chips: fallback ? menuChips(ctx) : chips, state: next, fallback, entities: ent };
 }
 
+// A lot was named that isn't on the site: say so and list the real ones, instead of
+// answering for the whole site. The topic stays, so "and Lot 6?" carries it on.
+const LOT_NOT_FOUND = { id: "lot_not_found", group: "status", next: ["What lots are there?", "Free spots in each lot"] };
+function lotNotFound(name, ctx, state, ent, topic) {
+  const names = lotViews(ctx).map((l) => l.name);
+  const where = ctx.mode === "sim" ? "in the simulation" : "on this site";
+  const list = names.length ? `Lots ${where}:\n${names.map((n) => `• ${n}`).join("\n")}` : `There are no lots ${where} yet.`;
+  const r = finish(LOT_NOT_FOUND, [
+    `I couldn't find a lot called ${name}. ${list}`,
+    `There's no lot called ${name}. ${list}`,
+    `Hmm, ${name} isn't one of the lots I know. ${list}`,
+  ], ctx, state, ent);
+  r.state.lastIntentId = topic && TOPICAL.has(topic.group) ? topic.id : state.lastIntentId;
+  return r;
+}
+
 const run = (intent, ctx, state, ent) => finish(intent, intent.say instanceof Function ? intent.say(ctx, ent) : intent.say, ctx, state, ent);
 
 // The intent to carry a named lot or curb into, from the conversation so far.
@@ -75,8 +93,10 @@ function respondOne(raw, ctx, state) {
 
   const ent = { curbId: findCurb(raw, ctx.units), lotId: findLot(raw, ctx.lots) };
   const follow = FOLLOW_UP.test(raw);
+  const missing = ent.curbId ? null : missingLot(raw, ctx.lots);
+  if (missing) ent.missingLot = missing;
   // "its battery", "that lot", "and the battery?": carry the last curb or lot over.
-  if (!ent.curbId && !ent.lotId) {
+  if (!ent.curbId && !ent.lotId && !missing) {
     if (state.lastCurbId && (pointsToCurb(raw) || ((pointsBack(raw) || follow) && state.lastKind === "curb"))) ent.curbId = state.lastCurbId;
     else if (state.lastLotId && (pointsToLot(raw) || ((pointsBack(raw) || follow) && state.lastKind === "lot"))) ent.lotId = state.lastLotId;
   }
@@ -88,6 +108,7 @@ function respondOne(raw, ctx, state) {
   if (ent.only) return run(followIntent(state, ent.curbId ? "curb" : "lot"), ctx, state, ent);
 
   const { intent } = match(raw, ctx, ent);
+  if (missing && (!intent || intent.group === "status" || entityOnly(raw, ent, ctx))) return lotNotFound(missing, ctx, state, ent, intent || INTENT_BY_ID[state.lastIntentId]);
   if (intent?.id === "more") {
     if (state.lastPaged) return run(INTENT_BY_ID[state.lastPaged.intentId], ctx, state, { ...state.lastPaged.ent, page: state.lastPaged.page + 1 });
     if (state.lastFunId) return run(INTENT_BY_ID[state.lastFunId], ctx, state, ent);

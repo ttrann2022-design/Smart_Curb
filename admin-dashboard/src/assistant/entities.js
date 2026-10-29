@@ -8,7 +8,8 @@ const ONES = ["zero", "one", "two", "three", "four", "five", "six", "seven", "ei
 const TENS = { twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90 };
 
 // "twenty one" -> "21", "twelve" -> "12". Normalised text in, normalised text out.
-export function numberWords(text) {
+// `fuzzy` also reads near misses after a lot word ("lot tweleve"), and "lot right" as "lot 8".
+export function numberWords(text, fuzzy = true) {
   const words = text.split(" ");
   const out = [];
   for (let i = 0; i < words.length; i++) {
@@ -17,7 +18,7 @@ export function numberWords(text) {
       const next = ONES.indexOf(words[i + 1]);
       if (next > 0 && next < 10) { out.push(String(TENS[w] + next)); i++; } else out.push(String(TENS[w]));
     } else if (ONES.includes(w)) out.push(String(ONES.indexOf(w)));
-    else if (w.length >= 5 && /^(lot|garage|level|deck|floor|curb)$/.test(words[i - 1] || "")) {
+    else if (fuzzy && w.length >= 5 && /^(lot|garage|level|deck|floor|curb)$/.test(words[i - 1] || "")) {
       // A misspelt number word after a lot word ("lot tweleve"); elsewhere "there" isn't "three".
       const near = ONES.findIndex((o) => o.length >= 5 && editDistance(w, o, 1) <= 1);
       out.push(near > 0 ? String(near) : w);
@@ -79,6 +80,32 @@ export function findLot(raw, lots = {}) {
     if (score > best.score + 0.01) { best = { id, score }; tie = false; } else if (score > 0 && Math.abs(score - best.score) <= 0.01 && id !== best.id) tie = true;
   }
   return tie ? null : best.id;
+}
+
+// Words before "lot" or "garage" that aren't a lot's name ("Which lot", "The garage").
+const NOT_A_NAME = new Set(["which", "what", "that", "this", "the", "each", "every", "any", "a", "one", "best", "busiest", "fullest",
+  "emptiest", "quietest", "next", "same", "parking", "full", "free", "empty", "my", "our", "your", "is", "in", "per", "by", "whole", "all", "car",
+  "biggest", "smallest", "closest", "nearest", "main", "other", "new", "another", "first", "last", "favourite", "favorite"]);
+
+// A lot the question names that isn't one of `lots`: "lot 99", "garage Z", "the lot
+// called Westfield", "Westfield lot". Returns the name as typed, or null. Names that
+// partly fit a real lot ("lot 12" for "Lot 12 — North") don't count as missing.
+export function missingLot(raw, lots) {
+  if (!lots || findLot(raw, lots)) return null;
+  const text = numberWords(normalize(raw), false);
+  const known = Object.entries(lots).flatMap(([id, l]) => numberWords(normalize(`${l?.name || ""} ${id}`)).split(" "))
+    .map((w) => (/^\d+$/.test(w) ? String(Number(w)) : w));
+  const isKnown = (w) => known.includes(/^\d+$/.test(w) ? String(Number(w)) : w);
+  const title = (s) => s.replace(/\b\w/g, (c) => c.toUpperCase());
+  const numbered = text.match(/\b(lot|garage|deck) (?:number |no )?(\d+[a-z]?|[a-z])\b/);
+  if (numbered && !(numbered[2].length === 1 && /[ai]/.test(numbered[2]) && numbered[1] === "lot") && !isKnown(numbered[2])) return title(`${numbered[1]} ${numbered[2]}`);
+  const called = text.match(/\b(?:lot|garage) (?:called|named) ([a-z0-9]+(?: [a-z0-9]+)?)/);
+  if (called && !called[1].split(" ").some(isKnown)) return title(called[1]);
+  // A capitalised word right before "lot" or "garage": only proper names are written that way.
+  const proper = [...String(raw).matchAll(/\b([A-Z][a-z]+) (?:[Ll]ot|[Gg]arage|[Cc]ar [Pp]ark)\b/g)].map((m) => m[1])
+    .find((w) => !NOT_A_NAME.has(w.toLowerCase()) && !isKnown(w.toLowerCase()));
+  if (proper) return proper;
+  return null;
 }
 
 // A curb the question names: an existing ID in any spelling ("C-041", "c41", "curb 41"),
