@@ -25,7 +25,7 @@ const DASHBOARD_MARKERS = [
   "A dashboard built around the curbs",
 ];
 
-// Text from the console's own pages (Requests, Customers, Deployments, Home, Import lots).
+// Text from the console's own pages (Requests, Customers, Deployments, Home, Import lots, Settings).
 // None of it may reach a customer bundle; quote requests live only in the console.
 const CONSOLE_PAGE_MARKERS = [
   "Convert to customer",
@@ -34,6 +34,7 @@ const CONSOLE_PAGE_MARKERS = [
   "Assign a lot",
   "Open spots keep coming from the curbs",
   "Nothing is written until you press Import.",
+  "Your console preferences, kept in this browser",
 ];
 
 // Each Assistant's own answers (src/assistant/console/ and the dashboard's

@@ -8,6 +8,7 @@ import CustomerDetail from "./CustomerDetail";
 import Requests from "./Requests";
 import Deployments from "./Deployments";
 import ImportLots from "./ImportLots";
+import ConsoleSettings from "./ConsoleSettings";
 import { CONSOLE_SUB } from "./constants";
 
 // The Console Assistant carries its phrase lists and examples, so it loads only when opened.
@@ -32,6 +33,7 @@ function ConsoleApp() {
           <Route path="/requests" element={<Requests />} />
           <Route path="/deployments" element={<Deployments />} />
           <Route path="/import" element={<ImportLots />} />
+          <Route path="/settings" element={<ConsoleSettings />} />
           <Route path="/assistant" element={<Suspense fallback={assistantLoading}><ConsoleAssistant /></Suspense>} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
