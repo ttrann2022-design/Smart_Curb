@@ -6,7 +6,7 @@ import { dataPath } from "../dataMode";
 import { useAlertSettings, useNow, unitIssues, formatAgo, formatExact, statusKey, hasBattery, isLowBattery, STALL_WORD, ROOMY_MAX, planLayout, lotCounts } from "../units";
 import LotPlan, { StallMark } from "../components/LotPlan";
 import { PageHeader, Notice, Button } from "../components/ui";
-import { useScoped } from "../useScope";
+import { useScope, useScoped } from "../useScope";
 
 // The curb wired to the real hardware Receiver. Live mode gives it its own card.
 const HARDWARE_ID = "C-095";
@@ -112,6 +112,7 @@ function Overview() {
   const [allUnits, setUnits] = useState({});
   // Only the lots and curbs this account may see (src/scope.js).
   const { lots, units } = useScoped(allLots, allUnits);
+  const scope = useScope();
   // Content waits for both lots and units, so the hero number doesn't count up from 0.
   const [ready, setReady] = useState({ lots: false, units: false });
   const [skelGone, setSkelGone] = useState(false);
@@ -173,6 +174,9 @@ function Overview() {
   const lotName = (u) => lots[u.lot]?.name || "Unassigned";
   const lotCount = plannedLots.length + (unassigned.length ? 1 : 0);
   const live = mode !== "sim";
+  // The hardware curb belongs to one customer: its card shows only with every customer
+  // in view, or for the customer whose lot it reports into.
+  const showHw = live && (scope.kind === "all" || !!units[HARDWARE_ID]);
 
   return (
     <>
@@ -189,7 +193,7 @@ function Overview() {
         ) : (
           <div className="ov-swap" aria-busy={loading}>
             {loading && <p className="sws-sr-only" role="status">Loading…</p>}
-            {!skelGone && <OverviewSkeleton live={live} leaving={!loading} onGone={() => setSkelGone(true)} />}
+            {!skelGone && <OverviewSkeleton live={showHw} leaving={!loading} onGone={() => setSkelGone(true)} />}
 
             {!loading && (
               <div className="ov-content">
@@ -197,7 +201,7 @@ function Overview() {
                   {alerts.length === 1 ? "1 unit needs attention" : `${alerts.length || "No"} units need attention`}
                 </p>
 
-                <div className={`ov-hero${live ? " has-hw" : ""}`}>
+                <div className={`ov-hero${showHw ? " has-hw" : ""}`}>
                   <div className="ov-summary">
                     <div className="ov-free">
                       {/* Keyed by value: each new count rolls up into place. */}
@@ -224,7 +228,7 @@ function Overview() {
                       </li>
                     </ul>
                   </div>
-                  {live && <HardwareCard unit={units[HARDWARE_ID]} lots={lots} alerts={alertSettings} now={now} />}
+                  {showHw && <HardwareCard unit={units[HARDWARE_ID]} lots={lots} alerts={alertSettings} now={now} />}
                 </div>
 
                 {total === 0 && Object.keys(lots).length === 0 ? (

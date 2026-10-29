@@ -377,4 +377,15 @@ test("scoped to one customer, the Assistant only knows that customer's lots and 
     const r = respond(q, fau);
     assert.doesNotMatch(`${r.text} ${r.chips.join(" ")}`, /Garage A|Lot 12/, q);
   }
+  // A lot named outside the usual "Lot N" patterns: the page passes the names of
+  // out-of-scope lots (hiddenLots) so the answer is still "couldn't find".
+  const withMall = { ...lots, mallp1: { name: "Mall P1", siteId: "broward" } };
+  const v = scopeData({ lots: withMall, units: DATA.units }, { kind: "site", siteId: "fau" });
+  const hiddenLots = Object.fromEntries(Object.entries(withMall).filter(([id]) => !v.lots[id]).map(([id, l]) => [id, { name: l.name }]));
+  const fauPage = ctx({ ...v, history: { week: null, live: null }, historyHidden: true, hiddenLots });
+  for (const q of ["is Mall P1 full", "free spots in mall p1", "how many spots in Mall P1"]) {
+    const r = respond(q, fauPage);
+    assert.equal(r.intent, "lot_not_found", q);
+    assert.doesNotMatch(r.text.split("Lots on this site:")[1], /Mall P1|Garage A|Lot 12/, q);
+  }
 });

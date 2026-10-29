@@ -53,7 +53,7 @@ const reducedMotion = () => typeof window !== "undefined" && window.matchMedia("
 // The assistant's reply at the moment it's asked. Status answers need the data,
 // so while it loads (or if it can't be read) they say so instead of reporting an empty site.
 function replyTo(q, data, base, conversation) {
-  const ctx = { ...base, lots: data.lots || {}, units: data.units || {}, history: { week: data.week, live: data.live }, historyHidden: data.historyHidden, now: Date.now() };
+  const ctx = { ...base, lots: data.lots || {}, units: data.units || {}, history: { week: data.week, live: data.live }, historyHidden: data.historyHidden, hiddenLots: data.hiddenLots, now: Date.now() };
   const reply = respond(q, ctx, conversation);
   if (reply.group === "status" && (data.error || !data.lots || !data.units)) {
     reply.text = data.error
@@ -84,6 +84,8 @@ function Assistant() {
     week: partial ? null : raw.week,
     live: partial ? null : raw.live,
     historyHidden: partial,
+    // Names of lots outside the scope, only so asking about one gets "couldn't find".
+    hiddenLots: raw.lots && Object.fromEntries(Object.entries(raw.lots).filter(([id, l]) => !scoped.lots[id] && typeof l?.name === "string").map(([id, l]) => [id, { name: l.name }])),
   };
   const sim = mode === "sim";
   const base = { alerts, mode, role, firstName: firstName(auth.currentUser) };

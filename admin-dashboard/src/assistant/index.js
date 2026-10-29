@@ -83,7 +83,13 @@ function respondOne(raw, ctx, state) {
 
   const ent = { curbId: findCurb(raw, ctx.units), lotId: findLot(raw, ctx.lots) };
   const follow = FOLLOW_UP.test(raw);
-  const missing = ent.curbId ? null : missingLot(raw, ctx.lots);
+  let missing = ent.curbId ? null : missingLot(raw, ctx.lots);
+  // A lot outside this dashboard's customer scope (ctx.hiddenLots, names only) is
+  // answered exactly like a lot that doesn't exist: "couldn't find" and our own lots.
+  if (!missing && !ent.lotId && !ent.curbId && ctx.hiddenLots) {
+    const hidden = findLot(raw, ctx.hiddenLots);
+    if (hidden) missing = ctx.hiddenLots[hidden].name;
+  }
   if (missing) ent.missingLot = missing;
   // "its battery", "that lot", "and the battery?": carry the last curb or lot over.
   if (!ent.curbId && !ent.lotId && !missing) {
