@@ -29,7 +29,7 @@ const double kRadius = 6;
 const String kSupportEmail = 'support@example.com';
 
 /// Shown on the About page (and by the assistant).
-const String kAppVersion = '1.0.8';
+const String kAppVersion = '1.0.9';
 
 /// IBM Plex Mono, the dashboard's heading/number font (`mono` in theme.js).
 TextStyle mono({
