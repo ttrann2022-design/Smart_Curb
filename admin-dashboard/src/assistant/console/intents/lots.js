@@ -158,10 +158,10 @@ export const LOT_INTENTS = [
         return [`There's no curb called ${ent.curbId} in the ${where} data.`, `I can't find ${ent.curbId} in the ${where} data. Deployments lists every curb.`, `${ent.curbId} doesn't exist in the ${where} data.`];
       }
       const l = lotOf(ctx, u);
-      const where = l ? `in ${l.name}${l.customer ? `, ${poss(l.customer)}` : ", which has no customer"}` : "not in a lot yet";
+      const where = l ? `in ${l.name}${l.customer ? ` (${l.customer})` : ", which has no customer"}` : "not in a lot yet";
       const body = `\nStatus: ${STATE(u)} · Battery: ${batteryText(u)} · Last heard ${ago(ctx, u.lastUpdated)}`;
       const state = isOnline(u) ? STATE(u) : "offline, so I can't tell whether it's free";
-      if (ent.occupancy) return [`${ent.curbId} is ${state} right now. It's ${where}.${body}\n\n${sourceLine(ctx)}`, `Right now ${ent.curbId} (${where}) is ${state}.${body}\n\n${sourceLine(ctx)}`, `${ent.curbId}: ${state}. It's ${where}.${body}\n\n${sourceLine(ctx)}`];
+      if (ent.occupancy) return [`${ent.curbId} is ${state} right now. It's ${where}.${body}\n\n${sourceLine(ctx)}`, `Right now ${ent.curbId} is ${state}, ${where}.${body}\n\n${sourceLine(ctx)}`, `${ent.curbId}: ${state}. It's ${where}.${body}\n\n${sourceLine(ctx)}`];
       return sourced(ctx, vary([`${ent.curbId} is ${where}.`, `Here's ${ent.curbId}, ${where}:`, `${ent.curbId} (${where}):`], body));
     }),
   },
