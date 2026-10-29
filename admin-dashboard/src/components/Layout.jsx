@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { ref, get, set, update, remove, onValue, serverTimestamp } from "firebase/database";
@@ -13,6 +13,9 @@ import SimBanner from "./SimBanner";
 import { Brand, FullScreen } from "./Brand";
 import Icon from "./Icon";
 import { Button } from "./ui";
+import { ViewingSwitcher, UnlinkedScreen } from "./ScopeControls";
+import { ALL_CUSTOMERS, resolveScope } from "../scope";
+import { ScopeContext, useCustomerNames, useViewing } from "../useScope";
 
 const navItems = [
   { label: "Overview", to: "/overview", icon: "overview" },
@@ -28,6 +31,10 @@ const navItems = [
 function Layout() {
   const [userEmail, setUserEmail] = useState("");
   const [role, setRole] = useState(null);
+  // Customer scoping (src/scope.js): users/<uid>/siteId, and whether this account
+  // is a platform admin (platformAdmins/<uid>, which everyone may read for themselves).
+  const [siteId, setSiteId] = useState(null);
+  const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
   const [phase, setPhase] = useState("checking"); // checking | ready | error
   const [attempt, setAttempt] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -94,11 +101,17 @@ function Layout() {
           // Bookkeeping only: never block sign-in if this write fails.
           update(userRef, { lastActive: serverTimestamp() }).catch(() => {});
         }
+        // A refused or failed read just means "not a platform admin".
+        const admin = await get(ref(database, `platformAdmins/${user.uid}`)).then((s) => s.val() === true, () => false);
         if (cancelled) return;
 
         setUserEmail(user.email);
-        stopRole = onValue(ref(database, `users/${user.uid}/role`), (s) => {
-          setRole(s.val() || "viewer");
+        setIsPlatformAdmin(admin);
+        // The whole record, so a role change or a new customer link applies at once.
+        stopRole = onValue(ref(database, `users/${user.uid}`), (s) => {
+          const record = s.val() || {};
+          setRole(record.role || "viewer");
+          setSiteId(typeof record.siteId === "string" ? record.siteId : null);
           setPhase("ready");
         }, () => setPhase("error"));
       } catch {
@@ -110,6 +123,19 @@ function Layout() {
     // location is only read for the redirect target; re-running on every navigation isn't wanted.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navigate, attempt]);
+
+  // What this account sees. A platform admin's pick that no longer names a
+  // customer falls back to all of them.
+  const [viewing, setViewing] = useViewing();
+  const names = useCustomerNames(isPlatformAdmin && mode !== "sim", isPlatformAdmin ? null : siteId);
+  const viewingId = viewing !== ALL_CUSTOMERS && names.sites && !names.sites.some((s) => s.id === viewing) ? ALL_CUSTOMERS : viewing;
+  const scope = useMemo(() => resolveScope({ mode, isPlatformAdmin, siteId, viewing: viewingId }), [mode, isPlatformAdmin, siteId, viewingId]);
+  const customerLabel = mode === "sim" ? null
+    : scope.kind === "site" ? (isPlatformAdmin ? names.sites?.find((s) => s.id === scope.siteId)?.name : names.own) || "Your customer"
+      : isPlatformAdmin ? "All customers" : null;
+  // Pages remount when the data mode or scope changes, so nothing from the old scope lingers.
+  const scopeKey = `${mode}:${scope.kind}:${scope.siteId || ""}`;
+  const signHref = mode === "sim" ? "/sign?source=sim" : scope.kind === "site" ? `/sign?site=${encodeURIComponent(scope.siteId)}` : "/sign";
 
   const closeMenu = useCallback(() => {
     setMenuOpen(false);
@@ -158,6 +184,9 @@ function Layout() {
 
   // First run: managers go through Setup until it's finished. Viewers and operators
   // never see it. If the database refuses the read (older published rules), don't block.
+  // An account not linked to a customer sees nothing from Live (not even Setup).
+  if (scope.kind === "none") return <UnlinkedScreen email={userEmail} onSignOut={handleSignOut} />;
+
   const isManager = role === "manager";
   const onSetup = location.pathname === "/setup";
   if (isManager && !siteConfig.loaded) {
@@ -179,7 +208,7 @@ function Layout() {
       <div className="su-shell">
         <a href="#main" className="sws-skip">Skip to content</a>
         <header className="su-top">
-          <Brand size={36} sub="ADMIN DASHBOARD · SETUP" />
+          <Brand size={36} sub="ADMIN DASHBOARD · SETUP" customer={customerLabel} />
           <div className="su-top-actions">
             {!DEMO_BUILD && <div className="su-top-switch"><DataModeSwitch /></div>}
             <button type="button" onClick={handleSignOut} aria-label="Sign out" title="Sign out" className="sws-btn sws-btn-ghost sws-btn-sm" style={{ padding: "0 7px" }}>
@@ -189,7 +218,7 @@ function Layout() {
         </header>
         {mode === "sim" && <SimBanner />}
         <main id="main" tabIndex={-1} className="su-main">
-          <Outlet key={mode} context={{ role, mode, siteConfig, theme, previewTheme }} />
+          <ScopeContext.Provider value={scope}><Outlet key={scopeKey} context={{ role, mode, siteConfig, theme, previewTheme, scope }} /></ScopeContext.Provider>
         </main>
       </div>
     );
@@ -214,11 +243,13 @@ function Layout() {
         style={{ width: 240, flexShrink: 0, background: c.side, borderRight: `1px solid ${c.sideLine}`, padding: "18px 12px 14px", display: "flex", flexDirection: "column" }}
       >
         <div style={{ padding: "0 4px 22px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-          <Brand />
+          <Brand customer={customerLabel} />
           <button type="button" className="sws-menu-btn sws-sidebar-close" onClick={closeMenu} aria-label="Close menu" style={{ display: "none" }}>
             <Icon name="close" size={18} />
           </button>
         </div>
+        {/* Platform admins pick a customer, or All. Simulation is never scoped. */}
+        {isPlatformAdmin && mode !== "sim" && <ViewingSwitcher sites={names.sites} value={viewingId} onChange={setViewing} />}
 
         <div style={{ display: "flex", flexDirection: "column", gap: 2, flexGrow: 1 }}>
           {navItems.filter((item) => (!item.simOnly || mode === "sim") && (!item.managerOnly || role === "manager")).map((item) => (
@@ -264,7 +295,7 @@ function Layout() {
           </div>
 
           <a
-            href={mode === "sim" ? "/sign?source=sim" : "/sign"}
+            href={signHref}
             target="_blank"
             rel="noreferrer"
             className="sws-nav-link"
@@ -293,7 +324,7 @@ function Layout() {
 
       <div className="sws-content" style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
         <div className="sws-topbar">
-          <Brand size={32} />
+          <Brand size={32} customer={customerLabel} />
           <button
             ref={menuBtn}
             type="button"
@@ -310,7 +341,7 @@ function Layout() {
         <main id="main" tabIndex={-1} className="sws-main" style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
           {/* Keyed by path so each route fades in (.sws-route); query changes don't refade. */}
           <div key={location.pathname} className="sws-route">
-            <Outlet key={mode} context={{ role, mode, siteConfig, theme, previewTheme }} />
+            <ScopeContext.Provider value={scope}><Outlet key={scopeKey} context={{ role, mode, siteConfig, theme, previewTheme, scope }} /></ScopeContext.Provider>
           </div>
         </main>
       </div>

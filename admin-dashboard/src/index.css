@@ -1143,3 +1143,18 @@ html.sws-theme-fade #root { animation: sws-theme-in var(--dur-base) var(--ease-o
 @media (max-width: 900px) {
   .tp-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-3); }
 }
+
+/* ---------- Customer scoping (src/components/ScopeControls.jsx, Brand) ---------- */
+/* The customer this dashboard shows, under ADMIN DASHBOARD in the sidebar and top bar. */
+.sws-brand-customer { margin-top: 3px; max-width: 170px; font-size: 11.5px; font-weight: 600; color: var(--brand); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sws-topbar .sws-brand-customer { max-width: 200px; }
+/* Platform admins: Viewing All customers, or one. */
+.sc-viewing { display: flex; flex-direction: column; gap: 6px; margin: -8px 4px 18px; }
+.sc-viewing-k { font-size: 10px; letter-spacing: 1.1px; }
+.sc-viewing-select { height: 34px; width: 100%; font-size: 13px; }
+/* No customer linked: one calm screen, no data. */
+.sc-unlinked-icon { width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; background: var(--brand-bg); color: var(--brand); box-shadow: inset 0 0 0 1px var(--brand-line); }
+.sc-unlinked-h { margin: 0; font-family: var(--mono); font-size: 17px; font-weight: 600; line-height: 1.4; }
+.sc-unlinked-p { margin: 0; font-size: var(--fs-body); line-height: 1.6; color: var(--dim); }
+.sc-unlinked-who { margin: 0; font-size: 12.5px; color: var(--dim); overflow-wrap: anywhere; }
+.sc-unlinked-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
