@@ -153,6 +153,27 @@ test("history answers use the recorded week and say where they come from", () =>
   assert.match(respond("when is it busiest", ctx({ history: {} })).text, /recorded history|No history/i);
 });
 
+test("\"today vs yesterday\" compares typical days of the week and never says \"yesterday\"", () => {
+  // Every variant, by asking repeatedly in one conversation (variants don't repeat back to back).
+  let state = {};
+  const texts = new Set();
+  for (let i = 0; i < 12; i++) {
+    const r = respond("today vs yesterday", ctx({ random: seeded(i + 1) }), state);
+    assert.equal(r.intent, "history_today_vs_yesterday");
+    state = r.state;
+    texts.add(r.text);
+  }
+  assert.equal(texts.size, 3);
+  for (const t of texts) {
+    assert.match(t, /a typical Wednesday/i, t);
+    assert.match(t, /a typical Tuesday/i, t);
+    assert.match(t, /from recorded history/i, t);
+    assert.doesNotMatch(t, /yesterday/i, t);
+  }
+  // Monday compares with a typical Sunday.
+  assert.match(respond("compared to yesterday", ctx({ now: new Date(2026, 9, 26, 12).getTime() })).text, /typical Monday[\s\S]*typical Sunday/);
+});
+
 test("status answers name lots and curbs and say how fresh the data is", () => {
   const offline = respond("which curbs are offline", ctx()).text;
   assert.match(offline, /C-003 in Lot 6/);

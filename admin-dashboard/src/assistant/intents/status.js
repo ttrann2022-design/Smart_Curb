@@ -549,10 +549,12 @@ export const STATUS_INTENTS = [
       const y = dayAverage(week, yesterday);
       const diff = Math.round(t - y);
       const cmp = diff === 0 ? "about the same as" : diff > 0 ? `${diff} points busier than` : `${-diff} points quieter than`;
+      // History holds typical days of the week, not actual dates, so never say "yesterday".
+      const [T, Y] = [DAY_NAMES[today], DAY_NAMES[yesterday]];
       return fromHistory(ctx, [
-        `On recorded history, ${DAY_NAMES[today]}s average ${pct(t)} full, ${cmp} ${DAY_NAMES[yesterday]}s (${pct(y)}).`,
-        `Today's a ${DAY_NAMES[today]}: those average ${pct(t)}, against ${pct(y)} for ${DAY_NAMES[yesterday]}s. So ${cmp.replace(" than", "").replace(" as", "")} yesterday.`,
-        `${DAY_NAMES[today]} vs ${DAY_NAMES[yesterday]}: ${pct(t)} vs ${pct(y)} on average.`,
+        `A typical ${T} vs a typical ${Y}, from recorded history: ${pct(t)} vs ${pct(y)} full on average, so ${cmp} a typical ${Y}.`,
+        `Comparing a typical ${T} with a typical ${Y} from recorded history: ${T}s average ${pct(t)} full, ${cmp} ${Y}s (${pct(y)}).`,
+        `From recorded history, a typical ${T} runs ${pct(t)} full and a typical ${Y} ${pct(y)}.`,
       ]);
     }),
   },
