@@ -222,7 +222,7 @@ function LotDetail() {
           <div className="sws-stack" style={{ display: "flex", gap: "var(--sp-7)", alignItems: "flex-start" }}>
             {lotUnits.length === 0 ? (
               <Card delay={60} style={{ flex: "0 1 560px" }}>
-                <EmptyState icon="units" title="No curbs in this lot">Curbs appear here once they're registered to this lot.</EmptyState>
+                <EmptyState icon="units" title="No curbs yet">This lot has no capacity until curbs are registered to it; then its free spots appear here.</EmptyState>
               </Card>
             ) : (
               <div style={{ flex: "0 1 560px", minWidth: 0 }}>
