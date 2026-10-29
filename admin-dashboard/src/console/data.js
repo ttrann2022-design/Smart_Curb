@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ref, onValue, push, set, update, remove, serverTimestamp } from "firebase/database";
 import { database } from "../firebase";
 import { SIM_ROOT, dataPath } from "../dataMode";
+import { DEFAULT_ALERTS, isLowBattery } from "../unitStatus";
 
 // Everything the company console reads, for the current data mode (Live reads
 // the root, Simulation reads demo/). ConsoleLayout subscribes once and hands the
@@ -225,6 +226,18 @@ export async function convertLead(lead) {
 
 export const isOnline = (u) => u?.online === true;
 
+// Platform admins can't read settings/alerts (staff only), so the default threshold applies.
+export const isLow = (u) => isLowBattery(u, DEFAULT_ALERTS);
+
+// Each curb counted once, worst first: offline, then low battery (attention),
+// then occupied, then free. Takes [id, unit] pairs.
+export const HEALTH_KEYS = ["free", "occupied", "attention", "offline"];
+export function curbHealth(curbs) {
+  const h = { free: 0, occupied: 0, attention: 0, offline: 0, total: curbs.length };
+  curbs.forEach(([, u]) => { h[!isOnline(u) ? "offline" : isLow(u) ? "attention" : u.occupied ? "occupied" : "free"] += 1; });
+  return h;
+}
+
 // Curbs grouped by the lot they report into (units/<id>/lot), with totals per lot and per customer.
 export function summarize({ sites, lots, units }) {
   const lotUnits = {};
@@ -241,12 +254,13 @@ export function summarize({ sites, lots, units }) {
     lotStats[lotId] = {
       curbs: list.length,
       online: list.filter(([, u]) => isOnline(u)).length,
+      health: curbHealth(list),
       lastSeen: list.reduce((m, [, u]) => (typeof u.lastUpdated === "number" && u.lastUpdated > m ? u.lastUpdated : m), 0) || null,
     };
   });
 
   const siteStats = {};
-  Object.keys(sites).forEach((siteId) => { siteStats[siteId] = { lots: [], curbs: 0, online: 0, lastSeen: null }; });
+  Object.keys(sites).forEach((siteId) => { siteStats[siteId] = { lots: [], curbs: 0, online: 0, lastSeen: null, health: curbHealth([]) }; });
   const unassignedLots = [];
   Object.entries(lots).forEach(([lotId, lot]) => {
     const s = siteStats[lot?.siteId];
@@ -255,6 +269,8 @@ export function summarize({ sites, lots, units }) {
     s.lots.push(lotId);
     s.curbs += st.curbs;
     s.online += st.online;
+    HEALTH_KEYS.forEach((k) => { s.health[k] += st.health[k]; });
+    s.health.total += st.curbs;
     if (st.lastSeen && st.lastSeen > (s.lastSeen || 0)) s.lastSeen = st.lastSeen;
   });
   const byName = (a, b) => (lots[a]?.name || a).localeCompare(lots[b]?.name || b, undefined, { numeric: true });
