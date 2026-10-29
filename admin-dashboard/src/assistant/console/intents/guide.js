@@ -290,7 +290,7 @@ export const TROUBLESHOOT_INTENTS = [
     keys: [["simulation empty", 5.5], ["no demo", 4], ["nothing in simulation", 5], ["empty", 2.5], ["simulation", 1], ["no simulated", 4]],
     next: ["How do I reload demo customers?", "How do I send a fake quote request?", "How do I switch Live/Simulation?"],
     say: [
-      "The simulated lots and curbs come from the customer dashboard's Simulation page (Load fresh simulated data). Once they exist, go to Home here in Simulation and press Reload demo customers.",
+      "The simulated lots and curbs come from the customer dashboard: its Simulation page loads them. Once they exist, go to Home here in Simulation and press Reload demo customers.",
       "Load simulated data on the dashboard first, then Reload demo customers on Home. That fills customers, requests and demo lot assignments.",
       "Empty simulation? Two steps: simulated data on the dashboard, then Reload demo customers here.",
     ],
