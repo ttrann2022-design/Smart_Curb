@@ -129,7 +129,7 @@ export const CUSTOMER_INTENTS = [
     next: ["Any offline curbs there?", "Who's the contact?", "Lots without a customer"],
     say: forCustomer("list the lots of", (n) => `Lots of ${n}`, (ctx, ent, c) => {
       if (!c.lots.length) return sourced(ctx, [`${c.name} has no lots yet. Assign one on its page.`, `No lots point to ${c.name} yet.`, `${c.name} doesn't have any lots so far.`]);
-      const body = `\n${c.lots.map((l) => `• ${l.name}: ${l.curbs.length ? `${plural(l.curbs.length, "curb")}, ${l.online} online` : "no curbs yet"}${l.totalSpots ? ` · ${l.totalSpots} spots` : ""}`).join("\n")}`;
+      const body = `\n${c.lots.map((l) => `• ${l.name}: ${l.curbs.length ? `${plural(l.curbs.length, "curb")}, ${l.online} online${l.capacity ? ` · ${l.free} free of ${l.capacity}` : ""}` : "no curbs yet"}`).join("\n")}`;
       return sourced(ctx, vary([`${c.name} has ${plural(c.lots.length, "lot")}:`, `${poss(c.name)} lots:`, `Lots belonging to ${c.name}:`], body));
     }),
   },

@@ -1,7 +1,7 @@
 // Views of the console's data (sites/, leads/, lots/, units/) for the Console
 // Assistant's answers. Same links as the console pages: a lot belongs to the
 // customer in its siteId, a curb to the lot in its lot field. Read-only.
-import { DEFAULT_ALERTS, formatAgo, hasBattery } from "../../unitStatus.js";
+import { DEFAULT_ALERTS, formatAgo, hasBattery, lotCounts } from "../../unitStatus.js";
 
 const byText = (a, b) => String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" });
 const obj = (x) => (x && typeof x === "object" ? x : {});
@@ -28,9 +28,12 @@ export function lotViews(ctx) {
   return Object.entries(obj(ctx.lots)).filter(([, l]) => l && typeof l === "object").map(([id, l]) => {
     const mine = curbs.filter(([, u]) => u.lot === id);
     const online = mine.filter(([, u]) => isOnline(u)).length;
+    // Capacity and free spots come from the curbs, as on every page (lotCounts).
+    const counts = lotCounts(mine.map(([, u]) => u));
     return {
       id,
       name: typeof l.name === "string" && l.name ? l.name : id,
+      capacity: counts.capacity, free: counts.free, occupied: counts.occupied,
       siteId: sites[l.siteId] ? l.siteId : null,
       customer: sites[l.siteId]?.name || null,
       totalSpots: typeof l.totalSpots === "number" ? l.totalSpots : null,
@@ -49,9 +52,11 @@ export function customerViews(ctx) {
     const mine = lots.filter((l) => l.siteId === id);
     const curbs = mine.flatMap((l) => l.curbs);
     const online = curbs.filter(([, u]) => isOnline(u)).length;
+    const counts = lotCounts(curbs.map(([, u]) => u));
     return {
       id,
       name: typeof s.name === "string" && s.name ? s.name : "Unnamed customer",
+      capacity: counts.capacity, free: counts.free,
       type: s.type, status: s.status, contactName: s.contactName, contactEmail: s.contactEmail,
       createdAt: s.createdAt, fromLeadId: s.fromLeadId,
       lots: mine, curbs, online, offline: curbs.length - online,

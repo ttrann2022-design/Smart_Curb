@@ -1,7 +1,7 @@
 // Lot, curb and deployment intents (lots/, units/): counts, lots without a customer,
 // a size or a location, one lot's details and curbs, offline curbs and low
 // batteries by customer, and one curb's status.
-import { batteryText } from "../../../unitStatus.js";
+import { batteryText, freeText } from "../../../unitStatus.js";
 import { ago, curbEntries, customerViews, isLow, isOnline, lotViews, plural, sourced, sourceLine, vary } from "../data.js";
 import { askLot, listing, poss, withData } from "../common.js";
 
@@ -36,7 +36,7 @@ export const LOT_INTENTS = [
   {
     id: "lots_no_coords", group: "status", lot: -3,
     keys: [["without location", 5], ["no location", 5], ["missing location", 5], ["location", 2], ["without", 1], ["not on map", 4], ["where is", -2], ["how do i", -3]],
-    next: ["Lots without a total size", "How do I edit a lot?", "How many lots are there?"],
+    next: ["Lots with no capacity", "How do I edit a lot?", "How many lots are there?"],
     say: withData((ctx, ent) => listing(ctx, ent, lotViews(ctx).filter((l) => !l.hasLocation).map((l) => `${l.name}${l.customer ? ` (${l.customer})` : ""}`),
       ["Lots with no coordinates:", "These have no latitude and longitude:", "Missing a location:"],
       ["Every lot has coordinates.", "No lot is missing a location.", "All lots have a latitude and longitude."])),
@@ -45,9 +45,10 @@ export const LOT_INTENTS = [
     id: "lots_no_size", group: "status", lot: -3,
     keys: [["without size", 5], ["no size", 5], ["missing size", 5], ["size", 2], ["without", 1], ["unknown size", 4], ["how do i", -3], ["biggest", -3], ["most", -3]],
     next: ["Lots without coordinates", "How do I edit a lot?", "How do I import lots?"],
-    say: withData((ctx, ent) => listing(ctx, ent, lotViews(ctx).filter((l) => !l.totalSpots).map((l) => `${l.name}${l.customer ? ` (${l.customer})` : ""}`),
-      ["Lots with no total size (totalSpots):", "These have no totalSpots set:", "Missing a size:"],
-      ["Every lot has a total size.", "No lot is missing totalSpots.", "All lots have a size."])),
+    // A lot's size is its capacity, the curbs that report into it, so "no size" means no curbs yet.
+    say: withData((ctx, ent) => listing(ctx, ent, lotViews(ctx).filter((l) => !l.curbs.length).map((l) => `${l.name}${l.customer ? ` (${l.customer})` : ""}`),
+      ["Capacity comes from the curbs, so these lots have none yet (no curbs):", "No curbs yet, so no capacity:", "Lots without curbs (their size comes from the curbs):"],
+      ["Every lot has curbs, so every lot has a capacity.", "No lot is without curbs.", "All lots have curbs reporting into them."])),
   },
   {
     id: "lot_details", group: "status", lot: 4, usesLot: true,
@@ -56,7 +57,7 @@ export const LOT_INTENTS = [
     say: forLot("look up", (n) => `Tell me about ${n}`, (ctx, ent, l) => {
       const body = [
         `\nCustomer: ${l.customer || "none (unassigned)"}`,
-        `Size: ${l.totalSpots ? `${l.totalSpots} spots` : "not set"} · Location: ${l.hasLocation ? `${l.latitude}, ${l.longitude}` : "not set"}`,
+        `Capacity: ${freeText({ curbs: l.curbs.length, capacity: l.capacity, free: l.free })} (from its curbs) · Location: ${l.hasLocation ? `${l.latitude}, ${l.longitude}` : "not set"}`,
         `Curbs: ${l.curbs.length ? `${l.curbs.length}, ${l.online} online${l.offline ? `, ${l.offline} offline` : ""}` : "none reporting yet"}`,
         `ID: ${l.id}`,
       ].join("\n");
@@ -179,24 +180,33 @@ export const LOT_INTENTS = [
   {
     id: "lot_biggest", group: "status", lot: -3,
     keys: [["biggest lot", 5], ["largest lot", 5], ["most spots", 4.5], ["most", 1], ["size", 1], ["customer", -3], ["curb", -2], ["smallest", -2]],
-    next: ["Lots without a total size", "How many lots are there?", "Total spots across all lots"],
+    next: ["Lots with no capacity", "How many lots are there?", "Total spots across all lots"],
     say: withData((ctx) => {
-      const sized = lotViews(ctx).filter((l) => l.totalSpots).sort((a, b) => b.totalSpots - a.totalSpots);
-      if (!sized.length) return sourced(ctx, ["No lot has a size set yet.", "I can't tell: no lot has totalSpots.", "None of the lots have a size."]);
+      // Size is capacity: the curbs that report into the lot (offline ones don't count).
+      const sized = lotViews(ctx).filter((l) => l.capacity).sort((a, b) => b.capacity - a.capacity);
+      if (!sized.length) return sourced(ctx, ["No lot has a curb reporting yet, so none has a capacity.", "I can't tell: capacity comes from the curbs, and none is reporting.", "None of the lots has capacity yet: no curbs are reporting."]);
       const l = sized[0];
-      return sourced(ctx, [`The biggest lot is ${l.name}, with ${l.totalSpots} spots${l.customer ? ` (${l.customer})` : ""}.`, `${l.name} is largest: ${l.totalSpots} spots.`, `Most spots: ${l.name}, ${l.totalSpots}.`]);
+      return sourced(ctx, [`The biggest lot is ${l.name}, with ${plural(l.capacity, "spot")} of capacity from its curbs${l.customer ? ` (${l.customer})` : ""}.`, `${l.name} is largest: ${plural(l.capacity, "reporting curb")}.`, `Most capacity: ${l.name}, ${l.capacity} spots.`]);
     }),
   },
   {
     id: "spots_total", group: "status", lot: -3,
     keys: [["total spots", 5], ["how many spots", 4], ["spots", 2], ["all lots", 1.5], ["size", 1.5], ["total", 1], ["biggest", -3], ["without", -3]],
-    next: ["Biggest lot", "Lots without a total size", "How many lots are there?"],
+    next: ["Biggest lot", "Lots with no capacity", "How many lots are there?"],
     say: withData((ctx) => {
       const lots = lotViews(ctx);
-      const sum = lots.reduce((s, l) => s + (l.totalSpots || 0), 0);
-      const missing = lots.filter((l) => !l.totalSpots).length;
-      const tail = missing ? ` (${plural(missing, "lot")} without a size aren't counted)` : "";
-      return sourced(ctx, [`${sum.toLocaleString()} spots across ${plural(lots.length, "lot")}${tail}.`, `All lots together: ${sum.toLocaleString()} spots${tail}.`, `Total capacity is ${sum.toLocaleString()} spots${tail}.`]);
+      // Capacity is the reporting curbs (lotCounts); offline curbs and lots with no curbs add nothing.
+      const sum = lots.reduce((s, l) => s + l.capacity, 0);
+      const free = lots.reduce((s, l) => s + l.free, 0);
+      const offline = lots.reduce((s, l) => s + l.offline, 0);
+      const empty = lots.filter((l) => !l.curbs.length).length;
+      const notes = [offline && `${plural(offline, "offline curb")} not counted`, empty && `${plural(empty, "lot")} with no curbs yet`].filter(Boolean);
+      const tail = notes.length ? ` (${notes.join("; ")})` : "";
+      return sourced(ctx, [
+        `${plural(sum, "spot")} of capacity across ${plural(lots.length, "lot")}, ${free.toLocaleString()} free right now${tail}.`,
+        `All lots together: ${free.toLocaleString()} free of ${sum.toLocaleString()}${tail}.`,
+        `Total capacity is ${plural(sum, "spot")} from the reporting curbs, ${free.toLocaleString()} of them free${tail}.`,
+      ]);
     }),
   },
   {

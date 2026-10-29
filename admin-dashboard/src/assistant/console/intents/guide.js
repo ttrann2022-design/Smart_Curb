@@ -49,8 +49,8 @@ export const HOWTO_INTENTS = [
     keys: [["add lot", 5], ["new lot", 4], ["create lot", 5], ["add", 1.5], ["lot", 1], ["how do i", 0.5], ["import", -3], ["csv", -3], ["assign", -2], ["customer", -0.5], ["many", -3]],
     next: ["How do I import lots from CSV?", "How do I edit a lot?", "What is a lot ID?"],
     say: [
-      "Open the customer's page and press Add lot. Give it a name (the ID is made from its letters and numbers and can't change later), total spots from 1 to 5,000, and optionally a latitude and longitude. Every spot starts open.",
-      "Customer page → Add lot → name, total spots, optional location → Add lot. For many lots at once, use Import lots instead.",
+      "Open the customer's page and press Add lot. Give it a name (the ID is made from its letters and numbers and can't change later) and optionally a latitude and longitude. Total spots is optional too: the lot's capacity comes from the curbs that report into it.",
+      "Customer page → Add lot → name, optional location (and total spots if you want to note it) → Add lot. Capacity comes from the curbs. For many lots at once, use Import lots instead.",
       "Lots are added per customer: its page has Add lot. The name sets the lot ID, so pick it carefully.",
     ],
   },
@@ -59,8 +59,8 @@ export const HOWTO_INTENTS = [
     keys: [["change lot", 5], ["rename lot", 5], ["lot size", 3], ["change location", 4], ["change", 2], ["lot", 1], ["location", 1], ["size", 1], ["how do i", 0.5], ["customer", -1.5], ["without", -3]],
     next: ["How do I import lots from CSV?", "Lots without coordinates", "What is a lot ID?"],
     say: [
-      "On the customer's page, press Edit on the lot. You can change its name, total spots, latitude and longitude, then Save lot. The ID and open spots don't change.",
-      "Customer page → the lot → Edit → Save lot. Name, total spots and location are editable; open spots keep coming from the curbs.",
+      "On the customer's page, press Edit on the lot. You can change its name, latitude, longitude and the optional total spots, then Save lot. The ID doesn't change, and capacity and free spots always come from the curbs.",
+      "Customer page → the lot → Edit → Save lot. Name, location and the optional total spots are editable; capacity and free spots come from the curbs.",
       "Use Edit beside the lot. For several lots, Import lots updates total spots and locations in one go.",
     ],
   },
@@ -69,9 +69,9 @@ export const HOWTO_INTENTS = [
     keys: [["import", 4], ["import lot", 5], ["csv", 3], ["column", 2.5], ["bulk", 2], ["many lot", 3], ["paste", 2], ["fail", -3], ["reject", -4], ["not found", -4], ["error", -3]],
     next: ["Why are import rows rejected?", "Customer not found in import", "How do I add a lot?"],
     say: [
-      "Open Import lots in the sidebar and paste CSV. The first line is the header: id, name, customer, totalSpots, latitude, longitude. id is lowercase letters and numbers; customer is an existing customer's exact name; totalSpots is a whole number from 1 to 5,000, and rows without it are refused; latitude and longitude go together or not at all. You'll see a preview with New, Update or Error on each row before anything is written.",
-      "Import lots → paste CSV with columns id, name, customer, totalSpots, latitude, longitude → check the preview → Import. Rows without totalSpots are refused. Existing lots only get their totalSpots and location updated, never their name or customer, and nothing is deleted.",
-      "Use the Import lots page. Its header is id, name, customer, totalSpots, latitude, longitude. A row needs a valid id, a name, a real customer name and totalSpots (1 to 5,000); missing totalSpots means the row is refused. Rows with errors are skipped and the rest go in batches.",
+      "Open Import lots in the sidebar and paste CSV. The first line is the header: id, name, customer, totalSpots, latitude, longitude. id is lowercase letters and numbers; customer is an existing customer's exact name; totalSpots is optional (capacity comes from the curbs), and when given it's a whole number from 1 to 5,000; latitude and longitude go together or not at all. You'll see a preview with New, Update or Error on each row before anything is written.",
+      "Import lots → paste CSV with columns id, name, customer, totalSpots, latitude, longitude → check the preview → Import. totalSpots can be blank or left out: capacity comes from the curbs. Existing lots only get their totalSpots and location updated, never their name or customer, and nothing is deleted.",
+      "Use the Import lots page. Its header is id, name, customer, totalSpots, latitude, longitude. A row needs a valid id, a name and a real customer name; totalSpots is optional (1 to 5,000 if given). Rows with errors are skipped and the rest go in batches.",
     ],
   },
   {
@@ -258,11 +258,11 @@ export const TROUBLESHOOT_INTENTS = [
   {
     id: "ts_import_rejected", group: "howto",
     keys: [["import reject", 5.5], ["row rejected", 5], ["row error", 5], ["import error", 5], ["import fail", 5], ["rejected", 3], ["import", 1.5], ["why error", 3], ["refused", 2], ["customer not found", -4]],
-    next: ["Customer not found in import", "How do I import lots from CSV?", "Lots without a total size"],
+    next: ["Customer not found in import", "How do I import lots from CSV?", "Lots with no capacity"],
     say: [
-      "Each rejected row says why in the preview. The usual reasons: id isn't lowercase letters and numbers; totalSpots is missing or outside 1 to 5,000; only one of latitude and longitude is given; the customer name doesn't match exactly; an id appears twice; or the lot already belongs to another customer.",
-      "Look at the reasons under each Error row. Missing totalSpots is the most common: rows without it are always refused. Fix those rows and paste them again.",
-      "Rows fail the same checks as Add lot: valid lowercase id, a name up to 80 characters, totalSpots 1 to 5,000, both coordinates or none, and an existing customer. Rows that pass still import; the errors are skipped.",
+      "Each rejected row says why in the preview. The usual reasons: id isn't lowercase letters and numbers; a totalSpots that's given but outside 1 to 5,000; only one of latitude and longitude is given; the customer name doesn't match exactly; an id appears twice; or the lot already belongs to another customer.",
+      "Look at the reasons under each Error row. A customer name that doesn't match exactly is the most common. A blank totalSpots is fine: capacity comes from the curbs. Fix those rows and paste them again.",
+      "Rows fail the same checks as Add lot: valid lowercase id, a name up to 80 characters, totalSpots 1 to 5,000 if given, both coordinates or none, and an existing customer. Rows that pass still import; the errors are skipped.",
     ],
   },
   {
@@ -422,7 +422,7 @@ export const EXPLAIN_INTENTS = [
     id: "explain_open_spots", group: "explain",
     keys: [["open spots", 4.5], ["openspots", 5], ["why can not change open", 5], ["free spots", 3]],
     next: ["How do I edit a lot?", "How do sites, lots and curbs link?", "Biggest lot"],
-    say: ["Open spots belong to the hardware: they start equal to total spots when a lot is created, then the curbs keep them up to date. Nobody edits them here.", "A lot's openSpots is set once, at creation, then reported by the curbs.", "We set total spots; the curbs report open spots."],
+    say: ["Free spots come from the curbs: a lot's capacity is its curbs that report, and its free spots are those that see no car. Offline curbs count in neither. Nobody types them in, and new lots get no openSpots field.", "Capacity and free spots are counted from the curbs every time. The old openSpots and totalSpots fields aren't used for them.", "The curbs say what's free; a lot with no curbs has no capacity yet."],
   },
   {
     id: "explain_curb", group: "explain",

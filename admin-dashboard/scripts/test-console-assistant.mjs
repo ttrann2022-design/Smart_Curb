@@ -226,6 +226,23 @@ test("\"is C-041 free / occupied / taken?\" answers for that curb, with its lot 
 
 // ---------- Answers ----------
 
+test("lot capacity comes from the curbs that report, never from totalSpots or openSpots", () => {
+  // Reporting curbs: Lot 14 has 3 (1 free), Mall P1 1 of 2 (C-096 offline, free), North Garage 1 (free).
+  // Lot 6's only curb is offline and Mall P2 has none. totalSpots (40, 20, 120, 80) must not appear.
+  const total = respond("total spots across all lots", ctx()).text;
+  assert.match(total, /5 spots of capacity|3 free of 5|Total capacity is 5 spots/);
+  assert.match(total, /2 offline curbs not counted/);
+  assert.match(total, /1 lot with no curbs yet/);
+  assert.doesNotMatch(total, /260|\b120\b|\b80\b/);
+  assert.match(respond("biggest lot", ctx()).text, /Lot 14/);
+  assert.match(respond("tell me about lot 14", ctx()).text, /Capacity: 1 free of 3 \(from its curbs\)/);
+  assert.match(respond("tell me about mall p1", ctx()).text, /Capacity: 1 free of 1/);
+  assert.match(respond("tell me about lot 6", ctx()).text, /Capacity: No curbs reporting/);
+  assert.match(respond("tell me about mall p2", ctx()).text, /Capacity: No curbs yet/);
+  assert.match(respond("lots of Demo University", ctx()).text, /Lot 14: 3 curbs, 3 online · 1 free of 3/);
+  assert.doesNotMatch(respond("lots of Demo University", ctx()).text, /40 spots|20 spots/);
+});
+
 test("answers use the data and say where it comes from and how fresh it is", () => {
   assert.match(respond("how many customers", ctx()).text, /4 customers[\s\S]*2 active, 1 prospect, 1 paused/);
   assert.match(respond("how many customers", ctx()).text, /From live data, read just now · newest curb reading 1 min ago\./);
@@ -243,7 +260,8 @@ test("answers use the data and say where it comes from and how fresh it is", () 
   assert.match(respond("which customers have real curbs", ctx()).text, /With curbs: Broward Mall \(2\), Demo University \(4\)/);
   assert.match(respond("curbs not in a lot", ctx()).text, /C-200/);
   assert.match(respond("show low batteries", ctx()).text, /C-003: 5%[\s\S]*C-002: 12%/);
-  assert.match(respond("how do I import lots", ctx()).text, /id, name, customer, totalSpots, latitude, longitude[\s\S]*refused/);
+  assert.match(respond("how do I import lots", ctx()).text, /id, name, customer, totalSpots, latitude, longitude[\s\S]*(optional|blank or left out)/);
+  assert.doesNotMatch(respond("how do I import lots", ctx()).text, /without (it|totalSpots) (are|is) refused/);
   assert.match(respond("how do I add a platform admin", ctx()).text, /platformAdmins\/<(their )?UID>/);
   assert.match(respond("how do I delete a customer", ctx()).text, /no lots point to the customer|unassign/i);
 });
