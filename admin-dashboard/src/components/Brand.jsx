@@ -2,7 +2,7 @@ import { c, mono } from "../theme";
 import logo from "../assets/smartcurb-logo.jpg";
 
 // Logo and wordmark for the sidebar and top bars (dashboard and company console).
-export function Brand({ size = 40, sub = "ADMIN CONSOLE" }) {
+export function Brand({ size = 40, sub = "ADMIN DASHBOARD" }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
       <img src={logo} alt="" width={size} height={size} style={{ width: size, height: size, borderRadius: 8, objectFit: "cover", flexShrink: 0 }} />

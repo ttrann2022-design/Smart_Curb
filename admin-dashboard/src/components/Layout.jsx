@@ -179,7 +179,7 @@ function Layout() {
       <div className="su-shell">
         <a href="#main" className="sws-skip">Skip to content</a>
         <header className="su-top">
-          <Brand size={36} sub="ADMIN CONSOLE · SETUP" />
+          <Brand size={36} sub="ADMIN DASHBOARD · SETUP" />
           <div className="su-top-actions">
             {!DEMO_BUILD && <div className="su-top-switch"><DataModeSwitch /></div>}
             <button type="button" onClick={handleSignOut} aria-label="Sign out" title="Sign out" className="sws-btn sws-btn-ghost sws-btn-sm" style={{ padding: "0 7px" }}>
