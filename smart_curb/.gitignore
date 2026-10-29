@@ -1,3 +1,7 @@
+# API keys: assets/config/secrets.json (see secrets.example.json). Never
+# commit them.
+secrets.json
+
 # Miscellaneous
 *.class
 *.log

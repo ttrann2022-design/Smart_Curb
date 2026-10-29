@@ -673,10 +673,17 @@ button.lp-stall { background: none; border: 0; padding: 0; margin: 0; font: inhe
 .as-msg.is-user { justify-content: flex-end; }
 @keyframes as-in { from { opacity: 0; transform: translateY(4px); } }
 .as-avatar {
-  width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0; margin-top: 2px;
+  width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0; margin-top: 2px; overflow: hidden;
   display: flex; align-items: center; justify-content: center;
   background: var(--brand-bg); color: var(--brand);
 }
+.as-avatar img { width: 100%; height: 100%; object-fit: cover; }
+/* Who you're talking to: the logo mark, the name and an "Online" line. */
+.as-head { display: flex; align-items: center; gap: var(--sp-3); padding: 10px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
+.as-head .as-avatar { width: 40px; height: 40px; margin: 0; }
+.as-head-name { margin: 0; font-family: var(--mono); font-weight: 600; font-size: var(--fs-section); color: var(--text); }
+.as-head-status { display: flex; align-items: center; gap: 6px; margin-top: 2px; font-size: 12.5px; color: var(--dim); }
+.as-head-status .sws-live-dot { margin: 0; }
 .as-bubble { max-width: min(600px, 85%); padding: 11px 15px; font-size: var(--fs-body); line-height: 1.6; white-space: pre-line; overflow-wrap: anywhere; background: var(--panel); color: var(--text); border-radius: 3px 12px 12px 12px; }
 /* Your messages: a lighter neutral surface, never lime. */
 .as-msg.is-user .as-bubble { background: var(--line); border-radius: 12px 12px 3px 12px; }

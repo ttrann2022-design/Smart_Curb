@@ -2,8 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:smart_curb/assistant.dart';
+import 'package:smart_curb/gemini_chat.dart';
 
 import 'assistant_test.dart' show FakeData;
+
+/// The screen's behaviour, without the language model (tests have no network).
+GeminiChat get noAi => GeminiChat(apiKey: '');
 
 void main() {
   setUpAll(() => GoogleFonts.config.allowRuntimeFetching = false);
@@ -21,7 +25,7 @@ void main() {
     tester.view.physicalSize = const Size(800, 2400);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
-    final session = ChatSession(data: FakeData());
+    final session = ChatSession(data: FakeData(), ai: noAi);
     await tester.pumpWidget(
         MaterialApp(home: AssistantChatPage(session: session)));
     await tester.pump(const Duration(seconds: 11)); // the greeting
@@ -62,7 +66,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     final data = FakeData();
-    final session = ChatSession(data: data);
+    final session = ChatSession(data: data, ai: noAi);
     await tester.pumpWidget(
         MaterialApp(home: AssistantChatPage(session: session)));
     await tester.pump(const Duration(seconds: 11)); // the greeting

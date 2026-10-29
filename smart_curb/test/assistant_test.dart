@@ -160,8 +160,8 @@ void main() {
         'are you there?': "I'm here",
         "what's up": 'Not much',
         'nice to meet you': 'Nice to meet you too',
-        'are you chatgpt': "Nope, I'm Smart Curb AI Agent",
-        'are you siri': "Nope, I'm Smart Curb AI Agent",
+        'are you chatgpt': "I'm Smart Curb AI Agent",
+        'are you siri': "I'm Smart Curb AI Agent",
         'do you sleep': '24/7',
         "I'm bored": 'parking joke',
         'tell me a fun fact': 'Fun fact',
@@ -760,6 +760,37 @@ void main() {
     });
   });
 
+  group('a reliable backup for life and hobbies', () {
+    test('feelings get a caring answer, topics a friendly one', () async {
+      final cases = {
+        "I'm feeling really sad today": '988',
+        'I feel so lonely': '988',
+        "I'm stressed about my exam": 'deep breath',
+        'I just graduated!!': 'congrats',
+        'have you watched any good anime': 'movies and shows',
+        'what song should I listen to': 'music',
+        'do you play minecraft': 'games',
+        'who will win the nba finals': 'sports',
+        'can you explain physics to me': 'science',
+        'my boss is annoying': 'work',
+        'my dog is so cute': 'pets',
+        'any ideas for the weekend': 'trips',
+        'do you know python': 'tech',
+      };
+      for (final e in cases.entries) {
+        final r = await bot().reply(e.key);
+        expect(r.text, contains(e.value), reason: e.key);
+        expect(r.text, isNot(startsWith(_sorry)), reason: e.key);
+      }
+      // ...while app questions with those words still get the app's answer.
+      expect((await bot().reply('parking for the gym')).text, contains('RC-91'));
+      expect((await bot().reply('ugh parking is stressful')).text,
+          contains('Which building'));
+      expect((await bot().reply('show me my vehicles')).text,
+          isNot(contains('movies')));
+    });
+  });
+
   group('going on with the conversation', () {
     test('"can I ask another question?" gets an invitation, not "sorry"', () async {
       for (final q in [
@@ -982,6 +1013,7 @@ void main() {
     test('the curbs, support and everything else', () async {
       final cases = {
         'what is a smart curb': 'wheel stop',
+        'tell me about smart curb': 'wheel stop',
         'how does it detect cars': 'senses',
         'what if a curb is broken': "curb's number",
         'the curb shows the wrong color': "curb's number",
@@ -1014,6 +1046,9 @@ void main() {
       for (final e in cases.entries) {
         expect((await bot(data()).reply(e.key)).text, contains(e.value), reason: e.key);
       }
+      // "campus" alone isn't the Campus Operations & Police building.
+      expect((await bot(data()).reply('study on campus')).text,
+          isNot(contains('CO-69')));
       // A phone number isn't a sum.
       expect((await bot(data()).reply('my phone is 561-555-1234')).text,
           isNot(contains("That's")));

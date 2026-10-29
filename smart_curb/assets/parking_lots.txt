@@ -1,0 +1,72 @@
+SMART CURB - PARKING LOTS
+Exported from the app's map data (app version 1.0.9).
+Coordinates: latitude / longitude in decimal degrees (WGS84),
+the same points the map uses for each lot.
+
+==============================================
+FLORIDA ATLANTIC UNIVERSITY (FAU)
+777 Glades Rd, Boca Raton, FL 33431
+47 parking lots (live Smart Curb data at this place)
+==============================================
+ID        NAME         LATITUDE    LONGITUDE
+-------   ----------   ---------   -----------
+lot01     Lot 1        26.370548   -80.099284
+lot02     Lot 2        26.372916   -80.099578
+lot03     Lot 3        26.371307   -80.101397
+lot04     Lot 4        26.374155   -80.099734
+lot05     Lot 5        26.379985   -80.101641
+lot06     Lot 6        26.374074   -80.104246
+lot07     Lot 7        26.374039   -80.105947
+lot08     Lot 8        26.37326    -80.106791
+lot10     Lot 10       26.372522   -80.108251
+lot12     Lot 12       26.373825   -80.110753
+lot13     Lot 13       26.372919   -80.111539
+lot14     Lot 14       26.372338   -80.110426
+lot15     Lot 15       26.370655   -80.108325
+lot16     Lot 16       26.368944   -80.106239
+lot17     Lot 17       26.367668   -80.10679
+lot18     Lot 18       26.368141   -80.105545
+lot19     Lot 19       26.371296   -80.104582
+lot20     Lot 20       26.371033   -80.104776
+lot21     Lot 21       26.367677   -80.104817
+lot22     Lot 22       26.36768    -80.10295
+lot23     Lot 23       26.367113   -80.102026
+lot24     Lot 24       26.366514   -80.100685
+lot25     Lot 25       26.369226   -80.098988
+lot26n    Lot 26N      26.375429   -80.096293
+lot27     Lot 27       26.37061    -80.098295
+lot28     Lot 28       26.368689   -80.098128
+lot29     Lot 29       26.377618   -80.096624
+lot30     Lot 30       26.376335   -80.096356
+lot31     Lot 31       26.376868   -80.096083
+lot32     Lot 32       26.376943   -80.096885
+lot33     Lot 33       26.376499   -80.097328
+lot34     Lot 34       26.374992   -80.096988
+lot35     Lot 35       26.375031   -80.097781
+lot36     Lot 36       26.375505   -80.099596
+lot45     Lot 45       26.377852   -80.097683
+lot46     Lot 46       26.378737   -80.097365
+lot47     Lot 47       26.378205   -80.094938
+lot51     Lot 51       26.371994   -80.104955
+lot60     Lot 60       26.368668   -80.096215
+lot92     Lot 92       26.366769   -80.10405
+lot96n    Lot 96N      26.373468   -80.098182
+lot102    Lot 102      26.36736    -80.099337
+garage1   Garage 1     26.372192   -80.10603
+garage2   Garage 2     26.368955   -80.099541
+garage3   Garage 3     26.375169   -80.104009
+aqua      Aqua Lot     26.37936    -80.099444
+copper    Copper Lot   26.37753    -80.099187
+
+==============================================
+WESTFIELD BROWARD MALL
+8000 W Broward Blvd, Plantation, FL 33388
+4 parking lots (no Smart Curb sensors yet)
+==============================================
+ID     NAME            LATITUDE    LONGITUDE
+----   -------------   ---------   -----------
+lot1   Parking Lot 1   26.119498   -80.256565
+lot2   Parking Lot 2   26.118063   -80.253161
+lot3   Parking Lot 3   26.115663   -80.253942
+lot4   Parking Lot 4   26.116812   -80.256363
+
