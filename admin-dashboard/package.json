@@ -18,6 +18,7 @@
     "check:contrast": "node scripts/check-contrast.mjs",
     "test:rules": "node --test scripts/test-rules.mjs",
     "test:assistant": "node --test scripts/test-assistant.mjs",
+    "test:import": "node --test scripts/test-import.mjs",
     "lint": "eslint .",
     "preview": "vite preview"
   },
