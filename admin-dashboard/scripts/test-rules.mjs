@@ -1101,3 +1101,91 @@ test("the console seeds demo customers, a won lead and lot assignments in one wr
   // Customer staff can't seed.
   denied(await call("PATCH", "", AS.manager, { "demo/sites/u3": { name: "X", type: "other", status: "prospect", createdAt: SERVER_TIME } }));
 });
+
+// ---------- Customer scoping: users/<uid>/siteId ----------
+
+// What a new staff account writes at first sign-in (Layout.jsx), after a manager's invite.
+const NEW_STAFF = { uid: "newbie", email: "newbie@example.com", key: "newbie@example,com" };
+AS.newStaff = mockToken(NEW_STAFF.uid, NEW_STAFF.email);
+const firstSignIn = (extra = {}) => ({ email: NEW_STAFF.email, role: "operator", createdAt: SERVER_TIME, lastActive: SERVER_TIME, ...extra });
+const NOT_ADMIN_ROLES = ["manager", "operator", "viewer", "driver", "signedOut", "newStaff"];
+
+test("a platform admin links an account to a customer, moves it and unlinks it", async () => {
+  await call("PUT", "sites/site2", OWNER, { ...CUSTOMER, name: "Second" });
+  allowed(await call("PUT", "users/mgr/siteId", AS.platformAdmin, "site1"));
+  assert.equal((await call("GET", "users/mgr/siteId", OWNER)).body, "site1");
+  allowed(await call("PATCH", "users/op", AS.platformAdmin, { siteId: "site2" }));
+  allowed(await call("PUT", "users/mgr/siteId", AS.platformAdmin, "site2"));
+  allowed(await call("DELETE", "users/mgr/siteId", AS.platformAdmin));
+  assert.deepEqual((await call("GET", "users/mgr", OWNER)).body, { email: "mgr@example.com", role: "manager" });
+});
+
+test("siteId must name an existing customer, as a plain id, on an existing account", async () => {
+  for (const bad of ["ghost", "", "site1/name", "site1.x", "a".repeat(129), 5, true, { id: "site1" }]) {
+    denied(await call("PUT", "users/mgr/siteId", AS.platformAdmin, bad));
+  }
+  // Only live customers count: demo/sites/site1 exists, but that's not sites/.
+  await call("PUT", "demo/sites/onlydemo", OWNER, DEMO_CUSTOMER);
+  denied(await call("PUT", "users/mgr/siteId", AS.platformAdmin, "onlydemo"));
+  // Not on an account that doesn't exist (it would create a record with only siteId).
+  denied(await call("PUT", "users/nobody/siteId", AS.platformAdmin, "site1"));
+  assert.equal((await call("GET", "users/nobody", OWNER)).body, null);
+  assert.equal((await call("GET", "users/mgr/siteId", OWNER)).body, null);
+});
+
+test("nobody but a platform admin can set, change or remove anyone's siteId", async () => {
+  await call("PUT", "sites/site2", OWNER, { ...CUSTOMER, name: "Second" });
+  await call("PATCH", "users", OWNER, { "mgr/siteId": "site1", "op/siteId": "site1", "view/siteId": "site1" });
+  await call("PUT", `users/${NEW_STAFF.uid}`, OWNER, { email: NEW_STAFF.email, role: "operator" });
+  const own = { manager: "mgr", operator: "op", viewer: "view", newStaff: NEW_STAFF.uid };
+  for (const who of NOT_ADMIN_ROLES) {
+    for (const uid of ["mgr", "op", "view", NEW_STAFF.uid, own[who]].filter(Boolean)) {
+      denied(await call("PUT", `users/${uid}/siteId`, AS[who], "site2"));
+      denied(await call("PATCH", `users/${uid}`, AS[who], { siteId: "site2" }));
+      denied(await call("DELETE", `users/${uid}/siteId`, AS[who]));
+      denied(await call("PATCH", "", AS[who], { [`users/${uid}/siteId`]: "site2" }));
+    }
+  }
+  // A manager editing a record, even their own, can't slip siteId in with the role.
+  denied(await call("PATCH", "users/mgr", AS.manager, { role: "manager", siteId: "site2" }));
+  denied(await call("PATCH", "users/op", AS.manager, { role: "viewer", siteId: "site2" }));
+  denied(await call("PUT", "users/mgr", AS.manager, { email: "mgr@example.com", role: "manager" }));
+  for (const uid of ["mgr", "op", "view"]) assert.equal((await call("GET", `users/${uid}/siteId`, OWNER)).body, "site1", uid);
+  assert.equal((await call("GET", `users/${NEW_STAFF.uid}/siteId`, OWNER)).body, null);
+});
+
+test("sign-up from an invite still works, but never with a siteId in the new record", async () => {
+  await call("PUT", `invites/${NEW_STAFF.key}`, OWNER, { email: NEW_STAFF.email, role: "operator", invitedBy: "mgr", invitedAt: 1760000000000 });
+  denied(await call("PUT", `users/${NEW_STAFF.uid}`, AS.newStaff, firstSignIn({ siteId: "site1" })));
+  denied(await call("PUT", `users/${NEW_STAFF.uid}`, AS.newStaff, firstSignIn({ siteId: "" })));
+  assert.equal((await call("GET", `users/${NEW_STAFF.uid}`, OWNER)).body, null);
+  allowed(await call("PUT", `users/${NEW_STAFF.uid}`, AS.newStaff, firstSignIn()));
+  allowed(await call("DELETE", `invites/${NEW_STAFF.key}`, AS.newStaff));
+  // Once it exists, the account can't add one either.
+  denied(await call("PUT", `users/${NEW_STAFF.uid}/siteId`, AS.newStaff, "site1"));
+});
+
+test("linked accounts keep working: lastActive, role changes and reading users", async () => {
+  await call("PATCH", "users", OWNER, { "mgr/siteId": "site1", "op/siteId": "site1" });
+  allowed(await call("PATCH", "users/op", AS.operator, { lastActive: SERVER_TIME }));
+  allowed(await call("PUT", "users/op/role", AS.manager, "viewer"));
+  allowed(await call("PATCH", "users/op", AS.manager, { role: "operator" }));
+  assert.deepEqual((await call("GET", "users/op", OWNER)).body.siteId, "site1");
+  // Staff read users (the Users page), and everyone reads their own record (the dashboard's scope).
+  for (const who of ["manager", "operator", "viewer"]) allowed(await call("GET", "users", AS[who]));
+  allowed(await call("GET", "users/op/siteId", AS.operator));
+  denied(await call("GET", "users/op/siteId", AS.driver));
+  // A platform admin reads their own platformAdmins entry (the dashboard's switcher).
+  allowed(await call("GET", "platformAdmins/pa", AS.platformAdmin));
+  denied(await call("GET", "platformAdmins/pa", AS.manager));
+});
+
+test("demo/users is closed: no siteId (or anything else) can be written or read there", async () => {
+  for (const who of ["platformAdmin", ...NOT_ADMIN_ROLES]) {
+    denied(await call("PUT", "demo/users/mgr/siteId", AS[who], "site1"));
+    denied(await call("PATCH", "demo", AS[who], { "users/mgr": { siteId: "site1" } }));
+    denied(await call("GET", "demo/users", AS[who]));
+  }
+  // The rest of demo/ is unchanged: staff still write simulated curbs.
+  allowed(await call("PATCH", "demo/units/C-001", AS.operator, { ledColor: "red" }));
+});

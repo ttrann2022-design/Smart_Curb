@@ -22,8 +22,16 @@
         // Everyone can read their own record (needed before it exists, at first sign-in).
         ".read": "auth != null && $uid === auth.uid",
         // Create your own record once, only if a manager invited your email,
-        // with exactly the role on the invite (viewer if the invite has none).
-        ".write": "auth != null && $uid === auth.uid && !data.exists() && newData.child('email').val() === auth.token.email && root.child('invites').child(auth.token.email.toLowerCase().replace('.', ',')).exists() && (newData.child('role').val() === root.child('invites').child(auth.token.email.toLowerCase().replace('.', ',')).child('role').val() || (!root.child('invites').child(auth.token.email.toLowerCase().replace('.', ',')).child('role').exists() && newData.child('role').val() === 'viewer'))",
+        // with exactly the role on the invite (viewer if the invite has none),
+        // and never with a siteId: only platform admins link an account to a customer.
+        ".write": "auth != null && $uid === auth.uid && !data.exists() && !newData.child('siteId').exists() && newData.child('email').val() === auth.token.email && root.child('invites').child(auth.token.email.toLowerCase().replace('.', ',')).exists() && (newData.child('role').val() === root.child('invites').child(auth.token.email.toLowerCase().replace('.', ',')).child('role').val() || (!root.child('invites').child(auth.token.email.toLowerCase().replace('.', ',')).child('role').exists() && newData.child('role').val() === 'viewer'))",
+        // The customer (sites/<id>) this account's dashboard is scoped to. Platform admins
+        // only, on an existing account, to an existing customer; they may also remove it.
+        // The .validate repeats the platform-admin check so no cascading write can set it.
+        "siteId": {
+          ".write": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true && data.parent().exists()",
+          ".validate": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true && newData.isString() && newData.val().matches(/^[A-Za-z0-9_-]{1,128}$/) && root.child('sites').child(newData.val()).exists()"
+        },
         "role": {
           // Only managers change roles after the account exists.
           ".write": "auth != null && data.exists() && root.child('users').child(auth.uid).child('role').val() === 'manager'",
@@ -400,6 +408,12 @@
         "$uid": {
           ".read": "auth != null && $uid === auth.uid"
         }
+      },
+      // Accounts are live only (users/). Named here so demo/$other can't be used to
+      // write a users/<uid>/siteId look-alike under demo/: no client reads or writes it.
+      "users": {
+        ".read": false,
+        ".write": false
       },
       // Everything else under demo/ (units, history, latency, simLock): any staff account.
       "$other": {

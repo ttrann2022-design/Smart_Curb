@@ -173,7 +173,7 @@ units/<curbId>
     ledColor       red | blue | green | gold | white
     panelText      up to 16 characters
 
-users/<uid>        Dashboard accounts: email, role, last active
+users/<uid>        Dashboard accounts: email, role, last active, siteId (see Customer scoping)
 invites/<email>    Pending dashboard invites (dots in the email become commas)
 drivers/<uid>      Driver app accounts
 demo/              Same shape as above, used only for demos
@@ -185,6 +185,40 @@ A few rules keep everything in sync:
 - Lot IDs are zero-padded (`lot06`, `lot07`) so they sort in the right order.
 - A lot's **capacity is its curbs that aren't offline**, and its free spots are the ones of those that report free; offline curbs count in neither. A lot with no curbs has no capacity yet ("No curbs yet"). The dashboard, lot sign, company console, both Assistants and the driver app all count this way from `units/` (`lotCounts()` in `admin-dashboard/src/unitStatus.js`).
 - `openSpots` and `totalSpots` are optional and nothing on the dashboard reads them. New lots from the console don't get them; existing lots keep theirs, and the Simulation keeps its simulated lots' values in step with the curbs.
+
+## Customer scoping
+
+There is one customer dashboard build at one address. The signed-in account decides which customer's lots and curbs it shows.
+
+### Linking an account to a customer
+
+1. Find the customer's id under `sites/` in the Firebase console (the company console's customer page shows the same customers; the id is the key under `sites/`, for example `-NxAbC123`).
+2. Find the account's uid under `users/` (or in Firebase Authentication).
+3. Set `users/<uid>/siteId` to that customer's id.
+
+Only platform admins (or the Firebase console, which ignores the rules) can set, change or remove `siteId`. A user can't set it at sign-up, a manager can't set it on anyone, their own record included, and the value must be the id of an existing customer under `sites/`. New accounts created from an invite start unlinked until someone links them.
+
+A platform admin who also uses the customer dashboard needs a `users/<uid>` record (invite them like anyone else) as well as `platformAdmins/<uid> = true`.
+
+### What the scoping does
+
+After sign-in the dashboard works out a scope (`src/scope.js`), and every page passes its data through it (`useScoped()` in `src/useScope.js`):
+
+- **Platform admin**: all customers by default, with a **Viewing** switcher under the brand to pick one customer or All.
+- **An account with `siteId`**: that customer's lots (`lots/<id>/siteId` equals it) and only the curbs whose `lot` is one of them. The header shows the customer's name if the rules let the account read it; today `sites/` is readable by platform admins only, so it says "Your customer".
+- **An account with no `siteId`**, in Live: a screen saying "Your account isn't linked to a customer yet. Ask Smart Wheel Stop to link it." and no data, Setup included.
+- **Simulation** shows the simulator's data, unscoped, for everyone: it's fake, and the banner says it's the same for every account.
+
+This covers Overview, Parking lots and Lot detail, Curb units (search included), Analytics' live occupancy and latency samples, Setup, the Users list (that customer's staff plus accounts not linked yet), the Assistant (answers, counts and chips; another customer's lot gets "couldn't find") and the lot sign (the dashboard's **Open lot sign** link adds `?site=<id>`). Occupancy history (`history/`) is recorded for every customer together, so with one customer in view Analytics and the Assistant say so instead of showing it. The Live hardware card on Overview appears only when its curb is in the scope.
+
+### The honest limit
+
+The scope controls what each dashboard **shows**. It is not access control. The database rules still let any signed-in staff account read every customer's `lots/`, `units/`, `history/`, `latency/`, `users/` and the shared `config/` and `settings/`; the lot sign's data (`lots/`, `units/`) is public, so `/sign` without `?site=` shows every lot; and any manager can still change any account's role. Someone with a staff account and the browser's developer tools could read another customer's data.
+
+Future work, if customers must be kept apart by the database itself:
+
+- **Per-customer read rules**: group data by customer (for example `customers/<siteId>/units/<id>` and `customers/<siteId>/lots/<id>`) so a rule can grant `users/<uid>/siteId === $siteId`. Rules can't filter a list, so today's flat `units/` can't be split per customer. The Receiver, the sign, the driver app and the simulator would all need to read and write the new paths.
+- **A separate Firebase project per customer**, with its own database, accounts and hosting.
 
 ## Live and Simulation data
 

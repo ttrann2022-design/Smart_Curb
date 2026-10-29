@@ -12,6 +12,7 @@ import { parseMath } from "../src/assistant/engine/math.js";
 import { ALL_EXAMPLES } from "../src/assistant/examples/index.js";
 import { FOLLOW_UPS, OUT_OF_SCOPE } from "./assistant-conversations.mjs";
 import { HOLDOUT } from "./assistant-holdout.mjs";
+import { scopeData } from "../src/scope.js";
 
 const NOW = new Date(2026, 9, 28, 15, 0, 0).getTime(); // a Wednesday, 3 PM local
 const min = (n) => NOW - n * 60000;
@@ -329,5 +330,62 @@ test("the assistant never writes, imports Firebase or calls the network", async 
   for (const f of files) {
     const src = await readFile(f, "utf8");
     assert.doesNotMatch(src, /from ["'][^"']*firebase|fetch\(|XMLHttpRequest|WebSocket|\beval\(|new Function/, f.pathname);
+  }
+});
+
+// ---------- Customer scoping (src/scope.js, as the Assistant page applies it) ----------
+
+test("scoped to one customer, the Assistant only knows that customer's lots and curbs", () => {
+  // Lot 6 and Lot 14 belong to FAU; Garage A and Lot 12 to Broward.
+  const owned = { lot06: "fau", lot14: "fau", garageA: "broward", lot12: "broward" };
+  const lots = Object.fromEntries(Object.entries(DATA.lots).map(([id, l]) => [id, { ...l, siteId: owned[id] }]));
+  const scoped = (siteId) => {
+    const v = scopeData({ lots, units: DATA.units }, { kind: "site", siteId });
+    return ctx({ ...v, history: { week: null, live: null }, historyHidden: true });
+  };
+  const broward = scoped("broward");
+  // Another customer's lot is "couldn't find", listing only this customer's lots.
+  for (const q of ["is lot 14 full", "free spots in lot 6", "tell me about lot 6"]) {
+    const r = respond(q, broward);
+    assert.equal(r.intent, "lot_not_found", q);
+    assert.match(r.text, /Lots on this site:\n• Garage A, Level 2\n• Lot 12 — North(\n|$)/, q);
+    // It may repeat the name asked about, but never lists the other customer's lots.
+    assert.doesNotMatch(r.text.split("Lots on this site:")[1], /Lot 6\b|Lot 14\b/, q);
+  }
+  // Totals and lists cover only these lots; FAU's curbs never appear.
+  const total = respond("how many spots are free", broward).text;
+  assert.match(total, /2 of 2|2 free spots out of 2|2 of 2 spots|2 free spots across the site \(2 in total\)/);
+  assert.doesNotMatch(total, /Lot 6|Lot 14/);
+  // Another customer's curb is unknown, just like a curb that doesn't exist.
+  for (let i = 0; i < 4; i++) {
+    assert.match(respond("status of C-041", broward).text, /can't find a curb called C-041|C-041 doesn't show up|there's no C-041|no curb called C-041/);
+  }
+  assert.doesNotMatch(respond("status of C-041", broward).text, /Lot 14|occupied|LED/);
+  for (const q of ["which curbs are offline", "show low batteries", "list all curbs", "give me a summary"]) {
+    assert.doesNotMatch(respond(q, broward).text, /C-00[123]|C-04[12]|Lot 6\b|Lot 14\b|C-200/, q);
+  }
+  assert.equal(respond("status of C-041", broward).intent, respond("status of C-999", broward).intent);
+  // Recorded history is for every customer together, so it's not given.
+  for (const q of ["is it busier than usual", "what's the busiest day", "is it filling up"]) {
+    assert.match(respond(q, broward).text, /all customers together|every customer combined|isn't kept per customer/, q);
+  }
+  // FAU sees its own lots, and chips never name the other customer's.
+  const fau = scoped("fau");
+  assert.match(respond("free spots in lot 6", fau).text, /Lot 6/);
+  assert.equal(respond("free spots in garage a", fau).intent, "lot_not_found");
+  for (const q of ["what lots are there", "free spots in each lot"]) {
+    const r = respond(q, fau);
+    assert.doesNotMatch(`${r.text} ${r.chips.join(" ")}`, /Garage A|Lot 12/, q);
+  }
+  // A lot named outside the usual "Lot N" patterns: the page passes the names of
+  // out-of-scope lots (hiddenLots) so the answer is still "couldn't find".
+  const withMall = { ...lots, mallp1: { name: "Mall P1", siteId: "broward" } };
+  const v = scopeData({ lots: withMall, units: DATA.units }, { kind: "site", siteId: "fau" });
+  const hiddenLots = Object.fromEntries(Object.entries(withMall).filter(([id]) => !v.lots[id]).map(([id, l]) => [id, { name: l.name }]));
+  const fauPage = ctx({ ...v, history: { week: null, live: null }, historyHidden: true, hiddenLots });
+  for (const q of ["is Mall P1 full", "free spots in mall p1", "how many spots in Mall P1"]) {
+    const r = respond(q, fauPage);
+    assert.equal(r.intent, "lot_not_found", q);
+    assert.doesNotMatch(r.text.split("Lots on this site:")[1], /Mall P1|Garage A|Lot 12/, q);
   }
 });

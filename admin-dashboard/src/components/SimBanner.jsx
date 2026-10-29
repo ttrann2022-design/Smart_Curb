@@ -18,7 +18,7 @@ function SimBanner() {
       <span className="sws-sim-text" style={{ color: c.simText, flex: "1 1 280px" }}>
         {DEMO_BUILD
           ? "Demo site. Every curb here is simulated."
-          : "You're viewing simulated curbs. Real curbs, including C-095, aren't shown or changed."}
+          : "You're viewing simulated curbs, the same for every account and customer. Real curbs, including C-095, aren't shown or changed."}
       </span>
       <span className="sws-sim-state" style={{ display: "flex", alignItems: "center", gap: 7, fontWeight: 600, minWidth: 0 }}>
         <span className={active ? "sws-live-dot" : ""} style={{ width: 7, height: 7, borderRadius: 4, margin: 0, background: active ? c.sim : c.simLine, display: "inline-block", flexShrink: 0 }} />

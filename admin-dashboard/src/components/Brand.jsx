@@ -2,13 +2,15 @@ import { c, mono } from "../theme";
 import logo from "../assets/smartcurb-logo.jpg";
 
 // Logo and wordmark for the sidebar and top bars (dashboard and company console).
-export function Brand({ size = 40, sub = "ADMIN DASHBOARD" }) {
+// customer: the customer this dashboard is scoped to, shown under the label.
+export function Brand({ size = 40, sub = "ADMIN DASHBOARD", customer }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
       <img src={logo} alt="" width={size} height={size} style={{ width: size, height: size, borderRadius: 8, objectFit: "cover", flexShrink: 0 }} />
       <div style={{ minWidth: 0 }}>
         <div style={{ fontFamily: mono, fontSize: 12.5, fontWeight: 600, letterSpacing: 0.3, whiteSpace: "nowrap" }}>SMART WHEEL STOP</div>
         <div style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: 1.4, color: c.dim }}>{sub}</div>
+        {customer && <div className="sws-brand-customer" title={customer}>{customer}</div>}
       </div>
     </div>
   );

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useOutletContext, useSearchParams } from "react-router-dom";
+import { useScoped } from "../useScope";
 import { ref, onValue } from "firebase/database";
 import { database } from "../firebase";
 import { dataPath } from "../dataMode";
@@ -39,8 +40,10 @@ const HEADERS = [
 ];
 
 function Units() {
-  const [lots, setLots] = useState({});
-  const [units, setUnits] = useState({});
+  const [allLots, setLots] = useState({});
+  const [rawUnits, setUnits] = useState({});
+  // Only the lots and curbs this account may see (src/scope.js).
+  const { lots, units } = useScoped(allLots, rawUnits);
   const [params, setParams] = useSearchParams();
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState({ key: "id", dir: 1 });
