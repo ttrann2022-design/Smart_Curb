@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { Link, useOutletContext } from "react-router-dom";
 import { ref, onValue } from "firebase/database";
 import { database } from "../firebase";
 import { dataPath } from "../dataMode";
-import { useAlertSettings, useNow, unitIssues, formatAgo, formatExact, statusKey, hasBattery, isLowBattery, STALL_WORD, ROOMY_MAX, planLayout, lotCounts } from "../units";
+import { useAlertSettings, useNow, unitIssues, formatAgo, formatExact, statusKey, hasBattery, isLowBattery, STALL_WORD, ROOMY_MAX, planLayout, lotCounts, lotsWithCapacity, freeText } from "../units";
 import LotPlan, { StallMark } from "../components/LotPlan";
 import { PageHeader, Notice, Button } from "../components/ui";
 import { useScope, useScoped } from "../useScope";
@@ -57,6 +57,35 @@ function HardwareCard({ unit, lots, alerts, now }) {
         {lot && <div><dt className="ov-k">Lot</dt><dd><Link to={`/lots?lot=${encodeURIComponent(unit.lot)}`} className="sws-link">{lot.name} <span aria-hidden="true">→</span></Link></dd></div>}
       </dl>
     </section>
+  );
+}
+
+// Lots with no curbs yet. Up to EMPTY_LOTS_SHOWN are listed; more collapse into
+// "N lots have no curbs yet" with a Show/Hide button that controls the list.
+const EMPTY_LOTS_SHOWN = 8;
+function EmptyLots({ lots }) {
+  const [open, setOpen] = useState(false);
+  const listId = useId();
+  const many = lots.length > EMPTY_LOTS_SHOWN;
+  const sorted = [...lots].sort(([, a], [, b]) => (a.name || "").localeCompare(b.name || "", undefined, { numeric: true }));
+  return (
+    <div className="ov-empty-lots">
+      {many ? (
+        <div className="ov-empty-head">
+          <span className="ov-k">{lots.length} lots have no curbs yet</span>
+          <button type="button" className="ov-empty-toggle" aria-expanded={open} aria-controls={listId} onClick={() => setOpen((o) => !o)}>
+            {open ? "Hide" : "Show"}<span className="sws-sr-only"> the {lots.length} lots with no curbs</span>
+          </button>
+        </div>
+      ) : (
+        <span className="ov-k">No curbs yet</span>
+      )}
+      <ul id={listId} hidden={many && !open}>
+        {sorted.map(([id, lot]) => (
+          <li key={id}><Link to={`/lots?lot=${encodeURIComponent(id)}`} className="sws-link">{lot.name}</Link></li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -167,12 +196,14 @@ function Overview() {
   const counts = lotCounts(entries.map(([, u]) => u));
   const { curbs: total, free, offline } = counts;
   const occupiedPct = counts.pctFull ?? 0;
+  const noCapacity = counts.capacity === 0;
   const alerts = entries
     .map(([id, u]) => [id, u, unitIssues(u, alertSettings, now)[0]])
     .filter(([, , issue]) => issue)
     .sort(([ida, a, ia], [idb, b, ib]) => (ISSUE_ORDER[ia] - ISSUE_ORDER[ib]) || ((a.battery ?? 0) - (b.battery ?? 0)) || ida.localeCompare(idb));
   const lotName = (u) => lots[u.lot]?.name || "Unassigned";
-  const lotCount = plannedLots.length + (unassigned.length ? 1 : 0);
+  // Only lots with capacity (lotsWithCapacity); unassigned curbs count as one group, as they show.
+  const lotCount = lotsWithCapacity([...plannedLots.map(([id]) => unitsByLot[id].map(([, u]) => u)), unassigned.map(([, u]) => u)]);
   const live = mode !== "sim";
   // The hardware curb belongs to one customer: its card shows only with every customer
   // in view, or for the customer whose lot it reports into.
@@ -203,21 +234,33 @@ function Overview() {
 
                 <div className={`ov-hero${showHw ? " has-hw" : ""}`}>
                   <div className="ov-summary">
-                    <div className="ov-free">
-                      {/* Keyed by value: each new count rolls up into place. */}
-                      <span className="ov-free-big"><span key={free} className="ov-num">{free}</span></span>
-                      <span className="ov-free-word">free</span>
-                    </div>
+                    {noCapacity ? (
+                      // No capacity (no curbs, or every curb offline): say why, not "0 free".
+                      <div className="ov-free is-none">
+                        <span className="ov-free-none">{freeText(counts)}</span>
+                      </div>
+                    ) : (
+                      <div className="ov-free">
+                        {/* Keyed by value: each new count rolls up into place. */}
+                        <span className="ov-free-big"><span key={free} className="ov-num">{free}</span></span>
+                        <span className="ov-free-word">free</span>
+                      </div>
+                    )}
                     <p className="ov-free-label">
                       {total === 0
-                        ? "No curbs are reporting yet"
-                        : `${free === 1 ? "Spot" : "Spots"} open right now, across ${lotCount} ${lotCount === 1 ? "lot" : "lots"}`}
+                        ? "Spots appear here once curbs report into a lot."
+                        : noCapacity
+                          ? `${total === 1 ? "The only curb is" : `All ${total} curbs are`} offline, so there are no spots to count.`
+                          : `${free === 1 ? "Spot" : "Spots"} open right now, across ${lotCount} ${lotCount === 1 ? "lot" : "lots"}`}
                     </p>
                     <ul className="ov-strip">
-                      <li>
-                        <StallMark status="occupied" />
-                        <span className="ov-strip-n">{PERCENT.format(occupiedPct / 100)}</span> <span className="ov-strip-l">occupied</span>
-                      </li>
+                      {/* No occupancy figure without capacity: 0% would read as "empty". */}
+                      {!noCapacity && (
+                        <li>
+                          <StallMark status="occupied" />
+                          <span className="ov-strip-n">{PERCENT.format(occupiedPct / 100)}</span> <span className="ov-strip-l">occupied</span>
+                        </li>
+                      )}
                       <li>
                         <StallMark status="ring" low />
                         <span className={`ov-strip-n${alerts.length ? " ov-t-warn" : ""}`}>{alerts.length}</span> <span className="ov-strip-l">need attention</span>
@@ -241,16 +284,7 @@ function Overview() {
                     {unassigned.length > 0 && (
                       <LotPlan index={plannedLots.length} columns={maxCols} name="Unassigned curbs" units={unassigned} alerts={alertSettings} now={now} />
                     )}
-                    {emptyLots.length > 0 && (
-                      <div className="ov-empty-lots">
-                        <span className="ov-k">No curbs yet</span>
-                        <ul>
-                          {emptyLots.map(([id, lot]) => (
-                            <li key={id}><Link to={`/lots?lot=${encodeURIComponent(id)}`} className="sws-link">{lot.name}</Link></li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
+                    {emptyLots.length > 0 && <EmptyLots lots={emptyLots} />}
                   </div>
                 )}
 

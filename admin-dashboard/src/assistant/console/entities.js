@@ -83,6 +83,9 @@ export const pointsToLot = (raw) => /\b(that|this|same) (lot|garage)\b/i.test(ra
 export const pointsToCurb = (raw) => /\b(that|this|same) (curb|sensor|unit)\b/i.test(raw);
 export const pointsToLead = (raw) => /\b(that|this|same) (request|lead|quote)\b/i.test(raw);
 
+// Words that start a phrase but never a name ("has been waiting", "does any lot", "has no curbs").
+const NOT_A_NAME_START = new Set(["been", "being", "had", "have", "got", "gotten", "no", "zero", "any", "some", "more", "most", "less", "least",
+  "the", "a", "an", "not", "never", "ever", "already", "still", "just", "only", "all", "every", "each", "many", "much", "few", "nothing", "none"]);
 // Words that never make a name on their own ("Tell me about Live").
 const NOT_NAMES = new Set(["i", "live", "simulation", "sim", "home", "customers", "customer", "requests", "request", "deployments", "import", "assistant",
   "console", "firebase", "csv", "uid", "lime", "it", "its", "them", "that", "this", "these", "those", "there", "here", "me", "you", "us", "my", "our",
@@ -124,11 +127,16 @@ export function nameIn(raw) {
     const text = clean(after[1]);
     if (text) return { text, kind: "thing" };
   }
-  // Lower case, at the end: "lots of acme", "how many lots does acme have", "and broward?"
-  const tail = s.match(/\b(?:about|for|of|does|did|has|and|with)\s+([a-z][a-z0-9&.-]*(?:\s+[a-z0-9][a-z0-9&.-]*){0,2})\s*\??\s*$/i);
+  // Lower case, at the end: "how many lots does acme have", "tell me about acme", "and broward?"
+  // Not after "with", "for" or "of": there an unfamiliar word is part of the question
+  // ("customers with zero lots", "lots for events"), not a name. Real names still match
+  // through findAll, and capitalised ones through the rule above.
+  const tail = s.match(/\b(?:about|does|did|has|and)\s+([a-z][a-z0-9&.-]*(?:\s+[a-z0-9][a-z0-9&.-]*){0,2})\s*\??\s*$/i);
   if (tail) {
     const text = clean(tail[1]);
-    if (text && text.toLowerCase().split(/\s+/).some((w) => w.length >= 3 && !isKnown(w) && !NOT_NAMES.has(w))) return { text, kind: "thing" };
+    const first = text ? text.toLowerCase().split(/\s+/)[0] : "";
+    // "has been sitting longest", "did any …": a verb or quantifier, not a name.
+    if (text && !NOT_A_NAME_START.has(first) && text.toLowerCase().split(/\s+/).some((w) => w.length >= 3 && !isKnown(w) && !NOT_NAMES.has(w))) return { text, kind: "thing" };
   }
   return null;
 }

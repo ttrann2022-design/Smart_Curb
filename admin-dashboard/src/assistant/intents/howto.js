@@ -111,7 +111,7 @@ export const HOWTO_INTENTS = [
     keys: [["setup", 3], ["run", 1], ["reopen", 2], ["redo", 2], ["how", 0.5], ["start", 0.5], ["facility type", 2.5], ["site name", 2]],
     next: ["How do I put a curb in a lot?", "What are zone presets?", "What are modules?"],
     say: (ctx) => note([
-      "Open Settings and press Reopen setup under Site setup. Setup has three steps: the site's name and contact, the facility type (which picks the zone presets and modules), and Connect curbs, where curbs that have reported get put in their lots.",
+      "Open Settings and press Reopen setup under Site setup. Setup has three steps: the site's name and contact, the facility type (which picks the LED zone presets), and Connect curbs, where curbs that have reported get put in their lots.",
       "Settings, then Reopen setup. You'll go through site details, facility type and Connect curbs.",
       "Setup reopens from Settings (Site setup, Reopen setup). It's three short steps.",
     ], needManager(ctx, "run Setup")),
@@ -264,9 +264,9 @@ export const HOWTO_INTENTS = [
     keys: [["module", 3], ["sidebar", 1], ["feature", 1.5], ["permit", 1], ["event mode", 2]],
     next: ["How do I run Setup?", "What are zone presets?", "What can you do?"],
     say: [
-      "Modules depend on the facility type chosen in Setup, for example permit tiers for a campus or event mode for a stadium. The ones that are on appear in the sidebar. None is built yet: each opens a page that says what it will do.",
-      "Modules are extra pages for your facility type. They're placeholders for now that describe what's coming.",
-      "The modules in the sidebar come from Setup's facility type. Each one explains what it will do once it's built.",
+      "Modules are optional features for a facility type, such as permit tiers for a campus or event mode for a stadium. None has shipped yet, so none appears in the sidebar. They'll show up there, and in Setup, once they're released.",
+      "Modules are extra features for your facility type. None is available yet, so you won't see any in the sidebar for now.",
+      "No modules are available yet. When one is released it appears in Setup and, once turned on, in the sidebar.",
     ],
   },
   {

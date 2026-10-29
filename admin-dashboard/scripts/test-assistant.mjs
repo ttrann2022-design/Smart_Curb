@@ -206,6 +206,12 @@ test("lot capacity is the curbs that report: offline curbs are never in \"of N\"
   assert.match(respond("free spots in lot 20", { ...c, lots, units }).text, /Lot 20 has no curbs yet|No curbs yet in Lot 20/);
   assert.match(respond("free spots in lot 21", { ...c, lots, units }).text, /reporting|offline/);
   assert.match(respond("free spots in each lot", { ...c, lots, units }).text, /• Lot 20: no curbs yet/);
+  // "across N lots" counts only the 4 lots with capacity, not Lot 20 (no curbs) or Lot 21 (all offline).
+  for (let seed = 1; seed <= 12; seed++) {
+    const t = respond("how many spots are free", { ...c, lots, units, random: seeded(seed) }).text;
+    const across = /across (\d+) lots?/.exec(t);
+    if (across) assert.equal(across[1], "4", t);
+  }
 });
 
 test("a lot that doesn't exist gets \"couldn't find\" and the real lots, not the site total", () => {
@@ -387,5 +393,22 @@ test("scoped to one customer, the Assistant only knows that customer's lots and 
     const r = respond(q, fauPage);
     assert.equal(r.intent, "lot_not_found", q);
     assert.doesNotMatch(r.text.split("Lots on this site:")[1], /Mall P1|Garage A|Lot 12/, q);
+  }
+});
+
+test("an unfamiliar word after with, for or of isn't treated as a name", () => {
+  const cases = [
+    ["customers with zero lots", ["fallback"]],
+    ["lots with no curbs", ["lot_list"]],
+    ["which request has been sitting longest", ["fallback"]],
+    ["customers with no lots", ["fallback"]],
+  ];
+  for (const [q, want] of cases) {
+    const r = respond(q, ctx());
+    assert.ok(want.includes(r.intent), `${q} -> ${r.intent}`);
+    assert.doesNotMatch(r.text, /couldn't find|There's no lot called|isn't one of the lots/, q);
+  }
+  for (const q of ["lots for events", "free spots for visitors", "curbs with low battery"]) {
+    assert.notEqual(respond(q, ctx()).intent, "lot_not_found", q);
   }
 });

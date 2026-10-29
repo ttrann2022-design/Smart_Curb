@@ -1,7 +1,7 @@
 // Lot, curb and deployment intents (lots/, units/): counts, lots without a customer,
 // a size or a location, one lot's details and curbs, offline curbs and low
 // batteries by customer, and one curb's status.
-import { batteryText, freeText } from "../../../unitStatus.js";
+import { batteryText, freeText, lotsWithCapacity } from "../../../unitStatus.js";
 import { ago, curbEntries, customerViews, isLow, isOnline, lotViews, plural, sourced, sourceLine, vary } from "../data.js";
 import { askLot, listing, poss, withData } from "../common.js";
 
@@ -43,7 +43,7 @@ export const LOT_INTENTS = [
   },
   {
     id: "lots_no_size", group: "status", lot: -3,
-    keys: [["without size", 5], ["no size", 5], ["missing size", 5], ["size", 2], ["without", 1], ["unknown size", 4], ["how do i", -3], ["biggest", -3], ["most", -3]],
+    keys: [["without size", 5], ["no size", 5], ["lot no curb", 6], ["lot without curb", 6], ["lot with no curb", 6], ["no curb yet", 4], ["no capacity", 4], ["missing size", 5], ["size", 2], ["without", 1], ["unknown size", 4], ["how do i", -3], ["biggest", -3], ["most", -3]],
     next: ["Lots without coordinates", "How do I edit a lot?", "How do I import lots?"],
     // A lot's size is its capacity, the curbs that report into it, so "no size" means no curbs yet.
     say: withData((ctx, ent) => listing(ctx, ent, lotViews(ctx).filter((l) => !l.curbs.length).map((l) => `${l.name}${l.customer ? ` (${l.customer})` : ""}`),
@@ -203,7 +203,7 @@ export const LOT_INTENTS = [
       const notes = [offline && `${plural(offline, "offline curb")} not counted`, empty && `${plural(empty, "lot")} with no curbs yet`].filter(Boolean);
       const tail = notes.length ? ` (${notes.join("; ")})` : "";
       return sourced(ctx, [
-        `${plural(sum, "spot")} of capacity across ${plural(lots.length, "lot")}, ${free.toLocaleString()} free right now${tail}.`,
+        `${plural(sum, "spot")} of capacity across ${plural(lotsWithCapacity(lots.map((l) => l.curbs.map(([, u]) => u))), "lot")}, ${free.toLocaleString()} free right now${tail}.`,
         `All lots together: ${free.toLocaleString()} free of ${sum.toLocaleString()}${tail}.`,
         `Total capacity is ${plural(sum, "spot")} from the reporting curbs, ${free.toLocaleString()} of them free${tail}.`,
       ]);
