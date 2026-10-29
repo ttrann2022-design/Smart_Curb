@@ -1158,3 +1158,8 @@ html.sws-theme-fade #root { animation: sws-theme-in var(--dur-base) var(--ease-o
 .sc-unlinked-p { margin: 0; font-size: var(--fs-body); line-height: 1.6; color: var(--dim); }
 .sc-unlinked-who { margin: 0; font-size: 12.5px; color: var(--dim); overflow-wrap: anywhere; }
 .sc-unlinked-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+
+/* Overview hero with no capacity: the reason ("No curbs yet" / "No curbs reporting")
+   in place of "0 free", sized to fit beside the hardware card and on a phone. */
+.ov-free.is-none { line-height: 1.05; }
+.ov-free-none { font-size: clamp(30px, 4.2vw, 56px); font-weight: 600; letter-spacing: -0.02em; color: var(--text); overflow-wrap: anywhere; }

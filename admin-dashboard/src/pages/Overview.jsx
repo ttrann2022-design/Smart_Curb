@@ -3,7 +3,7 @@ import { Link, useOutletContext } from "react-router-dom";
 import { ref, onValue } from "firebase/database";
 import { database } from "../firebase";
 import { dataPath } from "../dataMode";
-import { useAlertSettings, useNow, unitIssues, formatAgo, formatExact, statusKey, hasBattery, isLowBattery, STALL_WORD, ROOMY_MAX, planLayout, lotCounts } from "../units";
+import { useAlertSettings, useNow, unitIssues, formatAgo, formatExact, statusKey, hasBattery, isLowBattery, STALL_WORD, ROOMY_MAX, planLayout, lotCounts, freeText } from "../units";
 import LotPlan, { StallMark } from "../components/LotPlan";
 import { PageHeader, Notice, Button } from "../components/ui";
 import { useScope, useScoped } from "../useScope";
@@ -167,6 +167,7 @@ function Overview() {
   const counts = lotCounts(entries.map(([, u]) => u));
   const { curbs: total, free, offline } = counts;
   const occupiedPct = counts.pctFull ?? 0;
+  const noCapacity = counts.capacity === 0;
   const alerts = entries
     .map(([id, u]) => [id, u, unitIssues(u, alertSettings, now)[0]])
     .filter(([, , issue]) => issue)
@@ -203,21 +204,33 @@ function Overview() {
 
                 <div className={`ov-hero${showHw ? " has-hw" : ""}`}>
                   <div className="ov-summary">
-                    <div className="ov-free">
-                      {/* Keyed by value: each new count rolls up into place. */}
-                      <span className="ov-free-big"><span key={free} className="ov-num">{free}</span></span>
-                      <span className="ov-free-word">free</span>
-                    </div>
+                    {noCapacity ? (
+                      // No capacity (no curbs, or every curb offline): say why, not "0 free".
+                      <div className="ov-free is-none">
+                        <span className="ov-free-none">{freeText(counts)}</span>
+                      </div>
+                    ) : (
+                      <div className="ov-free">
+                        {/* Keyed by value: each new count rolls up into place. */}
+                        <span className="ov-free-big"><span key={free} className="ov-num">{free}</span></span>
+                        <span className="ov-free-word">free</span>
+                      </div>
+                    )}
                     <p className="ov-free-label">
                       {total === 0
-                        ? "No curbs are reporting yet"
-                        : `${free === 1 ? "Spot" : "Spots"} open right now, across ${lotCount} ${lotCount === 1 ? "lot" : "lots"}`}
+                        ? "Spots appear here once curbs report into a lot."
+                        : noCapacity
+                          ? `${total === 1 ? "The only curb is" : `All ${total} curbs are`} offline, so there are no spots to count.`
+                          : `${free === 1 ? "Spot" : "Spots"} open right now, across ${lotCount} ${lotCount === 1 ? "lot" : "lots"}`}
                     </p>
                     <ul className="ov-strip">
-                      <li>
-                        <StallMark status="occupied" />
-                        <span className="ov-strip-n">{PERCENT.format(occupiedPct / 100)}</span> <span className="ov-strip-l">occupied</span>
-                      </li>
+                      {/* No occupancy figure without capacity: 0% would read as "empty". */}
+                      {!noCapacity && (
+                        <li>
+                          <StallMark status="occupied" />
+                          <span className="ov-strip-n">{PERCENT.format(occupiedPct / 100)}</span> <span className="ov-strip-l">occupied</span>
+                        </li>
+                      )}
                       <li>
                         <StallMark status="ring" low />
                         <span className={`ov-strip-n${alerts.length ? " ov-t-warn" : ""}`}>{alerts.length}</span> <span className="ov-strip-l">need attention</span>
