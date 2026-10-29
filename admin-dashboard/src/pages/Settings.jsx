@@ -7,7 +7,7 @@ import { c, mono } from "../theme";
 import { DEFAULT_ALERTS, useAlertSettings } from "../units";
 import { stopSimulation } from "../demo/simulator";
 import { DEMO_BUILD } from "../dataMode";
-import { MODULES, SITE_PATH, enabledModules, facilityById, writeSetup } from "../site";
+import { MODULES, SITE_PATH, enabledModules, facilityById, isBuilt, writeSetup } from "../site";
 import { THEMES, normalizeTheme } from "../themes";
 import ThemePicker from "../components/ThemePicker";
 import DataModeSwitch from "../components/DataModeSwitch";
@@ -149,7 +149,8 @@ function SiteSummary({ siteConfig, canEdit }) {
     ["Site name", site?.siteName],
     ["Contact", contact && [contact.name, contact.email, contact.phone].filter(Boolean).join(" · ")],
     ["Facility type", facility?.label],
-    ["Modules on", facility && (modules.length ? modules.map((id) => MODULES[id].label).join(", ") : "None")],
+    // Listed only once some module is built; none is yet.
+    ...(Object.keys(MODULES).some(isBuilt) ? [["Modules on", facility && (modules.length ? modules.map((id) => MODULES[id].label).join(", ") : "None")]] : []),
   ];
 
   return (
