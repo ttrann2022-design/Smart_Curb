@@ -400,7 +400,9 @@ button.lp-stall { background: none; border: 0; padding: 0; margin: 0; font: inhe
 .ov-skel .lp-block { background: var(--card); }
 
 .ov-hero { display: grid; grid-template-columns: minmax(0, 1fr); gap: 28px 56px; align-items: end; }
-.ov-hero.has-hw { grid-template-columns: auto minmax(320px, 440px); justify-content: start; column-gap: 96px; }
+/* The summary takes the width its number needs; the gap and the hardware card give way
+   first, so a three-digit count never runs under the card (1101-1300px). */
+.ov-hero.has-hw { grid-template-columns: max-content minmax(280px, 440px); justify-content: start; column-gap: clamp(32px, 5vw, 96px); }
 .ov-summary {
   display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: var(--sp-8);
   grid-template-areas: "num strip" "label strip";
@@ -418,7 +420,7 @@ button.lp-stall { background: none; border: 0; padding: 0; margin: 0; font: inhe
   display: flex; flex-wrap: wrap; gap: var(--sp-3) 36px; font-size: var(--fs-body); color: var(--dim);
 }
 .ov-hero.has-hw .ov-strip { justify-self: start; margin-top: 30px; }
-.ov-strip li { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 9px; white-space: nowrap; }
+.ov-strip li { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 9px; white-space: nowrap; min-width: 0; }
 .ov-strip-n { font-family: var(--mono); font-size: 22px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
 .ov-strip .lp-block, .ov-attn-list .lp-block, .lp-block.is-swatch { width: 10px; --ring: 1.5px; flex-shrink: 0; }
 
@@ -429,6 +431,12 @@ button.lp-stall { background: none; border: 0; padding: 0; margin: 0; font: inhe
 .ov-empty-lots { align-self: start; padding-top: 2px; display: flex; flex-direction: column; gap: 10px; }
 .ov-empty-lots ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 18px; }
 .ov-empty-lots .sws-link { font-family: var(--mono); font-size: 13.5px; }
+/* More than 8 empty lots: a count with a Show/Hide button that controls the list. */
+.ov-empty-lots ul[hidden] { display: none; }
+.ov-empty-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.ov-empty-toggle { padding: 0; border: 0; background: none; font: inherit; font-size: 12.5px; font-weight: 600; color: var(--link); text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; cursor: pointer; border-radius: 3px; }
+.ov-empty-toggle:hover { text-decoration-color: currentColor; }
+.ov-empty-toggle:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
 
 /* Live hardware card (Live mode only) */
 .ov-hw { background: var(--panel); border-radius: 8px; padding: 22px var(--sp-5) var(--sp-5); display: flex; flex-direction: column; gap: 20px; min-width: 0; }
@@ -460,7 +468,9 @@ button.lp-stall { background: none; border: 0; padding: 0; margin: 0; font: inhe
   .lp-stall:hover .lp-block, .lp-stall:focus-visible .lp-block { transform: none; }
 }
 
-@media (max-width: 1100px) {
+/* Below this the summary (with a three-digit count) and the hardware card can't sit
+   side by side without one running under the other, so they stack. */
+@media (max-width: 1240px) {
   .ov-hero.has-hw { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 900px) {
@@ -673,10 +683,17 @@ button.lp-stall { background: none; border: 0; padding: 0; margin: 0; font: inhe
 .as-msg.is-user { justify-content: flex-end; }
 @keyframes as-in { from { opacity: 0; transform: translateY(4px); } }
 .as-avatar {
-  width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0; margin-top: 2px;
+  width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0; margin-top: 2px; overflow: hidden;
   display: flex; align-items: center; justify-content: center;
   background: var(--brand-bg); color: var(--brand);
 }
+.as-avatar img { width: 100%; height: 100%; object-fit: cover; }
+/* Who you're talking to: the logo mark, the name and an "Online" line. */
+.as-head { display: flex; align-items: center; gap: var(--sp-3); padding: 10px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
+.as-head .as-avatar { width: 40px; height: 40px; margin: 0; }
+.as-head-name { margin: 0; font-family: var(--mono); font-weight: 600; font-size: var(--fs-section); color: var(--text); }
+.as-head-status { display: flex; align-items: center; gap: 6px; margin-top: 2px; font-size: 12.5px; color: var(--dim); }
+.as-head-status .sws-live-dot { margin: 0; }
 .as-bubble { max-width: min(600px, 85%); padding: 11px 15px; font-size: var(--fs-body); line-height: 1.6; white-space: pre-line; overflow-wrap: anywhere; background: var(--panel); color: var(--text); border-radius: 3px 12px 12px 12px; }
 /* Your messages: a lighter neutral surface, never lime. */
 .as-msg.is-user .as-bubble { background: var(--line); border-radius: 12px 12px 3px 12px; }
@@ -1136,3 +1153,23 @@ html.sws-theme-fade #root { animation: sws-theme-in var(--dur-base) var(--ease-o
 @media (max-width: 900px) {
   .tp-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-3); }
 }
+
+/* ---------- Customer scoping (src/components/ScopeControls.jsx, Brand) ---------- */
+/* The customer this dashboard shows, under ADMIN DASHBOARD in the sidebar and top bar. */
+.sws-brand-customer { margin-top: 3px; max-width: 170px; font-size: 11.5px; font-weight: 600; color: var(--brand); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sws-topbar .sws-brand-customer { max-width: 200px; }
+/* Platform admins: Viewing All customers, or one. */
+.sc-viewing { display: flex; flex-direction: column; gap: 6px; margin: -8px 4px 18px; }
+.sc-viewing-k { font-size: 10px; letter-spacing: 1.1px; }
+.sc-viewing-select { height: 34px; width: 100%; font-size: 13px; }
+/* No customer linked: one calm screen, no data. */
+.sc-unlinked-icon { width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; background: var(--brand-bg); color: var(--brand); box-shadow: inset 0 0 0 1px var(--brand-line); }
+.sc-unlinked-h { margin: 0; font-family: var(--mono); font-size: 17px; font-weight: 600; line-height: 1.4; }
+.sc-unlinked-p { margin: 0; font-size: var(--fs-body); line-height: 1.6; color: var(--dim); }
+.sc-unlinked-who { margin: 0; font-size: 12.5px; color: var(--dim); overflow-wrap: anywhere; }
+.sc-unlinked-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+
+/* Overview hero with no capacity: the reason ("No curbs yet" / "No curbs reporting")
+   in place of "0 free", sized to fit beside the hardware card and on a phone. */
+.ov-free.is-none { line-height: 1.05; }
+.ov-free-none { font-size: clamp(30px, 4.2vw, 56px); font-weight: 600; letter-spacing: -0.02em; color: var(--text); overflow-wrap: anywhere; }

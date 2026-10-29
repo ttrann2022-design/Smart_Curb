@@ -9,21 +9,23 @@ import { SIM_ROOT, dataPath, getDataMode } from "./dataMode";
 // In Simulation it lives at demo/config/site instead, like all other curb data.
 export const SITE_PATH = "config/site";
 
-// Optional modules a facility type can turn on. They appear in the sidebar when on.
-// None is built yet: each opens a page that says what it will do.
+// Optional modules a facility type can turn on. A module appears (sidebar, Setup,
+// Settings, /modules/<id>) only when it is built and turned on. None is built yet,
+// so none is shown to anyone; set built: true on one when it ships and it comes
+// back everywhere, with the page in src/pages/Module.jsx.
 export const MODULES = {
-  eventMode: { label: "Event mode scheduling", desc: "Switch lots into event signage and pricing on a schedule." },
-  gateRouting: { label: "Gate and lane routing", desc: "Point drivers to the gate or lane with the most free curbs." },
-  demandPricing: { label: "Demand-based pricing", desc: "Raise or lower rates as lots fill and empty." },
-  tailgateZones: { label: "Tailgate zone controls", desc: "Mark tailgating areas and set when they open and close." },
-  permitTiers: { label: "Permit tiers", desc: "Match zones to permit types and flag cars in the wrong one." },
-  semesterCalendar: { label: "Semester calendar", desc: "Plan around term dates, exams and breaks." },
-  rateTiers: { label: "Daily rate tiers", desc: "Short term, long term and economy rates by the day." },
-  patientPriority: { label: "Patient priority", desc: "Keep spaces near entrances free for patients." },
-  staffShifts: { label: "Staff shifts", desc: "Hold staff zones around shift changes." },
-  dwellLimits: { label: "Dwell limits", desc: "Flag cars that stay past a zone's time limit." },
-  meteredParking: { label: "Metered parking", desc: "Street spaces with meters and time limits." },
-  enforcementRouting: { label: "Enforcement routing", desc: "Send enforcement staff to overstays in a sensible order." },
+  eventMode: { label: "Event mode scheduling", desc: "Switch lots into event signage and pricing on a schedule.", built: false },
+  gateRouting: { label: "Gate and lane routing", desc: "Point drivers to the gate or lane with the most free curbs.", built: false },
+  demandPricing: { label: "Demand-based pricing", desc: "Raise or lower rates as lots fill and empty.", built: false },
+  tailgateZones: { label: "Tailgate zone controls", desc: "Mark tailgating areas and set when they open and close.", built: false },
+  permitTiers: { label: "Permit tiers", desc: "Match zones to permit types and flag cars in the wrong one.", built: false },
+  semesterCalendar: { label: "Semester calendar", desc: "Plan around term dates, exams and breaks.", built: false },
+  rateTiers: { label: "Daily rate tiers", desc: "Short term, long term and economy rates by the day.", built: false },
+  patientPriority: { label: "Patient priority", desc: "Keep spaces near entrances free for patients.", built: false },
+  staffShifts: { label: "Staff shifts", desc: "Hold staff zones around shift changes.", built: false },
+  dwellLimits: { label: "Dwell limits", desc: "Flag cars that stay past a zone's time limit.", built: false },
+  meteredParking: { label: "Metered parking", desc: "Street spaces with meters and time limits.", built: false },
+  enforcementRouting: { label: "Enforcement routing", desc: "Send enforcement staff to overstays in a sensible order.", built: false },
 };
 
 // zones: the default label and panel text for each LED zone colour (panel text is 16 characters at most).
@@ -123,10 +125,13 @@ export function writeSetup(path, values) {
 
 export const facilityById = (id) => FACILITIES.find((f) => f.id === id) || null;
 
-// Module ids that are on, in catalog order.
+export const isBuilt = (id) => MODULES[id]?.built === true;
+
+// Module ids that are built and turned on, in catalog order. Unbuilt ones are never
+// listed, even if a site has them on (their setting is kept for later).
 export function enabledModules(site) {
   const on = site?.modules || {};
-  return Object.keys(MODULES).filter((id) => on[id] === true);
+  return Object.keys(MODULES).filter((id) => isBuilt(id) && on[id] === true);
 }
 
 // Live site settings for the current data mode. Pass the mode so the

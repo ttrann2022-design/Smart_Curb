@@ -1,5 +1,5 @@
 import { Navigate, useOutletContext, useParams } from "react-router-dom";
-import { MODULES, facilityById } from "../site";
+import { MODULES, facilityById, isBuilt } from "../site";
 import { PageHeader, Card, EmptyState } from "../components/ui";
 
 // Optional modules chosen in Setup. None is built yet, so each page says
@@ -8,7 +8,8 @@ function Module() {
   const { id } = useParams();
   const { role, siteConfig } = useOutletContext();
   const mod = MODULES[id];
-  if (!mod) return <Navigate to="/overview" replace />;
+  // Unbuilt modules have no page for anyone (they come back with built: true in site.js).
+  if (!mod || !isBuilt(id)) return <Navigate to="/overview" replace />;
   const facility = facilityById(siteConfig.site?.facilityType);
   const on = siteConfig.site?.modules?.[id] === true;
 

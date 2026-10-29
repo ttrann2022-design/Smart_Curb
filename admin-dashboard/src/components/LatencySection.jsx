@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useScope, useScoped } from "../useScope";
 import { ref, onValue } from "firebase/database";
 import { database } from "../firebase";
 import { dataPath } from "../dataMode";
@@ -105,14 +106,19 @@ function LegChart({ points, label }) {
 
 function LatencySection({ mode, delay = 0 }) {
   const sim = mode === "sim";
-  const [samples, setSamples] = useState([]);
+  const [allSamples, setSamples] = useState([]);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState(false);
-  const [dash, setDash] = useState([]);
+  const [allDash, setDash] = useState([]);
   const [leg, setLeg] = useState("rxToWriteMs");
   const [showAll, setShowAll] = useState(false);
   const offset = useRef(0);
   const seen = useRef(null);
+  // Curbs in scope, for filtering the samples below (src/scope.js).
+  const [allLots, setLots] = useState({});
+  const [allUnits, setUnits] = useState({});
+  const scope = useScope();
+  const { units: scopedUnits } = useScoped(allLots, allUnits);
 
   useEffect(() => {
     const stopSamples = onValue(ref(database, dataPath("latency")), (snap) => {
@@ -135,7 +141,9 @@ function LatencySection({ mode, delay = 0 }) {
 
     // Firebase to dashboard: compare each changed lastUpdated with server-corrected now.
     // The first snapshot only sets the baseline; old timestamps aren't delays.
+    const stopLots = onValue(ref(database, dataPath("lots")), (snap) => setLots(snap.val() || {}), () => {});
     const stopUnits = onValue(ref(database, dataPath("units")), (snap) => {
+      setUnits(snap.val() || {});
       const now = Date.now() + offset.current;
       const latest = {};
       const fresh = [];
@@ -149,8 +157,13 @@ function LatencySection({ mode, delay = 0 }) {
       if (fresh.length) setDash((d) => [...d, ...fresh].slice(-DASH_KEEP));
     }, () => {});
 
-    return () => { stopSamples(); stopOffset(); stopUnits(); };
+    return () => { stopSamples(); stopOffset(); stopUnits(); stopLots(); };
   }, []);
+
+  // Only curbs in scope: another customer's samples never reach the chart or table.
+  const inScope = (x) => scope.kind === "all" || Object.hasOwn(scopedUnits, x.unit);
+  const samples = allSamples.filter(inScope);
+  const dash = allDash.filter(inScope);
 
   // Points per leg, oldest first.
   const pointsFor = (id) => (id === "fbToDash"

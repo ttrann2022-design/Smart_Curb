@@ -4,6 +4,7 @@ import {
 } from "firebase/database";
 import { auth, database } from "../firebase";
 import { SIM_ROOT } from "../dataMode";
+import { lotCounts } from "../unitStatus";
 
 // Everything in this file reads and writes ONLY under SIM_ROOT ("demo/").
 // It deliberately never uses dataPath(), so switching the dashboard to Live
@@ -61,14 +62,14 @@ const LOCK_PATH = simPath("simLock");
 const LOCK_STALE_MS = 15000;
 const SESSION = Math.random().toString(36).slice(2) + Date.now().toString(36);
 
+// The legacy openSpots/totalSpots on each simulated lot, kept in step with the curbs
+// for anything outside the dashboard that still reads them. Same rule as every page
+// (lotCounts): totalSpots is the curbs that report, openSpots those that are free.
 function lotStats(units) {
   const stats = {};
-  Object.keys(DEMO_LOTS).forEach((lotId) => { stats[lotId] = { openSpots: 0, totalSpots: 0 }; });
-  Object.values(units).forEach((u) => {
-    const s = stats[u.lot];
-    if (!s) return;
-    s.totalSpots += 1;
-    if (u.online && !u.occupied) s.openSpots += 1;
+  Object.keys(DEMO_LOTS).forEach((lotId) => {
+    const c = lotCounts(Object.values(units).filter((u) => u.lot === lotId));
+    stats[lotId] = { openSpots: c.free, totalSpots: c.capacity };
   });
   return stats;
 }

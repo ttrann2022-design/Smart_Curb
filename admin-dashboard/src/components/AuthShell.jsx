@@ -2,7 +2,7 @@ import { c, mono } from "../theme";
 import logo from "../assets/smartcurb-logo.jpg";
 
 // Shared two-pane layout for Sign in and Create account.
-function AuthShell({ children, sub = "ADMIN CONSOLE" }) {
+function AuthShell({ children, sub = "ADMIN DASHBOARD" }) {
   return (
     <div className="sws-login" style={{ display: "flex", minHeight: "100dvh" }}>
       <div

@@ -6,6 +6,8 @@ import { c } from "../theme";
 import { useNow, formatAgo, formatExact } from "../units";
 import Icon from "../components/Icon";
 import { PageHeader, Card, Button, Input, Select, EmptyState, StatusText } from "../components/ui";
+import { scopeUsers } from "../scope";
+import { useScope } from "../useScope";
 
 const permLabels = ["View occupancy", "View battery and status", "Change LED zones", "Edit panel text", "View camera snapshots (planned)", "Manage users"];
 
@@ -52,6 +54,7 @@ function Users() {
   const now = useNow(60000);
   const isManager = role === "manager";
   const myUid = auth.currentUser?.uid;
+  const scope = useScope();
 
   useEffect(() => {
     const stopUsers = onValue(ref(database, "users"), (s) => setUsers(s.val() || {}));
@@ -62,7 +65,8 @@ function Users() {
     return () => { stopUsers(); stopInvites(); };
   }, [isManager]);
 
-  const userList = Object.entries(users).sort(([, a], [, b]) => (a.email || "").localeCompare(b.email || ""));
+  // Accounts of the customer in scope, plus ones not linked yet (src/scope.js).
+  const userList = Object.entries(scopeUsers(users, scope)).sort(([, a], [, b]) => (a.email || "").localeCompare(b.email || ""));
   const inviteList = Object.entries(invites).sort(([, a], [, b]) => (b.invitedAt || 0) - (a.invitedAt || 0));
   const countFor = (id) => userList.filter(([, u]) => u.role === id).length;
 

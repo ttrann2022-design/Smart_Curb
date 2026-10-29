@@ -1,18 +1,20 @@
 import { useState } from "react";
-import { Link, useNavigate, useOutletContext } from "react-router-dom";
-import { useNow, formatAgo, formatExact } from "../units";
-import { PageHeader, Card, Chips, EmptyState, Button, SearchInput } from "../components/ui";
-import { EMPTY_SITE_FORM, SITE_STATUSES, createSite, sortedSites, summarize, typeLabel } from "./data";
-import { LoadError, LoadingCard, SiteForm, SiteStatusBadge } from "./parts";
+import { useNavigate, useOutletContext, useSearchParams } from "react-router-dom";
+import { useNow } from "../units";
+import { PageHeader, Card, Chips, Button, SearchInput, Skeleton } from "../components/ui";
+import { EMPTY_SITE_FORM, SITE_STATUSES, createSite, sortedSites, summarize } from "./data";
+import { ConsoleEmpty, CustomerCards, LoadError, SiteForm } from "./parts";
 
-const HEADERS = ["Customer", "Type", "Status", "Lots", "Curbs", "Online", "Last seen"];
+// Home's pipeline links here as /customers?status=prospect (or active).
+const statusFrom = (params) => (SITE_STATUSES.some((s) => s.id === params.get("status")) ? params.get("status") : "all");
 
 function Customers() {
   const { mode, data } = useOutletContext();
   const navigate = useNavigate();
   const now = useNow();
+  const [params] = useSearchParams();
   const [adding, setAdding] = useState(false);
-  const [filter, setFilter] = useState("all");
+  const [filter, setFilter] = useState(() => statusFrom(params));
   const [search, setSearch] = useState("");
   const { loaded, error, sites } = data;
 
@@ -24,13 +26,23 @@ function Customers() {
     />
   );
   if (error) return <>{head}<div className="sws-page-body sws-narrow"><LoadError error={error} /></div></>;
-  if (!loaded) return <>{head}<div className="sws-page-body"><LoadingCard rows={4} /></div></>;
+  if (!loaded) {
+    return (
+      <>
+        {head}
+        <div className="sws-page-body" role="status" aria-label="Loading">
+          <Skeleton width={320} height={34} style={{ maxWidth: "100%" }} />
+          <div className="cn-cards">{[0, 1, 2, 3].map((i) => <Skeleton key={i} height={210} />)}</div>
+        </div>
+      </>
+    );
+  }
 
   const { siteStats } = summarize(data);
   const all = sortedSites(sites);
   const q = search.trim().toLowerCase();
   const searched = all.filter(([, s]) => !q || (s.name || "").toLowerCase().includes(q) || (s.contactName || "").toLowerCase().includes(q));
-  const rows = searched.filter(([, s]) => filter === "all" || s.status === filter);
+  const shown = searched.filter(([, s]) => filter === "all" || s.status === filter);
   const options = [{ id: "all", label: "All", count: searched.length }, ...SITE_STATUSES.map((s) => ({ ...s, count: searched.filter(([, x]) => x.status === s.id).length }))];
 
   return (
@@ -51,56 +63,27 @@ function Customers() {
         )}
 
         {all.length === 0 ? (
-          <Card delay={60}>
-            <EmptyState
-              icon="users"
-              title="No customers yet"
-              action={!adding && <Button size="sm" onClick={() => setAdding(true)}>New customer</Button>}
-            >
-              {mode === "sim" ? "Reload the demo customers from Home, or add one here." : "Add one here, or convert a quote request on the Requests page."}
-            </EmptyState>
-          </Card>
+          <ConsoleEmpty
+            icon="users"
+            title="No customers yet"
+            action={!adding && <Button size="sm" variant="primary" onClick={() => setAdding(true)}>New customer</Button>}
+          >
+            {mode === "sim" ? "Reload the demo customers from Home, or add one here." : "Add one here, or convert a quote request on the Requests page."}
+          </ConsoleEmpty>
         ) : (
           <>
-            <div className="sws-enter" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "var(--sp-3)", flexWrap: "wrap" }}>
+            <div className="cn-toolbar sws-enter">
               <Chips label="Filter by status" options={options} value={filter} onChange={setFilter} />
-              <SearchInput label="Search customers" placeholder="Search name or contact…" value={search} onChange={(e) => setSearch(e.target.value)} style={{ width: 240, maxWidth: "100%" }} />
+              <SearchInput label="Search customers" placeholder="Search name or contact…" value={search} onChange={(e) => setSearch(e.target.value)} />
             </div>
-            <Card body={false} delay={60}>
-              <div className="cn-list">
-                <p className="sws-sr-only" role="status">{rows.length} of {all.length} customers shown</p>
-                <div role="table" aria-label="Customers" style={{ padding: "4px 6px" }}>
-                  <div role="row" className="cn-row cn-cust cn-head">
-                    {HEADERS.map((h) => <div key={h} role="columnheader" className="sws-th">{h}</div>)}
-                  </div>
-                  <div role="rowgroup" className="cn-body">
-                    {rows.length === 0 && (
-                      <EmptyState icon="search" title="No customers match" action={<Button size="sm" onClick={() => { setFilter("all"); setSearch(""); }}>Clear filters</Button>}>
-                        Try another status or search.
-                      </EmptyState>
-                    )}
-                    {rows.map(([id, s]) => {
-                      const st = siteStats[id];
-                      const ago = formatAgo(st.lastSeen, now);
-                      return (
-                        // The name is the link; it stretches over the row so the whole row is clickable.
-                        <div key={id} role="row" className="cn-row cn-cust is-link">
-                          <span role="cell" className="cn-c cn-name"><Link to={`/customers/${id}`} className="cn-row-link">{s.name}</Link></span>
-                          <span role="cell" className="cn-c cn-dim">{typeLabel(s.type)}</span>
-                          <span role="cell" className="cn-c"><SiteStatusBadge status={s.status} /></span>
-                          <span role="cell" className="cn-c"><span className="cn-num">{st.lots.length}</span><span className="cn-key"> {st.lots.length === 1 ? "lot" : "lots"}</span></span>
-                          <span role="cell" className="cn-c cn-num">{st.curbs}</span>
-                          <span role="cell" className={`cn-c${st.curbs && st.online < st.curbs ? " cn-warn" : ""}`}>
-                            {st.curbs ? <><span className="cn-num">{st.online} of {st.curbs}</span><span className="cn-key"> online</span></> : <span className="cn-dim">No curbs</span>}
-                          </span>
-                          <span role="cell" className={`cn-c${ago ? "" : " cn-dim"}`} title={formatExact(st.lastSeen)}>{ago ? <><span className="cn-key">Seen </span>{ago}</> : "Never seen"}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            </Card>
+            <p className="sws-sr-only" role="status">{shown.length} of {all.length} customers shown</p>
+            {shown.length === 0 ? (
+              <ConsoleEmpty icon="search" title="No customers match" action={<Button size="sm" onClick={() => { setFilter("all"); setSearch(""); }}>Clear filters</Button>}>
+                {q ? `Nothing matches “${search.trim()}”` : "None have this status"}{filter !== "all" && q ? " with this status" : ""}. Try another status or search.
+              </ConsoleEmpty>
+            ) : (
+              <CustomerCards sites={shown} siteStats={siteStats} now={now} />
+            )}
           </>
         )}
       </div>

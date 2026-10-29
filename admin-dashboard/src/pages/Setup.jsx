@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { Navigate, useNavigate, useOutletContext } from "react-router-dom";
+import { useScoped } from "../useScope";
 import { ref, onValue } from "firebase/database";
 import { database } from "../firebase";
 import { dataPath } from "../dataMode";
 import { addNewSimCurbs } from "../demo/simulator";
 import { c, mono, LED_HEX, LED_COLORS } from "../theme";
-import { FACILITIES, MODULES, SITE_PATH, facilityById, writeSetup } from "../site";
+import { FACILITIES, MODULES, SITE_PATH, facilityById, isBuilt, writeSetup } from "../site";
 import { useNow, formatAgo, formatExact } from "../units";
 import { normalizeTheme } from "../themes";
 import Icon from "../components/Icon";
@@ -76,6 +77,7 @@ function SiteStep({ form, setForm, invalid }) {
 
 function FacilityStep({ facility, modules, pickFacility, toggleModule }) {
   const chosen = facilityById(facility);
+  const builtIds = chosen ? Object.keys(chosen.modules).filter(isBuilt) : [];
   return (
     <>
       <div role="radiogroup" aria-label="Facility type" className="su-grid">
@@ -93,9 +95,10 @@ function FacilityStep({ facility, modules, pickFacility, toggleModule }) {
 
       {chosen && (
         <div key={chosen.id} className="su-split sws-enter">
-          <Card plain title={`Modules turned on for ${chosen.label}`} subtitle="Modules that are on appear in the sidebar. None is built yet: each opens a page that says what it will do.">
+          {/* Only modules that are built are offered (none yet); the rest stay hidden. */}
+          {builtIds.length > 0 && <Card plain title={`Modules turned on for ${chosen.label}`} subtitle="Modules that are on appear in the sidebar.">
             <div className="su-mods">
-              {Object.keys(chosen.modules).map((id) => (
+              {builtIds.map((id) => (
                 <label key={id} className="su-mod">
                   <input type="checkbox" checked={!!modules[id]} onChange={() => toggleModule(id)} style={{ width: 16, height: 16, accentColor: c.text, margin: "1px 0 0", flexShrink: 0 }} />
                   <span style={{ minWidth: 0, flex: 1 }}>
@@ -106,7 +109,7 @@ function FacilityStep({ facility, modules, pickFacility, toggleModule }) {
                 </label>
               ))}
             </div>
-          </Card>
+          </Card>}
           <Card plain title="Zone presets" subtitle="Ready-made zones for Parking lots → LED panel control. Operators can still set any colour and text.">
             <ul className="su-zones">
               {LED_COLORS.map((name) => (
@@ -125,8 +128,12 @@ function FacilityStep({ facility, modules, pickFacility, toggleModule }) {
 }
 
 function CurbsStep({ mode }) {
-  const [units, setUnits] = useState(null);
-  const [lots, setLots] = useState(null);
+  const [allUnits, setUnits] = useState(null);
+  const [allLots, setLots] = useState(null);
+  // Only this account's customer (src/scope.js); null while loading.
+  const scoped = useScoped(allLots || {}, allUnits || {});
+  const units = allUnits && scoped.units;
+  const lots = allLots && scoped.lots;
   const [choice, setChoice] = useState({});
   // Curbs assigned during this visit stay listed, so the manager sees what they did.
   const [assignedHere, setAssignedHere] = useState({});
@@ -335,7 +342,7 @@ function Wizard({ saved, mode, previewTheme }) {
 
   const titles = [
     { title: "Tell us about this site", sub: "The basics staff will see. You can change them later from Settings." },
-    { title: "What kind of facility are you managing?", sub: "The dashboard configures itself around your answer: the zone presets and the modules in the sidebar both follow it. You can switch this later in Settings." },
+    { title: "What kind of facility are you managing?", sub: "The dashboard configures itself around your answer: the LED zone presets follow it. You can switch this later in Settings." },
     { title: "Connect curbs", sub: "These curbs have reported in but aren't in a lot yet. Put each one in the lot it's installed in, then pick a look for the dashboard." },
   ];
 

@@ -1,0 +1,115 @@
+// Held-out phrasings for the Console Assistant: written before any tuning and never
+// tuned on. npm run test:console-assistant requires at least 80% of them to reach
+// the expected intent; misses here are reported, not fixed by adding these phrases.
+// Test-only: not shipped with the app.
+//
+// Names refer to the test data in scripts/test-console-assistant.mjs.
+
+export const CONSOLE_HOLDOUT = [
+  // Customers
+  ["how many clients have we got", "customer_count"],
+  ["give me the count of our sites", "customer_count"],
+  ["split customers by active and paused", "customer_by_status"],
+  ["who is currently an active client", "customer_active"],
+  ["any prospects in the pipeline?", "customer_prospects"],
+  ["which accounts are on hold", "customer_paused"],
+  ["show every customer we have", "customer_list"],
+  ["what do we know about Broward Mall", "customer_details"],
+  ["give me info on harbor point hotel", "customer_details"],
+  ["email address for the Broward Mall contact", "customer_contact"],
+  ["who should I call at Riverside Garage", "customer_contact"],
+  ["is Demo University active or not", "customer_status_one"],
+  ["what kind of customer is Riverside Garage", "customer_type_one"],
+  ["which lots does Broward Mall have", "customer_lots"],
+  ["how many curbs at Demo University", "customer_curbs"],
+  ["are any of Broward Mall's sensors down", "customer_offline"],
+  ["who has the largest number of lots", "most_lots_customer"],
+  ["which client has the most hardware", "most_curbs_customer"],
+  ["which customer is in the worst shape for offline curbs", "most_offline_customer"],
+  ["customers with zero lots", "customers_without_lots"],
+  ["who's the latest customer we signed", "newest_customer"],
+  ["how many hotels and malls do we have", "customer_by_type"],
+  ["did Demo University come from a quote request", "customer_from_request"],
+  ["when did we add Broward Mall", "customer_created"],
+
+  // Requests
+  ["total number of quote requests", "request_count"],
+  ["any unanswered requests", "request_new_count"],
+  ["what came in most recently", "request_newest"],
+  ["break the requests down by status", "request_by_status"],
+  ["requests nobody has answered in two days", "request_stale"],
+  ["what types of sites are people asking about", "request_by_type"],
+  ["did Dana Whitaker's request get converted", "request_converted"],
+  ["which leads turned into customers", "request_won_list"],
+  ["what did Elena Ortiz ask for", "request_details"],
+  ["which request has been sitting longest", "request_oldest_open"],
+  ["how many quotes this week", "request_this_week"],
+  ["what share of requests do we win", "request_conversion_rate"],
+
+  // Lots and deployments
+  ["count the lots", "lot_count"],
+  ["lots nobody owns", "lots_unassigned"],
+  ["which lots are missing gps coordinates", "lots_no_coords"],
+  ["lots with no capacity set", "lots_no_size"],
+  ["details on lot 14", "lot_details"],
+  ["whose lot is North Garage", "lot_owner"],
+  ["what curbs are in lot 6", "lot_curbs"],
+  ["how many sensors are online overall", "curb_total"],
+  ["list the dead curbs", "curbs_offline"],
+  ["offline counts for each client", "offline_by_customer"],
+  ["which batteries need replacing", "low_battery"],
+  ["low battery count per client", "low_battery_by_customer"],
+  ["which customers actually have hardware", "sites_real_curbs"],
+  ["is C-041 taken", "curb_status"],
+  ["curbs that aren't placed in any lot", "curbs_unplaced"],
+  ["what's our largest lot", "lot_biggest"],
+  ["how many parking spaces in total", "spots_total"],
+  ["is this data current", "data_freshness"],
+  ["am I looking at real data", "data_mode_now"],
+  ["give me a quick overview", "site_summary"],
+
+  // How-to
+  ["how do I create a new client", "howto_add_customer"],
+  ["steps to turn a lead into a customer", "howto_convert_request"],
+  ["how can I attach a lot to a customer", "howto_assign_lot"],
+  ["how do I detach a lot from a client", "howto_unassign_lot"],
+  ["how do I make a new lot", "howto_add_lot"],
+  ["how to change a lot's capacity", "howto_edit_lot"],
+  ["can I upload lots from a spreadsheet", "howto_import_lots"],
+  ["how do I go to the simulation", "howto_switch_mode"],
+  ["how to refill the demo data", "howto_reload_demo"],
+  ["how do I generate a test quote", "howto_fake_request"],
+  ["how do I give a colleague access to the console", "howto_add_platform_admin"],
+  ["how do I take away someone's admin rights", "howto_remove_platform_admin"],
+  ["where do I get someone's user id", "howto_find_uid"],
+  ["how do I get rid of a customer", "howto_delete_customer"],
+  ["where's the public request form", "howto_quote_form"],
+  ["how do I update a customer's contact", "howto_edit_customer"],
+  ["how do I set a customer to paused", "howto_customer_status"],
+  ["how do I close a request", "howto_request_status"],
+
+  // Troubleshooting
+  ["it says no console access", "ts_no_access"],
+  ["I can't log in to the console", "ts_cant_sign_in"],
+  ["home says couldn't load console data", "ts_load_error"],
+  ["convert to customer isn't working", "ts_convert_fails"],
+  ["the lot won't assign to the customer", "ts_assign_fails"],
+  ["why did my import rows get rejected", "ts_import_rejected"],
+  ["import says no customer is called that", "ts_import_customer_not_found"],
+  ["the totals don't look right", "ts_numbers_wrong"],
+  ["simulation has nothing in it", "ts_sim_empty"],
+
+  // Explain
+  ["what's the difference between a platform admin and a manager", "explain_admin_vs_manager"],
+  ["what do prospect active and paused mean", "explain_customer_status"],
+  ["what does it mean when a request is won", "explain_won"],
+  ["explain live versus simulation", "explain_live_vs_sim"],
+  ["how are customers lots and curbs connected", "explain_data_model"],
+
+  // Small talk and fun
+  ["hey there", "greeting"],
+  ["cheers, that helped", "thanks"],
+  ["tell me something funny", "joke"],
+  ["what's 250 times 4", "calculator"],
+  ["what's the time", "time_now"],
+];

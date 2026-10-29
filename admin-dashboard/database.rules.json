@@ -22,8 +22,16 @@
         // Everyone can read their own record (needed before it exists, at first sign-in).
         ".read": "auth != null && $uid === auth.uid",
         // Create your own record once, only if a manager invited your email,
-        // with exactly the role on the invite (viewer if the invite has none).
-        ".write": "auth != null && $uid === auth.uid && !data.exists() && newData.child('email').val() === auth.token.email && root.child('invites').child(auth.token.email.toLowerCase().replace('.', ',')).exists() && (newData.child('role').val() === root.child('invites').child(auth.token.email.toLowerCase().replace('.', ',')).child('role').val() || (!root.child('invites').child(auth.token.email.toLowerCase().replace('.', ',')).child('role').exists() && newData.child('role').val() === 'viewer'))",
+        // with exactly the role on the invite (viewer if the invite has none),
+        // and never with a siteId: only platform admins link an account to a customer.
+        ".write": "auth != null && $uid === auth.uid && !data.exists() && !newData.child('siteId').exists() && newData.child('email').val() === auth.token.email && root.child('invites').child(auth.token.email.toLowerCase().replace('.', ',')).exists() && (newData.child('role').val() === root.child('invites').child(auth.token.email.toLowerCase().replace('.', ',')).child('role').val() || (!root.child('invites').child(auth.token.email.toLowerCase().replace('.', ',')).child('role').exists() && newData.child('role').val() === 'viewer'))",
+        // The customer (sites/<id>) this account's dashboard is scoped to. Platform admins
+        // only, on an existing account, to an existing customer; they may also remove it.
+        // The .validate repeats the platform-admin check so no cascading write can set it.
+        "siteId": {
+          ".write": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true && data.parent().exists()",
+          ".validate": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true && newData.isString() && newData.val().matches(/^[A-Za-z0-9_-]{1,128}$/) && root.child('sites').child(newData.val()).exists()"
+        },
         "role": {
           // Only managers change roles after the account exists.
           ".write": "auth != null && data.exists() && root.child('users').child(auth.uid).child('role').val() === 'manager'",
@@ -163,10 +171,11 @@
       ".read": true,
       "$lotId": {
         // Platform admins create a lot, but never replace or delete one. The ID is lowercase
-        // letters and numbers; a new lot has name, totalSpots, openSpots equal to totalSpots,
-        // siteId and optional latitude/longitude, and nothing else.
+        // letters and numbers; a new lot has name, siteId and optional latitude/longitude,
+        // totalSpots and openSpots (only alongside totalSpots, and equal to it), and nothing
+        // else. Capacity comes from the curbs, so the console leaves both counts out.
         ".write": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true && !data.exists() && newData.exists()",
-        ".validate": "data.exists() || ($lotId.matches(/^[a-z0-9]+$/) && $lotId.length <= 80 && newData.hasChildren(['name', 'totalSpots', 'openSpots', 'siteId']) && newData.child('openSpots').val() === newData.child('totalSpots').val())",
+        ".validate": "data.exists() || ($lotId.matches(/^[a-z0-9]+$/) && $lotId.length <= 80 && newData.hasChildren(['name', 'siteId']))",
         // After that they change only name, totalSpots, latitude and longitude.
         "name": {
           ".write": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true && data.parent().exists() && newData.exists()",
@@ -184,7 +193,8 @@
           ".write": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true && data.parent().exists()",
           ".validate": "newData.isNumber() && newData.val() >= -180 && newData.val() <= 180"
         },
-        // Set by a platform admin only when creating the lot; then it belongs to the hardware.
+        // Optional when a platform admin creates the lot, and then only equal to totalSpots;
+        // after that it belongs to the hardware.
         "openSpots": { ".validate": "data.exists() || newData.val() === newData.parent().child('totalSpots').val()" },
         // No other field on a new lot (units and the rest come from the hardware).
         "$other": { ".validate": "data.exists() || data.parent().exists()" },
@@ -341,10 +351,11 @@
         ".write": "auth != null && root.child('users').child(auth.uid).exists()",
         "$lotId": {
           // Platform admins create a lot, but never replace or delete one. The ID is lowercase
-          // letters and numbers; a new lot has name, totalSpots, openSpots equal to totalSpots,
-          // siteId and optional latitude/longitude, and nothing else.
+          // letters and numbers; a new lot has name, siteId and optional latitude/longitude,
+          // totalSpots and openSpots (only alongside totalSpots, and equal to it), and nothing
+          // else. Capacity comes from the curbs, so the console leaves both counts out.
           ".write": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true && !data.exists() && newData.exists()",
-          ".validate": "auth != null && root.child('users').child(auth.uid).exists() || (data.exists() || ($lotId.matches(/^[a-z0-9]+$/) && $lotId.length <= 80 && newData.hasChildren(['name', 'totalSpots', 'openSpots', 'siteId']) && newData.child('openSpots').val() === newData.child('totalSpots').val()))",
+          ".validate": "auth != null && root.child('users').child(auth.uid).exists() || (data.exists() || ($lotId.matches(/^[a-z0-9]+$/) && $lotId.length <= 80 && newData.hasChildren(['name', 'siteId'])))",
           // After that they change only name, totalSpots, latitude and longitude.
           "name": {
             ".write": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true && data.parent().exists() && newData.exists()",
@@ -362,7 +373,8 @@
             ".write": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true && data.parent().exists()",
             ".validate": "auth != null && root.child('users').child(auth.uid).exists() || (newData.isNumber() && newData.val() >= -180 && newData.val() <= 180)"
           },
-          // Set by a platform admin only when creating the lot; then it belongs to the hardware.
+          // Optional when a platform admin creates the lot, and then only equal to totalSpots;
+          // after that it belongs to the hardware.
           "openSpots": { ".validate": "auth != null && root.child('users').child(auth.uid).exists() || (data.exists() || newData.val() === newData.parent().child('totalSpots').val())" },
           // No other field on a new lot (units and the rest come from the hardware).
           "$other": { ".validate": "auth != null && root.child('users').child(auth.uid).exists() || (data.exists() || data.parent().exists())" },
@@ -396,6 +408,12 @@
         "$uid": {
           ".read": "auth != null && $uid === auth.uid"
         }
+      },
+      // Accounts are live only (users/). Named here so demo/$other can't be used to
+      // write a users/<uid>/siteId look-alike under demo/: no client reads or writes it.
+      "users": {
+        ".read": false,
+        ".write": false
       },
       // Everything else under demo/ (units, history, latency, simLock): any staff account.
       "$other": {

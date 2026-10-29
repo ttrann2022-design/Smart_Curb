@@ -5,6 +5,8 @@ import { database } from "../firebase";
 import { DEMO_BUILD, SIM_ROOT } from "../dataMode";
 import AnimatedNumber from "../components/AnimatedNumber";
 import { useFlash } from "../motion";
+import { lotCounts } from "../unitStatus";
+import { scopeData } from "../scope";
 
 const mono = "'IBM Plex Mono', monospace";
 
@@ -52,12 +54,16 @@ function Sign() {
     return () => { stopLots(); stopUnits(); clearInterval(clock); };
   }, [root]);
 
-  const unitList = Object.values(units);
-  const rows = Object.entries(lots).map(([id, lot]) => {
-    const mine = unitList.filter((u) => u.lot === id);
-    const open = mine.filter((u) => u.online && !u.occupied).length;
+  // ?site=<customer id> (the dashboard's "Open lot sign" link for a scoped account)
+  // shows only that customer's lots and curbs (src/scope.js). Simulation is never scoped.
+  const siteId = simulated ? null : params.get("site");
+  const shown = siteId ? scopeData({ lots, units }, { kind: "site", siteId }) : { lots, units };
+  const unitList = Object.values(shown.units);
+  const rows = Object.entries(shown.lots).map(([id, lot]) => {
+    // Capacity is the lot's curbs that report (lotCounts); offline ones count in neither.
+    const counts = lotCounts(unitList.filter((u) => u.lot === id));
     const [main, sub] = (lot.name || id).split(" — ");
-    return { id, main, sub, open, total: mine.length };
+    return { id, main, sub, open: counts.free, total: counts.capacity };
   });
   const totalOpen = rows.reduce((s, r) => s + r.open, 0);
 
