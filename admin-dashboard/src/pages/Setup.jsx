@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Navigate, useNavigate, useOutletContext } from "react-router-dom";
+import { useScoped } from "../useScope";
 import { ref, onValue } from "firebase/database";
 import { database } from "../firebase";
 import { dataPath } from "../dataMode";
@@ -125,8 +126,12 @@ function FacilityStep({ facility, modules, pickFacility, toggleModule }) {
 }
 
 function CurbsStep({ mode }) {
-  const [units, setUnits] = useState(null);
-  const [lots, setLots] = useState(null);
+  const [allUnits, setUnits] = useState(null);
+  const [allLots, setLots] = useState(null);
+  // Only this account's customer (src/scope.js); null while loading.
+  const scoped = useScoped(allLots || {}, allUnits || {});
+  const units = allUnits && scoped.units;
+  const lots = allLots && scoped.lots;
   const [choice, setChoice] = useState({});
   // Curbs assigned during this visit stay listed, so the manager sees what they did.
   const [assignedHere, setAssignedHere] = useState({});

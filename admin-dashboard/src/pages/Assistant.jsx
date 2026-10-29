@@ -7,6 +7,8 @@ import { PageHeader, Button, Input } from "../components/ui";
 import { useAlertSettings } from "../units";
 import { respond, welcome } from "../assistant";
 import logo from "../assets/smartcurb-logo.jpg";
+import { isPartial } from "../scope";
+import { useScope, useScoped } from "../useScope";
 
 // Curb IDs (C-041) in a message render in the monospace, kept away from auto-translate.
 function withIds(text) {
@@ -51,7 +53,7 @@ const reducedMotion = () => typeof window !== "undefined" && window.matchMedia("
 // The assistant's reply at the moment it's asked. Status answers need the data,
 // so while it loads (or if it can't be read) they say so instead of reporting an empty site.
 function replyTo(q, data, base, conversation) {
-  const ctx = { ...base, lots: data.lots || {}, units: data.units || {}, history: { week: data.week, live: data.live }, now: Date.now() };
+  const ctx = { ...base, lots: data.lots || {}, units: data.units || {}, history: { week: data.week, live: data.live }, historyHidden: data.historyHidden, now: Date.now() };
   const reply = respond(q, ctx, conversation);
   if (reply.group === "status" && (data.error || !data.lots || !data.units)) {
     reply.text = data.error
@@ -68,7 +70,21 @@ function greetingFor(base) {
 function Assistant() {
   const { role, mode } = useOutletContext();
   const alerts = useAlertSettings();
-  const data = useAssistantData();
+  const raw = useAssistantData();
+  // Answers, counts and chips use only the lots and curbs in scope, so a lot of another
+  // customer gets "couldn't find". History covers every customer together, so it's
+  // left out unless everything is in view.
+  const scope = useScope();
+  const partial = isPartial(scope);
+  const scoped = useScoped(raw.lots, raw.units);
+  const data = {
+    ...raw,
+    lots: raw.lots && scoped.lots,
+    units: raw.units && scoped.units,
+    week: partial ? null : raw.week,
+    live: partial ? null : raw.live,
+    historyHidden: partial,
+  };
   const sim = mode === "sim";
   const base = { alerts, mode, role, firstName: firstName(auth.currentUser) };
   const [messages, setMessages] = useState(() => [greetingFor(base)]);

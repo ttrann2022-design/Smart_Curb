@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { useOutletContext } from "react-router-dom";
+import { isPartial } from "../scope";
+import { useScope, useScoped } from "../useScope";
 import { ref, onValue, query, limitToLast } from "firebase/database";
 import { database } from "../firebase";
 import { dataPath } from "../dataMode";
@@ -182,18 +184,27 @@ function LiveChart({ live }) {
 function Analytics() {
   const [week, setWeek] = useState(null);
   const [live, setLive] = useState([]);
-  const [units, setUnits] = useState({});
+  const [allUnits, setUnits] = useState({});
+  const [allLots, setLots] = useState({});
   const [loaded, setLoaded] = useState(false);
   const { mode } = useOutletContext();
+  const scope = useScope();
+  // History is recorded for every customer together, so it's only shown when all are in view.
+  const partial = isPartial(scope);
+  const { units } = useScoped(allLots, allUnits);
 
   useEffect(() => {
+    const stopUnits = onValue(ref(database, dataPath("units")), (s) => setUnits(s.val() || {}));
+    const stopLots = onValue(ref(database, dataPath("lots")), (s) => setLots(s.val() || {}));
+    if (partial) {
+      return () => { stopUnits(); stopLots(); };
+    }
     const stopWeek = onValue(ref(database, dataPath("history/week")), (s) => { setWeek(s.val()); setLoaded(true); }, () => setLoaded(true));
     const stopLive = onValue(query(ref(database, dataPath("history/live")), limitToLast(60)), (s) => {
       setLive(Object.values(s.val() || {}).filter((p) => typeof p?.t === "number").sort((a, b) => a.t - b.t));
     }, () => {});
-    const stopUnits = onValue(ref(database, dataPath("units")), (s) => setUnits(s.val() || {}));
-    return () => { stopWeek(); stopLive(); stopUnits(); };
-  }, []);
+    return () => { stopWeek(); stopLive(); stopUnits(); stopLots(); };
+  }, [partial]);
 
   // Right now comes straight from the curbs, not from the last history point.
   // Occupied share of the curbs that report (lotCounts), as everywhere else.
@@ -218,7 +229,7 @@ function Analytics() {
 
   return (
     <>
-      <PageHeader title="Analytics" subtitle={mode === "sim" ? "Occupancy trends across all simulated lots" : "Occupancy trends across all lots"} />
+      <PageHeader title="Analytics" subtitle={mode === "sim" ? "Occupancy trends across all simulated lots" : partial ? "Occupancy across your customer's lots" : "Occupancy trends across all lots"} />
 
       <div className="sws-page-body an-body">
         <section className="an-summary sws-enter" aria-label="Summary">
@@ -236,7 +247,13 @@ function Analytics() {
           </dl>
         </section>
 
-        {loaded && !hasWeek && live.length === 0 ? (
+        {partial ? (
+          <div className="an-panel sws-enter" style={{ "--d": "60ms" }}>
+            <EmptyState icon="analytics" title="History isn't kept per customer yet">
+              Occupancy history is recorded for every customer together, so it isn't shown for one customer. The live occupancy above comes from this customer's curbs only.
+            </EmptyState>
+          </div>
+        ) : loaded && !hasWeek && live.length === 0 ? (
           <div className="an-panel sws-enter" style={{ "--d": "60ms" }}>
             <EmptyState icon="analytics" title="No history recorded yet">
               {mode === "sim"

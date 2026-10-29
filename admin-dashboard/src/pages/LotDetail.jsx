@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useOutletContext, useSearchParams } from "react-router-dom";
+import { scopeLots } from "../scope";
+import { useScope, useScoped } from "../useScope";
 import { ref, onValue, update } from "firebase/database";
 import { database } from "../firebase";
 import { dataPath, getDataMode } from "../dataMode";
@@ -64,8 +66,11 @@ function InfoRow({ label, value, title }) {
 }
 
 function LotDetail() {
-  const [lots, setLots] = useState({});
-  const [units, setUnits] = useState({});
+  const [allLots, setLots] = useState({});
+  const [allUnits, setUnits] = useState({});
+  // Only the lots and curbs this account may see (src/scope.js).
+  const { lots, units } = useScoped(allLots, allUnits);
+  const scope = useScope();
   const [selectedLot, setSelectedLot] = useState(null);
   const [selectedUnit, setSelectedUnit] = useState(null);
   const [ledColor, setLedColor] = useState("blue");
@@ -90,14 +95,15 @@ function LotDetail() {
 
   useEffect(() => {
     const stopLots = onValue(ref(database, dataPath("lots")), (snap) => {
-      const data = snap.val() || {};
+      // Pick only from lots in scope: ?lot= naming another customer's lot is ignored.
+      const data = scopeLots(snap.val() || {}, scope);
       setLots(data);
       const wanted = requestedLot.current;
       setSelectedLot((prev) => (prev && data[prev] ? prev : wanted && data[wanted] ? wanted : Object.keys(data)[0] || null));
     });
     const stopUnits = onValue(ref(database, dataPath("units")), (snap) => setUnits(snap.val() || {}));
     return () => { stopLots(); stopUnits(); };
-  }, []);
+  }, [scope]);
 
   const lotUnits = Object.entries(units)
     .filter(([, u]) => u.lot === selectedLot)

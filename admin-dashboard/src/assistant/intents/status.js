@@ -57,7 +57,14 @@ function curbList(ctx, ent, entries, openers, emptyVariants, detail) {
   return { variants: sourced(ctx, vary(page ? ["Here are the next ones:", "More of them:", "Continuing the list:"] : openers, body)), more: hasMore(entries, page) };
 }
 
-const HISTORY_EMPTY = (ctx) => [
+// History is recorded for every customer together, so a dashboard scoped to one
+// customer doesn't get it (ctx.historyHidden, from the page).
+const HISTORY_NOT_SCOPED = [
+  "History is recorded for all customers together, so I can't give it for yours yet. Ask me about right now instead?",
+  "I don't have history for just your lots: it's kept for every customer combined. I can tell you how things look right now.",
+  "Recorded history isn't kept per customer yet, so I can't compare times for your lots. Ask me about free spots, offline curbs or batteries right now.",
+];
+const HISTORY_EMPTY = (ctx) => ctx.historyHidden ? HISTORY_NOT_SCOPED : [
   `There's no recorded history yet${ctx.mode === "sim" ? " in the simulation. Loading fresh simulated data adds a week of it" : " for the live site. Analytics fills in as readings are recorded"}.`,
   `I don't have any recorded history to go on yet${ctx.mode === "sim" ? "; load fresh simulated data to create some" : ""}.`,
   "No history has been recorded yet, so I can't compare times. Ask me about right now instead?",
@@ -603,6 +610,7 @@ export const STATUS_INTENTS = [
     keys: [["getting busier", 4], ["getting quieter", 4], ["occupancy going", 3], ["filling up", 3.5], ["emptying", 3.5], ["last hour", 2.5], ["lately", 2], ["going up", 3], ["going down", 3], ["direction", 2]],
     next: ["How full is the site?", "Is it busier than usual?", "When is it busiest?"],
     say: (ctx) => {
+      if (ctx.historyHidden) return HISTORY_NOT_SCOPED;
       const series = liveSeries(ctx).filter((p) => ctx.now - p.t < 3600000);
       if (series.length < 2) return [`There aren't enough recent readings to see a trend${ctx.mode === "sim" ? ". Start the simulation and give it a minute" : ""}.`, "I need a few recent readings to spot a trend, and there aren't enough yet.", "Not enough recent history to tell which way it's going."];
       const a = series[0];

@@ -6,6 +6,7 @@ import { dataPath } from "../dataMode";
 import { useAlertSettings, useNow, unitIssues, formatAgo, formatExact, statusKey, hasBattery, isLowBattery, STALL_WORD, ROOMY_MAX, planLayout, lotCounts } from "../units";
 import LotPlan, { StallMark } from "../components/LotPlan";
 import { PageHeader, Notice, Button } from "../components/ui";
+import { useScoped } from "../useScope";
 
 // The curb wired to the real hardware Receiver. Live mode gives it its own card.
 const HARDWARE_ID = "C-095";
@@ -107,8 +108,10 @@ function OverviewSkeleton({ live, leaving, onGone }) {
 }
 
 function Overview() {
-  const [lots, setLots] = useState({});
-  const [units, setUnits] = useState({});
+  const [allLots, setLots] = useState({});
+  const [allUnits, setUnits] = useState({});
+  // Only the lots and curbs this account may see (src/scope.js).
+  const { lots, units } = useScoped(allLots, allUnits);
   // Content waits for both lots and units, so the hero number doesn't count up from 0.
   const [ready, setReady] = useState({ lots: false, units: false });
   const [skelGone, setSkelGone] = useState(false);
