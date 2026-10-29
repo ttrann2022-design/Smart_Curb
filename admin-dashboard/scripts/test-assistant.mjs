@@ -8,7 +8,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import { INTENTS, INTENT_BY_ID, SOMETHING_ELSE, findLot, menuChips, respond, welcome } from "../src/assistant/index.js";
-import { parseMath } from "../src/assistant/math.js";
+import { parseMath } from "../src/assistant/engine/math.js";
 import { ALL_EXAMPLES } from "../src/assistant/examples/index.js";
 import { FOLLOW_UPS, OUT_OF_SCOPE } from "./assistant-conversations.mjs";
 import { HOLDOUT } from "./assistant-holdout.mjs";

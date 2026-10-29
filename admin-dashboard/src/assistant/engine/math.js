@@ -1,6 +1,6 @@
 // A small, safe calculator for "what is 17x23" style questions. It tokenises and
 // parses the expression itself (recursive descent); nothing is ever evaluated as code.
-import { numberWords } from "./entities.js";
+import { numberWords } from "./names.js";
 
 const WORD_OPS = [
   [/\bmultiplied by\b|\btimes\b/g, " * "],
