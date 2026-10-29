@@ -26,6 +26,9 @@ const REPEATABLE = new Set(["joke", "fun_fact", "story", "riddle", "tip_general"
 const TOPICAL = new Set(["status", "howto", "explain"]);
 
 const FOLLOW_UP = /^\s*(and|what about|how about|and what about|same for|also|then|ok and|so)\b/i;
+// Asking whether one curb is free or taken, and words that make it a question about many.
+const OCCUPANCY = /\b(free|available|open|empty|vacant|occupied|taken|in use|busy)\b/i;
+const LIST_WORDS = /\b(how many|which|all|each|every|list|curbs|spots|lots|count|how to|how do|what does|mean)\b/i;
 const FILLER = new Set(["and", "about", "how", "the", "for", "same", "then", "with", "in", "at", "is", "it", "its", "of", "ok", "so", "also", "please", "one", "there", "that", "this", "lot", "curb", "c", "unit", "sensor", "garage", "level"]);
 
 // Only the curb or lot was named ("and Lot 6?", "C-042", "lot 99"): no other words left.
@@ -106,6 +109,8 @@ function respondOne(raw, ctx, state) {
   ent.only = !!named && entityOnly(raw, ent, ctx);
 
   if (ent.only) return run(followIntent(state, ent.curbId ? "curb" : "lot"), ctx, state, ent);
+  // "Is C-041 free?" asks about that curb, never the site total.
+  if (ent.curbId && OCCUPANCY.test(raw) && !LIST_WORDS.test(raw)) return run(INTENT_BY_ID.curb_status, ctx, state, { ...ent, occupancy: true });
 
   const { intent } = match(raw, ctx, ent);
   if (missing && (!intent || intent.group === "status" || entityOnly(raw, ent, ctx))) return lotNotFound(missing, ctx, state, ent, intent || INTENT_BY_ID[state.lastIntentId]);

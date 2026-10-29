@@ -189,6 +189,27 @@ test("a lot that doesn't exist gets \"couldn't find\" and the real lots, not the
   }
 });
 
+test("\"is C-041 free / occupied / taken?\" answers for that curb, not the site", () => {
+  for (const q of ["Is C-041 free?", "is C-041 occupied", "is C-041 taken", "is c41 available", "is curb 41 empty", "is C-041 vacant", "is C-041 in use"]) {
+    const r = respond(q, ctx());
+    assert.equal(r.intent, "curb_status", q);
+    assert.equal(r.entities.curbId, "C-041", q);
+    assert.match(r.text, /^(C-041 is occupied|Right now C-041 \(in Lot 14\) is occupied)/, q);
+    assert.match(r.text, /Lot 14/, q);
+    assert.doesNotMatch(r.text, /spots are free across|free spots? out of|Garage A/, q);
+  }
+  const first = respond("is C-002 free right now", ctx()).text.split("\n")[0];
+  assert.match(first, /C-002/);
+  assert.match(first, /is free/);
+  assert.match(first, /Lot 6/);
+  assert.match(respond("is C-003 free", ctx()).text, /C-003[^\n]*offline, so I can't tell/);
+  assert.match(respond("is C-200 taken", ctx()).text, /C-200[^\n]*not in a lot yet/);
+  assert.match(respond("is C-999 free", ctx()).text, /can't find a curb called C-999|no C-999|C-999 doesn't show up/);
+  assert.match(respond("is it free?", ctx(), respond("status of C-002", ctx()).state).text, /^(C-002 is free|Right now C-002)/);
+  // Questions about many spots still get the site answer.
+  assert.equal(intentOf("how many spots are free"), "free_total");
+});
+
 test("answers are role-aware and point viewers to a manager", () => {
   const viewer = respond("how do I change an LED colour", ctx({ role: "viewer" })).text;
   assert.match(viewer, /You're a viewer, so you can see LED settings but not change it/);

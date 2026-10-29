@@ -67,7 +67,7 @@ const fromHistory = (ctx, variants) => variants.map((v) => `${v}\n\n${historySou
 
 export const STATUS_INTENTS = [
   {
-    id: "free_total", group: "status", lot: -3, lotIntent: "free_lot",
+    id: "free_total", group: "status", lot: -3, curb: -3, lotIntent: "free_lot",
     keys: [["free", 2], ["spot", 1], ["how many", 1], ["how much", 1], ["total", 1.5], ["overall", 1.5], ["left", 1.5], ["park", 0.5], ["anywhere", 1], ["empty", 1.5], ["right now", 0.5], ["count", 1], ["spot count", 3], ["what count", -3], ["but", -2], ["fewest", -3], ["exact", -2], ["good time", -3], ["tv", -2], ["sign", -2], ["which spot", -2], ["when", -2]],
     next: ["Free spots in each lot", "Where should I park?", "Which lot is busiest?"],
     say: withData((ctx) => {
@@ -289,6 +289,12 @@ export const STATUS_INTENTS = [
         `LED: ${color ? `${color}${u.panelText ? `, showing "${u.panelText}"` : ""}` : "not set"}`,
       ].join("\n");
       const where = ctx.lots?.[u.lot] ? lotName(ctx.lots, u.lot) : "no lot yet";
+      // "Is C-041 free?": the answer first, then the details.
+      if (ent.occupancy) {
+        const state = u.online ? STATE(u) : "offline, so I can't tell whether it's free";
+        const lot = ctx.lots?.[u.lot] ? `in ${where}` : "not in a lot yet";
+        return sourced(ctx, vary([`${ent.curbId} is ${state} right now. It's ${lot}.`, `Right now ${ent.curbId} (${lot}) is ${state}.`, `${ent.curbId} is ${state}: it's ${lot}.`], body), [[ent.curbId, u]]);
+      }
       return sourced(ctx, vary([`${ent.curbId} is in ${where}.`, `Here's ${ent.curbId} (${where}):`, `${ent.curbId}, in ${where}:`], body), [[ent.curbId, u]]);
     }),
   },
