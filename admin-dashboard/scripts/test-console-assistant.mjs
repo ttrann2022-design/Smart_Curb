@@ -365,3 +365,27 @@ test("the console assistant never writes, imports Firebase, calls the network, o
 test("intent ids are unique", () => {
   assert.equal(Object.keys(INTENT_BY_ID).length, INTENTS.length);
 });
+
+test("an unfamiliar word after with, for or of isn't a customer or lot name", () => {
+  const notFound = /couldn't find|There's no (customer|lot)|isn't one of the (customers|lots)/;
+  const cases = [
+    ["customers with zero lots", ["customers_without_lots", "fallback"]],
+    ["lots with no curbs", ["lots_no_size"]],
+    ["which request has been sitting longest", ["request_oldest_open", "fallback"]],
+    ["customers with no lots", ["customers_without_lots"]],
+    ["lots for events", null],
+    ["which lots are good for visitors", null],
+    ["requests for parking", null],
+    ["lots with nothing in them", null],
+  ];
+  for (const [q, want] of cases) {
+    const r = respond(q, ctx());
+    assert.notEqual(r.intent, "not_found", q);
+    assert.doesNotMatch(r.text, notFound, q);
+    if (want) assert.ok(want.includes(r.intent), `${q} -> ${r.intent}`);
+  }
+  // Names that don't exist are still named back: lower case after about/does/and, capitalised anywhere.
+  for (const q of ["tell me about acme", "how many lots does acme have", "lots of Acme Corp", "curbs for Westfield Plaza"]) {
+    assert.equal(respond(q, ctx()).intent, "not_found", q);
+  }
+});

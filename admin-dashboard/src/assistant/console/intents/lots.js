@@ -43,7 +43,7 @@ export const LOT_INTENTS = [
   },
   {
     id: "lots_no_size", group: "status", lot: -3,
-    keys: [["without size", 5], ["no size", 5], ["missing size", 5], ["size", 2], ["without", 1], ["unknown size", 4], ["how do i", -3], ["biggest", -3], ["most", -3]],
+    keys: [["without size", 5], ["no size", 5], ["lot no curb", 6], ["lot without curb", 6], ["lot with no curb", 6], ["no curb yet", 4], ["no capacity", 4], ["missing size", 5], ["size", 2], ["without", 1], ["unknown size", 4], ["how do i", -3], ["biggest", -3], ["most", -3]],
     next: ["Lots without coordinates", "How do I edit a lot?", "How do I import lots?"],
     // A lot's size is its capacity, the curbs that report into it, so "no size" means no curbs yet.
     say: withData((ctx, ent) => listing(ctx, ent, lotViews(ctx).filter((l) => !l.curbs.length).map((l) => `${l.name}${l.customer ? ` (${l.customer})` : ""}`),

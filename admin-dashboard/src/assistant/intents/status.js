@@ -156,7 +156,7 @@ export const STATUS_INTENTS = [
   },
   {
     id: "full_lots", group: "status", lot: -2, lotIntent: "free_lot",
-    keys: [["full", 2.5], ["any lot", 1], ["which lot", 0.5], ["no free", 3.5], ["completely", 1], ["how full", -3], ["least", -3], ["is lot", -2]],
+    keys: [["full", 2.5], ["any lot", 1], ["which lot", 0.5], ["no free", 3.5], ["completely", 1], ["customer", -3], ["how full", -3], ["least", -3], ["is lot", -2]],
     next: ["Where should I park?", "Which lot is busiest?", "Free spots in each lot"],
     say: withData((ctx) => {
       const full = lotViews(ctx).filter((l) => l.total > 0 && l.open === 0);
@@ -448,7 +448,7 @@ export const STATUS_INTENTS = [
   },
   {
     id: "unassigned_curbs", group: "status",
-    keys: [["unassigned", 3], ["no lot assigned", 4], ["not assigned", 3.5], ["not in lot", 3], ["arent in lot", 3], ["isnt in lot", 3], ["without lot", 3], ["no lot", 2.5], ["new curb", 2], ["curb", 0.5], ["how", -1]],
+    keys: [["unassigned", 3], ["no lot assigned", 4], ["customer", -3], ["not assigned", 3.5], ["not in lot", 3], ["arent in lot", 3], ["isnt in lot", 3], ["without lot", 3], ["no lot", 2.5], ["new curb", 2], ["curb", 0.5], ["how", -1]],
     next: ["How do I put a curb in a lot?", "How many curbs are there?", "Which curbs are offline?"],
     say: withData((ctx, ent) => {
       const loose = curbsWithoutLot(ctx);
@@ -483,7 +483,7 @@ export const STATUS_INTENTS = [
   },
   {
     id: "lot_list", group: "status", lot: -2,
-    keys: [["what lot", 3], ["which lot", 1.5], ["list", 2], ["how many lot", 3.5], ["all lot", 2], ["lot name", 3], ["lot", 1], ["have", 0.5], ["free", -2], ["busy", -2], ["full", -2], ["should", -2], ["problem", -2], ["attention", -2], ["change", -3], ["rename", -3]],
+    keys: [["what lot", 3], ["which lot", 1.5], ["list", 2], ["how many lot", 3.5], ["all lot", 2], ["lot name", 3], ["lot no curb", 5], ["lot without curb", 5], ["lot with no curb", 5], ["customer", -3], ["lot", 1], ["have", 0.5], ["free", -2], ["busy", -2], ["full", -2], ["should", -2], ["problem", -2], ["attention", -2], ["change", -3], ["rename", -3]],
     next: ["Free spots in each lot", "How many curbs are there?", "Which lot is busiest?"],
     say: withData((ctx) => {
       const lots = lotViews(ctx);

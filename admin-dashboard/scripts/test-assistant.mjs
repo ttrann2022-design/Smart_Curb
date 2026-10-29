@@ -395,3 +395,20 @@ test("scoped to one customer, the Assistant only knows that customer's lots and 
     assert.doesNotMatch(r.text.split("Lots on this site:")[1], /Mall P1|Garage A|Lot 12/, q);
   }
 });
+
+test("an unfamiliar word after with, for or of isn't treated as a name", () => {
+  const cases = [
+    ["customers with zero lots", ["fallback"]],
+    ["lots with no curbs", ["lot_list"]],
+    ["which request has been sitting longest", ["fallback"]],
+    ["customers with no lots", ["fallback"]],
+  ];
+  for (const [q, want] of cases) {
+    const r = respond(q, ctx());
+    assert.ok(want.includes(r.intent), `${q} -> ${r.intent}`);
+    assert.doesNotMatch(r.text, /couldn't find|There's no lot called|isn't one of the lots/, q);
+  }
+  for (const q of ["lots for events", "free spots for visitors", "curbs with low battery"]) {
+    assert.notEqual(respond(q, ctx()).intent, "lot_not_found", q);
+  }
+});
