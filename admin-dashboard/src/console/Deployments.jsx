@@ -1,14 +1,18 @@
 import { useState } from "react";
 import { Link, useOutletContext } from "react-router-dom";
 import { useNow } from "../units";
-import { PageHeader, Card, Chips, EmptyState } from "../components/ui";
-import { isOnline, lotName, sortedSites, summarize } from "./data";
-import { CurbRows, LoadError, LoadingCard, LotBlock, SiteStatusBadge } from "./parts";
+import { PageHeader, Card, Chips } from "../components/ui";
+import { isLow, isOnline, lotName, sortedSites, summarize } from "./data";
+import { ConsoleEmpty, CurbRows, LoadError, LoadingCard, LotRow, SiteStatusBadge } from "./parts";
 
 const FILTERS = [
-  { id: "all", label: "All curbs" },
-  { id: "offline", label: "Offline only" },
+  { id: "all", label: "All curbs", test: () => true },
+  { id: "offline", label: "Offline", test: (u) => !isOnline(u) },
+  { id: "low", label: "Low battery", test: (u) => isOnline(u) && isLow(u) },
 ];
+
+// A lot's size, for the row's meta line.
+const spots = (lot) => (typeof lot?.totalSpots === "number" ? `${lot.totalSpots.toLocaleString()} ${lot.totalSpots === 1 ? "spot" : "spots"}` : "");
 
 function Deployments() {
   const { mode, data } = useOutletContext();
@@ -21,29 +25,31 @@ function Deployments() {
   if (!loaded) return <>{head}<div className="sws-page-body"><LoadingCard rows={5} /></div></>;
 
   const { siteStats, lotStats, lotUnits, unassignedLots, looseUnits } = summarize(data);
-  const pick = (list) => (filter === "offline" ? list.filter(([, u]) => !isOnline(u)) : list);
+  const active = FILTERS.find((f) => f.id === filter);
+  const pick = (list) => list.filter(([, u]) => active.test(u || {}));
   const allUnits = Object.values(units);
-  const offline = allUnits.filter((u) => !isOnline(u)).length;
-  const options = [{ ...FILTERS[0], count: allUnits.length }, { ...FILTERS[1], count: offline }];
+  const options = FILTERS.map((f) => ({ id: f.id, label: f.label, count: allUnits.filter((u) => f.test(u || {})).length }));
   const sitesWithLots = sortedSites(sites).filter(([id]) => siteStats[id].lots.length > 0);
   const sitesWithout = sortedSites(sites).filter(([id]) => siteStats[id].lots.length === 0);
-  // With "Offline only", hide lots with nothing to show.
-  const visibleLots = (ids) => (filter === "offline" ? ids.filter((id) => pick(lotUnits[id] || []).length) : ids);
+  // With a filter on, hide lots with nothing to show.
+  const visibleLots = (ids) => (filter === "all" ? ids : ids.filter((id) => pick(lotUnits[id] || []).length));
 
-  const lotBlocks = (ids) => visibleLots(ids).map((lotId) => (
-    <LotBlock key={lotId} name={lotName(lots, lotId)} stats={lotStats[lotId]} curbs={pick(lotUnits[lotId] || [])} now={now} />
-  ));
+  const lotRows = (ids) => (
+    <div className="cn-lrows">
+      {visibleLots(ids).map((lotId) => (
+        <LotRow key={lotId} name={lotName(lots, lotId)} detail={spots(lots[lotId])} stats={lotStats[lotId]} curbs={pick(lotUnits[lotId] || [])} now={now} />
+      ))}
+    </div>
+  );
 
   if (!Object.keys(lots).length && !allUnits.length) {
     return (
       <>
         {head}
         <div className="sws-page-body sws-narrow">
-          <Card>
-            <EmptyState icon="units" title="Nothing deployed yet">
-              {mode === "sim" ? "Load simulated data on the dashboard's Simulation page, then reload the demo customers from Home." : "Lots and curbs appear here once the hardware reports in."}
-            </EmptyState>
-          </Card>
+          <ConsoleEmpty icon="units" title="Nothing deployed yet">
+            {mode === "sim" ? "Load simulated data on the dashboard's Simulation page, then reload the demo customers from Home." : "Lots and curbs appear here once the hardware reports in."}
+          </ConsoleEmpty>
         </div>
       </>
     );
@@ -52,6 +58,7 @@ function Deployments() {
   const shownSites = sitesWithLots.filter(([id]) => visibleLots(siteStats[id].lots).length);
   const shownFree = visibleLots(unassignedLots);
   const shownLoose = pick(looseUnits);
+  const nothing = filter !== "all" && !shownSites.length && !shownFree.length && !shownLoose.length;
   // Cards fade in one after another (capped), in the order they appear.
   const delayAt = (i) => Math.min((i + 1) * 60, 360);
   const n = shownSites.length;
@@ -64,8 +71,10 @@ function Deployments() {
           <Chips label="Filter curbs" options={options} value={filter} onChange={setFilter} />
         </div>
 
-        {filter === "offline" && offline === 0 && (
-          <Card delay={60}><EmptyState icon="check" title="Every curb is online">Nothing to show with this filter.</EmptyState></Card>
+        {nothing && (
+          <ConsoleEmpty icon="check" tone="ok" title={filter === "offline" ? "Every curb is online" : "No batteries are low"}>
+            Nothing to show with this filter.
+          </ConsoleEmpty>
         )}
 
         {shownSites.map(([id, s], i) => {
@@ -78,14 +87,14 @@ function Deployments() {
               subtitle={`${st.lots.length} ${st.lots.length === 1 ? "lot" : "lots"} · ${st.curbs ? `${st.online} of ${st.curbs} curbs online` : "no curbs yet"}`}
               actions={<SiteStatusBadge status={s.status} />}
             >
-              {lotBlocks(st.lots)}
+              {lotRows(st.lots)}
             </Card>
           );
         })}
 
         {shownFree.length > 0 && (
           <Card delay={delayAt(n)} title="Lots without a customer" subtitle="Assign them from a customer's page.">
-            {lotBlocks(unassignedLots)}
+            {lotRows(unassignedLots)}
           </Card>
         )}
 
