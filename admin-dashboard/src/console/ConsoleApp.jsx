@@ -6,6 +6,7 @@ import Customers from "./Customers";
 import CustomerDetail from "./CustomerDetail";
 import Requests from "./Requests";
 import Deployments from "./Deployments";
+import ImportLots from "./ImportLots";
 import { CONSOLE_SUB } from "./constants";
 
 // What Login says when ConsoleLayout signs out an account without platformAdmins/<uid>.
@@ -25,6 +26,7 @@ function ConsoleApp() {
           <Route path="/customers/:id" element={<CustomerDetail />} />
           <Route path="/requests" element={<Requests />} />
           <Route path="/deployments" element={<Deployments />} />
+          <Route path="/import" element={<ImportLots />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

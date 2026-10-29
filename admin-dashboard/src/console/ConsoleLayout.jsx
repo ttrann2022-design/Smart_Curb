@@ -18,6 +18,7 @@ const navItems = [
   { label: "Customers", to: "/customers", icon: "users" },
   { label: "Requests", to: "/requests", icon: "inbox" },
   { label: "Deployments", to: "/deployments", icon: "units" },
+  { label: "Import lots", to: "/import", icon: "lots" },
 ];
 
 // Shown on every page while the console reads demo/ instead of live data.

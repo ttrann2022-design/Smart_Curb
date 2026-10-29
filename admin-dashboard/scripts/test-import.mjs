@@ -1,11 +1,11 @@
-// Tests the company console's lot import (src/console/importLots.js) without a
+// Tests the company console's lot import (src/console/lotImport.js) without a
 // database: CSV parsing, the checks on every row, and writing in batches through a
 // fake writer that applies the same lot rules as database.rules.json.
 //
 //   npm run test:import
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { BATCH_SIZE, parseCsv, planImport, rowUpdates, runImport } from "../src/console/importLots.js";
+import { BATCH_SIZE, parseCsv, planImport, rowUpdates, runImport } from "../src/console/lotImport.js";
 
 const SITES = { s1: { name: "Northfield University" }, s2: { name: "Harbor Mall" }, s3: { name: "Twin" }, s4: { name: "Twin" } };
 const LOTS = {
@@ -242,7 +242,7 @@ test("stopping (the page closed or the mode changed) leaves later batches unwrit
 
 test("the import module stays free of Firebase and the network", async () => {
   const { readFile } = await import("node:fs/promises");
-  const src = await readFile(new URL("../src/console/importLots.js", import.meta.url), "utf8");
+  const src = await readFile(new URL("../src/console/lotImport.js", import.meta.url), "utf8");
   assert.doesNotMatch(src, /from\s+["'](firebase|\.\.?\/)/);
   assert.doesNotMatch(src, /\bfetch\(|XMLHttpRequest|WebSocket/);
 });

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ref, onValue, push, set, update, remove, serverTimestamp } from "firebase/database";
 import { database } from "../firebase";
-import { dataPath } from "../dataMode";
+import { SIM_ROOT, dataPath } from "../dataMode";
 
 // Everything the company console reads, for the current data mode (Live reads
 // the root, Simulation reads demo/). ConsoleLayout subscribes once and hands the
@@ -172,6 +172,21 @@ export const updateLot = (lotId, form) => update(ref(database, dataPath(`lots/${
 // Assigning only ever writes siteId: the rest of a lot belongs to the hardware and the dashboard.
 export const assignLot = (lotId, siteId) => set(ref(database, dataPath(`lots/${key(lotId)}/siteId`)), key(siteId));
 export const unassignLot = (lotId) => remove(ref(database, dataPath(`lots/${key(lotId)}/siteId`)));
+
+// ---------- Importing lots (lotImport.js plans the rows) ----------
+
+// One import batch as one multi-path write. The root comes from the mode the import
+// started in, not the current one, so switching Live / Simulation mid-import can't
+// send the rest of the rows to the other data.
+export function writeLotImport(mode, updates) {
+  const root = mode === "sim" ? SIM_ROOT : "";
+  const paths = Object.entries(updates).map(([path, value]) => {
+    const [top, id, ...rest] = path.split("/");
+    if (top !== "lots" || rest.length > 1) throw new Error(`Not a lot path: ${path}`);
+    return [`${root}${["lots", key(id), ...rest].join("/")}`, value];
+  });
+  return update(ref(database), Object.fromEntries(paths));
+}
 
 // ---------- Converting a quote request ----------
 
