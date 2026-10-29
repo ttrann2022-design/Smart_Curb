@@ -24,7 +24,7 @@
 .cn-hero-line { margin: 18px 0 0; font-size: 13.5px; color: var(--dim); line-height: 1.55; }
 .cn-hero-facts { list-style: none; margin: 14px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 22px; font-size: var(--fs-body); color: var(--dim); }
 .cn-hero-facts .cn-num { color: var(--text); font-weight: 600; }
-.cn-hero-facts .cn-num.cn-warn { color: var(--attention); }
+.cn-hero-facts .cn-num.cn-warn { color: var(--warn); }
 .cn-ghost { color: transparent; border-radius: 4px; display: inline-block; }
 
 /* Pipeline: Requests -> Prospect -> Active. */
@@ -128,7 +128,9 @@ a.cn-row:focus-visible { outline: 2px solid var(--text); outline-offset: -2px; }
 .cn-c { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cn-name { font-weight: 600; }
 .cn-dim { color: var(--dim); }
-.cn-warn { color: var(--attention); }
+/* Warning text uses the warning tone, not the fixed attention colour: on Paper's
+   light surfaces attention is too pale to read (scripts/check-contrast.mjs). */
+.cn-warn { color: var(--warn); }
 .cn-num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 
 /* Short labels that only show where a row folds into a card (Import lots). */
@@ -139,10 +141,12 @@ a.cn-row:focus-visible { outline: 2px solid var(--text); outline-offset: -2px; }
 .cn-curb .cn-id { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-weight: 600; }
 .cn-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--free); }
 .cn-dot.is-off { background: var(--offline-mark); }
+/* Paper: status dots on light rows get the dark status ring, like the legend swatches. */
+:where([data-theme="paper"]) .cn-dot { box-shadow: 0 0 0 2px var(--status-ring); }
 .cn-batt { display: flex; align-items: center; gap: var(--sp-2); }
 .cn-bar { width: 48px; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; flex-shrink: 0; }
 .cn-bar > span { display: block; height: 100%; background: var(--nav-text); }
-.cn-bar.is-low > span { background: var(--attention); }
+.cn-bar.is-low > span { background: var(--warn); }
 @container (max-width: 520px) {
   .cn-curb { grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "id status status" "batt batt seen"; padding: 8px var(--sp-2); }
   .cn-curb > :nth-child(1) { grid-area: id; }
