@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { DEFAULT_ALERTS, STALL_WORD, formatAgo, formatExact, hasBattery, statusKey } from "../units";
+import { DEFAULT_ALERTS, STALL_WORD, formatAgo, formatExact, freeText, hasBattery, statusKey } from "../units";
 import Icon from "../components/Icon";
 import LotPlan, { StallMark } from "../components/LotPlan";
 import { Button, Card, Input, Notice, Select, Skeleton, StatusText } from "../components/ui";
@@ -18,6 +18,10 @@ const HEALTH = {
   offline: { word: "offline", mark: { status: "offline" } },
 };
 const healthText = (h) => HEALTH_KEYS.filter((k) => h[k]).map((k) => `${h[k]} ${HEALTH[k].word}`).join(", ");
+
+// A lot's capacity line, as the dashboard's lot plans: "2 free of 3 · 1 offline",
+// "No curbs yet" or "No curbs reporting" (lotCounts and freeText in unitStatus.js).
+const lotCountText = (c) => `${freeText(c)}${c.offline && c.capacity ? ` · ${c.offline} offline` : ""}`;
 
 // A bar of a customer's or lot's curbs in the fixed status colours, with a key underneath.
 export function HealthBar({ health, label, keyed = true, empty = "No curbs reporting yet" }) {
@@ -200,7 +204,7 @@ export function SiteForm({ idPrefix, initial, submitLabel, busyLabel, onSubmit, 
 
 // Add and edit lot form. `lots` is given when adding, to show and check the ID
 // made from the name; editing never changes the ID.
-export function LotForm({ idPrefix, initial, lots, submitLabel, busyLabel, onSubmit, onCancel }) {
+export function LotForm({ idPrefix, initial, lots, existing, submitLabel, busyLabel, onSubmit, onCancel }) {
   const [form, setForm] = useState(initial);
   const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState(false);
@@ -213,7 +217,7 @@ export function LotForm({ idPrefix, initial, lots, submitLabel, busyLabel, onSub
 
   const submit = async (e) => {
     e.preventDefault();
-    const found = lotErrors(form, lots);
+    const found = lotErrors(form, lots, existing);
     setErrors(found);
     const first = Object.keys(found)[0];
     if (first) {
@@ -239,7 +243,7 @@ export function LotForm({ idPrefix, initial, lots, submitLabel, busyLabel, onSub
       <FormField id={id("name")} label="Name" error={errors.name} hint={nameHint}>
         {(a) => <Input {...a} maxLength={LOT_LIMITS.name} value={form.name} onChange={set("name")} autoComplete="off" />}
       </FormField>
-      <FormField id={id("totalSpots")} label="Total spots" error={errors.totalSpots} hint={lots ? "All of them start open, until the curbs report." : "Open spots keep coming from the curbs."}>
+      <FormField id={id("totalSpots")} label="Total spots" optional error={errors.totalSpots} hint={lots ? "Capacity comes from the curbs that report into this lot. Fill this in only to note the lot's size." : "Capacity and free spots come from the curbs, not from this number."}>
         {(a) => <Input {...a} inputMode="numeric" value={form.totalSpots} onChange={set("totalSpots")} autoComplete="off" />}
       </FormField>
       <FormField id={id("latitude")} label="Latitude" optional error={errors.latitude} hint="-90 to 90, for example 40.7128.">
@@ -306,7 +310,7 @@ export function LotBlock({ name, stats, curbs, now, action, detail, children, pl
         <H className="cn-lot-name">{name}</H>
         <span className="cn-lot-meta">
           {detail ? `${detail} · ` : ""}
-          {stats.curbs ? `${stats.online} of ${stats.curbs} curbs online` : "No curbs"}
+          {lotCountText(stats.counts)}
           {stats.lastSeen ? ` · last seen ${formatAgo(stats.lastSeen, now)}` : ""}
         </span>
         {action}
@@ -337,7 +341,7 @@ export function LotRow({ name, detail, stats, curbs, now, headingLevel = 3 }) {
         <H className="cn-lot-name">{name}</H>
         <span className="cn-lot-meta">
           {detail ? `${detail} · ` : ""}
-          {stats.curbs ? `${stats.online} of ${stats.curbs} online` : "No curbs"}
+          {lotCountText(stats.counts)}
           {stats.lastSeen ? ` · last seen ${formatAgo(stats.lastSeen, now)}` : ""}
         </span>
         <span className="cn-calls">

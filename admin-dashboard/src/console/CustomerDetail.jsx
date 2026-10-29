@@ -95,10 +95,9 @@ function UnassignButton({ lotId, name }) {
   );
 }
 
-// A short line for the lot head: its size and, if set, where it is.
+// A short line for the lot head: where it is, if set. Its capacity comes from the curbs.
 function lotDetail(lot) {
   const parts = [];
-  if (typeof lot?.totalSpots === "number") parts.push(`${lot.totalSpots.toLocaleString()} ${lot.totalSpots === 1 ? "spot" : "spots"}`);
   if (typeof lot?.latitude === "number" && typeof lot?.longitude === "number") parts.push(`${lot.latitude}, ${lot.longitude}`);
   return parts.join(" · ");
 }
@@ -127,6 +126,7 @@ function LotItem({ lotId, lot, stats, curbs, now }) {
           <LotForm
             idPrefix={`edit-lot-${lotId}`}
             initial={lotToForm(lot || {})}
+            existing={lot || {}}
             submitLabel="Save lot"
             busyLabel="Saving…"
             onSubmit={async (form) => { await updateLot(lotId, form); setEditing(false); }}
@@ -256,7 +256,7 @@ function CustomerDetail() {
     ["Lots", st.lots.length],
     ["Curbs", st.curbs],
     ["Online", st.curbs ? `${st.online} of ${st.curbs}` : "–", st.curbs && st.online < st.curbs],
-    ["Free now", st.health.free],
+    ["Free now", st.counts.capacity ? `${st.counts.free} of ${st.counts.capacity}` : "–"],
   ];
 
   return (

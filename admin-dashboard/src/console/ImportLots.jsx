@@ -30,7 +30,12 @@ function Location({ row }) {
 
 // One row of the preview or the results: line, id, name, customer, spots, location, then status and why.
 function Row({ row, badge, tone, detail }) {
-  const spotsChange = row.status === "update" && row.fields.totalSpots !== undefined ? `${row.existing.totalSpots ?? "–"} → ${row.totalSpots}` : row.totalSpots;
+  // totalSpots is optional: blank means the curbs give the capacity (or, for an
+  // existing lot, that its current totalSpots is kept).
+  const kept = row.status === "update" && typeof row.existing?.totalSpots === "number";
+  const spotsChange = row.status === "update" && row.fields.totalSpots !== undefined
+    ? `${row.existing.totalSpots ?? "–"} → ${row.totalSpots}`
+    : row.totalSpots || (kept ? <span className="cn-dim" title="Left blank, so the current total is kept">{row.existing.totalSpots} (kept)</span> : <span className="cn-dim" title="Capacity comes from the lot's curbs">From curbs</span>);
   return (
     <div role="row" className={`cn-row im-row${tone === "error" ? " is-error" : ""}`}>
       <div role="cell" className="cn-c cn-num cn-dim im-line"><span className="cn-key">Line </span>{row.line}</div>
@@ -156,14 +161,15 @@ function ImportLots() {
               id="im-csv" className="sws-input cn-textarea im-text" rows={8} spellCheck={false} autoComplete="off"
               aria-describedby="im-csv-hint" value={text} disabled={!!busy}
               onChange={(e) => { setText(e.target.value); setFilter("all"); }}
-              placeholder={`${COLUMNS.join(",")}\nnorthgarage,North Garage,${firstSite || "Customer name"},120,40.7128,-74.006`}
+              placeholder={`${COLUMNS.join(",")}\nnorthgarage,North Garage,${firstSite || "Customer name"},,40.7128,-74.006`}
             />
             <div id="im-csv-hint" className="sws-field-hint im-hint">
               First line:<code translate="no" className="im-cols">{COLUMNS.join(", ")}</code>
               <ul className="im-rules">
                 <li>IDs use lowercase letters and numbers; customer is a customer's exact name.</li>
-                <li>totalSpots is 1 to {IMPORT_LIMITS.maxSpots.toLocaleString()}; give latitude and longitude together or leave both empty.</li>
-                <li>Existing lots only get totalSpots and location; their name and customer never change, and nothing is deleted.</li>
+                <li>totalSpots is optional: a lot's capacity comes from the curbs that report into it. If you give it, use a whole number from 1 to {IMPORT_LIMITS.maxSpots.toLocaleString()}; the column can be left out.</li>
+                <li>Give latitude and longitude together or leave both empty.</li>
+                <li>Existing lots only get totalSpots and location, and only when the row gives them; their name and customer never change, and nothing is deleted.</li>
               </ul>
             </div>
           </div>

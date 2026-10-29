@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { ref, onValue, push, set, update, remove, serverTimestamp } from "firebase/database";
 import { database } from "../firebase";
 import { SIM_ROOT, dataPath } from "../dataMode";
-import { DEFAULT_ALERTS, isLowBattery } from "../unitStatus";
+import { DEFAULT_ALERTS, isLowBattery, lotCounts } from "../unitStatus";
 
 // Everything the company console reads, for the current data mode (Live reads
 // the root, Simulation reads demo/). ConsoleLayout subscribes once and hands the
@@ -112,6 +112,8 @@ export const deleteSite = (id) => remove(ref(database, dataPath(`sites/${key(id)
 
 // As in database.rules.json. Platform admins create a lot and later change only
 // name, totalSpots, latitude and longitude; openSpots and units belong to the hardware.
+// A lot's capacity comes from its curbs (lotCounts in unitStatus.js), so totalSpots
+// is optional: left out of a new lot when it isn't given, and checked when it is.
 export const LOT_LIMITS = { name: 80, minSpots: 1, maxSpots: 5000 };
 export const EMPTY_LOT_FORM = { name: "", totalSpots: "", latitude: "", longitude: "" };
 
@@ -125,8 +127,9 @@ export const lotIdFromName = (name) => name.toLowerCase().replace(/[^a-z0-9]+/g,
 
 const number = (text) => (/^[-+]?(\d+\.?\d*|\.\d+)$/.test(text.trim()) ? Number(text.trim()) : NaN);
 
-// The rules' checks, in the form's words. `lots` is given for a new lot, to refuse an ID that's taken.
-export function lotErrors(form, lots) {
+// The rules' checks, in the form's words. `lots` is given for a new lot, to refuse an
+// ID that's taken; `existing` for an edited one (the rules never remove its totalSpots).
+export function lotErrors(form, lots, existing) {
   const errors = {};
   const name = form.name.trim();
   if (!name) errors.name = "Enter the lot's name.";
@@ -137,8 +140,10 @@ export function lotErrors(form, lots) {
     else if (lots[id]) errors.name = `A lot with the ID "${id}" already exists. Choose a different name.`;
   }
   const spots = form.totalSpots.trim();
-  if (!/^\d+$/.test(spots) || Number(spots) < LOT_LIMITS.minSpots || Number(spots) > LOT_LIMITS.maxSpots) {
-    errors.totalSpots = `Enter a whole number from ${LOT_LIMITS.minSpots} to ${LOT_LIMITS.maxSpots.toLocaleString()}.`;
+  if (!spots) {
+    if (typeof existing?.totalSpots === "number") errors.totalSpots = `This lot already has a total (${existing.totalSpots}); it can be changed but not removed. Capacity comes from the curbs either way.`;
+  } else if (!/^\d+$/.test(spots) || Number(spots) < LOT_LIMITS.minSpots || Number(spots) > LOT_LIMITS.maxSpots) {
+    errors.totalSpots = `Enter a whole number from ${LOT_LIMITS.minSpots} to ${LOT_LIMITS.maxSpots.toLocaleString()}, or leave it empty.`;
   }
   const lat = form.latitude.trim();
   const lng = form.longitude.trim();
@@ -148,10 +153,11 @@ export function lotErrors(form, lots) {
   return errors;
 }
 
-// Form -> the four fields platform admins may write. An empty location is left
-// out of a new lot and removed (null) from an existing one.
+// Form -> the fields platform admins may write. An empty location is left out of a
+// new lot and removed (null) from an existing one; an empty totalSpots is never sent.
 function lotFields(form, emptyAs) {
-  const fields = { name: form.name.trim(), totalSpots: Number(form.totalSpots.trim()) };
+  const fields = { name: form.name.trim() };
+  if (form.totalSpots.trim()) fields.totalSpots = Number(form.totalSpots.trim());
   for (const k of ["latitude", "longitude"]) {
     if (form[k].trim()) fields[k] = number(form[k]);
     else if (emptyAs !== undefined) fields[k] = emptyAs;
@@ -159,12 +165,11 @@ function lotFields(form, emptyAs) {
   return fields;
 }
 
-// A new lot for a customer: every spot open until the hardware reports. The rules
-// refuse it if the ID is already taken, even by a lot this page hasn't loaded.
+// A new lot for a customer. No openSpots: the curbs give its capacity and free spots.
+// The rules refuse it if the ID is already taken, even by a lot this page hasn't loaded.
 export async function createLot(siteId, form) {
   const id = key(lotIdFromName(form.name.trim()));
-  const fields = lotFields(form);
-  await set(ref(database, dataPath(`lots/${id}`)), { ...fields, openSpots: fields.totalSpots, siteId: key(siteId) });
+  await set(ref(database, dataPath(`lots/${id}`)), { ...lotFields(form), siteId: key(siteId) });
   return id;
 }
 
@@ -255,6 +260,8 @@ export function summarize({ sites, lots, units }) {
       curbs: list.length,
       online: list.filter(([, u]) => isOnline(u)).length,
       health: curbHealth(list),
+      // Capacity and free spots, from the curbs (the same helper the dashboard uses).
+      counts: lotCounts(list.map(([, u]) => u)),
       lastSeen: list.reduce((m, [, u]) => (typeof u.lastUpdated === "number" && u.lastUpdated > m ? u.lastUpdated : m), 0) || null,
     };
   });
@@ -274,7 +281,10 @@ export function summarize({ sites, lots, units }) {
     if (st.lastSeen && st.lastSeen > (s.lastSeen || 0)) s.lastSeen = st.lastSeen;
   });
   const byName = (a, b) => (lots[a]?.name || a).localeCompare(lots[b]?.name || b, undefined, { numeric: true });
-  Object.values(siteStats).forEach((s) => s.lots.sort(byName));
+  Object.values(siteStats).forEach((s) => {
+    s.lots.sort(byName);
+    s.counts = lotCounts(s.lots.flatMap((id) => (lotUnits[id] || []).map(([, u]) => u)));
+  });
   unassignedLots.sort(byName);
 
   return { lotUnits, looseUnits, lotStats, siteStats, unassignedLots };

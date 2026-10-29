@@ -11,8 +11,8 @@ const FILTERS = [
   { id: "low", label: "Low battery", test: (u) => isOnline(u) && isLow(u) },
 ];
 
-// A lot's size, for the row's meta line.
-const spots = (lot) => (typeof lot?.totalSpots === "number" ? `${lot.totalSpots.toLocaleString()} ${lot.totalSpots === 1 ? "spot" : "spots"}` : "");
+// A lot's location, if set, for the row's meta line. Its capacity comes from the curbs.
+const lotPlace = (lot) => (typeof lot?.latitude === "number" && typeof lot?.longitude === "number" ? `${lot.latitude}, ${lot.longitude}` : "");
 
 function Deployments() {
   const { mode, data } = useOutletContext();
@@ -37,7 +37,7 @@ function Deployments() {
   const lotRows = (ids) => (
     <div className="cn-lrows">
       {visibleLots(ids).map((lotId) => (
-        <LotRow key={lotId} name={lotName(lots, lotId)} detail={spots(lots[lotId])} stats={lotStats[lotId]} curbs={pick(lotUnits[lotId] || [])} now={now} />
+        <LotRow key={lotId} name={lotName(lots, lotId)} detail={lotPlace(lots[lotId])} stats={lotStats[lotId]} curbs={pick(lotUnits[lotId] || [])} now={now} />
       ))}
     </div>
   );

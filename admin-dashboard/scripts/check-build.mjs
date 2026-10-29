@@ -32,7 +32,7 @@ const CONSOLE_PAGE_MARKERS = [
   "Lots without a customer",
   "Reload demo customers",
   "Assign a lot",
-  "Open spots keep coming from the curbs",
+  "Capacity comes from the curbs that report into this lot",
   "Nothing is written until you press Import.",
   "Your console preferences, kept in this browser",
 ];
