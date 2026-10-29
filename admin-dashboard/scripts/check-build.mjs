@@ -25,7 +25,7 @@ const DASHBOARD_MARKERS = [
   "A dashboard built around the curbs",
 ];
 
-// Text from the console's own pages (Requests, Customers, Deployments, Home).
+// Text from the console's own pages (Requests, Customers, Deployments, Home, Import lots).
 // None of it may reach a customer bundle; quote requests live only in the console.
 const CONSOLE_PAGE_MARKERS = [
   "Convert to customer",
@@ -33,6 +33,7 @@ const CONSOLE_PAGE_MARKERS = [
   "Reload demo customers",
   "Assign a lot",
   "Open spots keep coming from the curbs",
+  "Nothing is written until you press Import.",
 ];
 
 const [dir, expected] = process.argv.slice(2);
@@ -84,6 +85,12 @@ if (expected === "console") {
   if (leaked.length) fail(`the console bundle contains customer dashboard code: ${leaked.map((m) => `"${m}"`).join(", ")}.`);
   const absent = CONSOLE_PAGE_MARKERS.filter((m) => !bundle.includes(m));
   if (absent.length) fail(`the console bundle is missing its own pages' text: ${absent.map((m) => `"${m}"`).join(", ")}. If you changed that text, update CONSOLE_PAGE_MARKERS in scripts/check-build.mjs.`);
+  // Import lots ships in this bundle: its parsing and batch tests take well under a second.
+  const imports = spawnSync(process.execPath, ["--test", fileURLToPath(new URL("./test-import.mjs", import.meta.url))], { encoding: "utf8" });
+  if (imports.status !== 0) {
+    console.error(imports.stdout.split("\n").filter((l) => /^\s*(✖|AssertionError)/.test(l)).slice(0, 12).join("\n"));
+    fail("the lot import's tests fail (npm run test:import shows why).");
+  }
 } else {
   if (bundle.includes(CONSOLE_MARKER)) fail(`the ${expected} bundle contains company console code ("${CONSOLE_MARKER}").`);
   const leaked = CONSOLE_PAGE_MARKERS.filter((m) => bundle.includes(m));
