@@ -1,6 +1,25 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:smart_curb/assistant.dart';
 import 'package:smart_curb/main.dart';
+
+/// `lots/` as the database had it (Oct 2026): every lot at every place,
+/// so tests run the same without a connection.
+final Map<String, dynamic> testLots =
+    jsonDecode(File('test/fixtures/lots.json').readAsStringSync());
+
+/// Gives every place its lots from [testLots], as the app's `lots/`
+/// listener does.
+void useTestLots() => Place.applyLotsToAll(testLots);
+
+/// [place]'s lots from [testLots], each with one free curb: every lot can
+/// be recommended, so routing to any of them can be checked.
+Map<String, Map<String, dynamic>> openLots(Place place) =>
+    parseLiveLots(place, testLots, {
+      for (final id in place.siteLots(testLots).keys) 'T-$id': {'lot': id},
+    });
 
 /// Made-up app data: at FAU, Lot 14's curbs report (C-095 taken, C-077
 /// open, C-001 offline); two cars; FAU saved; a filled-in profile.
@@ -21,10 +40,8 @@ class FakeData implements AssistantData {
 
   @override
   Future<Map<String, Map<String, dynamic>>> lots(Place place) async {
-    if (!place.liveParking) return staticLots(place);
-    return parseLiveLots(place, {
-      'lot14': {'name': 'Lot 14'},
-    }, {
+    if (!place.liveParking) return parseLiveLots(place, testLots, null);
+    return parseLiveLots(place, testLots, {
       'C-095': {'lot': 'lot14', 'occupied': true, 'online': true},
       'C-077': {'lot': 'lot14', 'occupied': false, 'online': true},
       'C-001': {'lot': 'lot14', 'occupied': false, 'online': false},
@@ -73,6 +90,7 @@ class FakeData implements AssistantData {
 const _sorry = "Sorry, I don't understand that";
 
 void main() {
+  useTestLots();
   TestWidgetsFlutterBinding.ensureInitialized();
   setUpAll(() async {
     for (final p in Place.all) {
@@ -253,7 +271,7 @@ void main() {
         (b) => bestParkingFor(fauBoca, b, lots)?.unitId != null,
       );
       final r = await bot().reply('where should i park for ${near.code}');
-      expect(r.text, contains('curb C-077 in Lot 14 (1 free right now)'));
+      expect(r.text, contains('curb C-077 in Lot 14 — Blue Permit (1 free right now)'));
     });
 
     test('an ambiguous building asks which one', () async {
@@ -282,7 +300,8 @@ void main() {
       final r = await bot().reply("hi, where do I park for macy's");
       expect(r.text, startsWith('Hi! '));
       expect(r.text, contains("Macy's"));
-      expect(r.text, contains('Parking Lot 2'));
+      // No lot at the mall has sensors yet: nowhere to send them.
+      expect(r.text, contains('no available parking lots'));
       expect(r.actions.firstWhere((a) => a.place != null).place, browardMall);
     });
   });
@@ -290,7 +309,7 @@ void main() {
   group('lots and open spots', () {
     test('a lot with curbs: live count', () async {
       final r = await bot().reply('is lot 14 full?');
-      expect(r.text, contains('Lot 14 has 1 of 2'));
+      expect(r.text, contains('Lot 14 — Blue Permit has 1 of 2'));
       expect(r.text, contains('1 curb is offline'));
     });
 
@@ -304,7 +323,7 @@ void main() {
 
     test('open spots right now: every live lot, and the mall', () async {
       final r = await bot().reply('Open spots right now');
-      expect(r.text, contains('FAU Lot 14: 1 of 2 open'));
+      expect(r.text, contains('FAU Lot 14 — Blue Permit: 1 of 2 open'));
       expect(r.text, contains('Broward Mall: no Smart Curb sensors'));
       expect((await bot().reply('any free spaces?')).text,
           contains('Lot 14'));
@@ -649,7 +668,7 @@ void main() {
 
     test('live answers: emptiest lot, curb count, time, sign-in', () async {
       expect((await bot().reply('which lot has the most space?')).text,
-          contains('FAU Lot 14 has the most open spots: 1 of 2'));
+          contains('FAU Lot 14 — Blue Permit has the most open spots: 1 of 2'));
       final count = await bot().reply('how many curbs are there');
       expect(count.text, contains('3 Smart Curbs'));
       expect(count.text, contains('2 online'));
@@ -680,7 +699,7 @@ void main() {
         'how do I add a place': 'Which place do you want to add?',
         'how do I add a new car': "Fill in your car's details",
         'how do i change my phone number': 'Sorry, you didn',
-        'is lot 14 full?': 'Lot 14 has 1 of 2',
+        'is lot 14 full?': 'Lot 14 — Blue Permit has 1 of 2',
         'what is my email': 'owl@fau.edu',
       };
       for (final e in cases.entries) {
@@ -749,7 +768,7 @@ void main() {
 
     test('...without taking over look-alike questions', () async {
       final b = FakeData(me: {'firstName': 'Sam', 'lastName': 'Owl'});
-      expect((await bot(b).reply('status of lot 14')).text, contains('Lot 14 has'));
+      expect((await bot(b).reply('status of lot 14')).text, contains('Lot 14 — Blue Permit has'));
       expect((await bot(b).reply('complete my profile')).form, isNotNull);
       expect((await bot(b).reply('how many devices are there')).text, contains('Smart Curbs'));
       expect((await bot(b).reply('is it safe to park at night')).text, contains('well-lit'));
@@ -940,14 +959,14 @@ void main() {
         'is there parking at FAU': 'Florida Atlantic University has 47 parking lots',
         'best lot for engineering': 'Which one do you mean',
         'parking for the gym': 'Recreation & Fitness Center (RC-91)',
-        'how far is lot 14 from the library': 'From Lot 14 to S E Wimberly Library (LY-3)',
-        'which lots have smart curbs': 'FAU Lot 14: 3 curbs',
+        'how far is lot 14 from the library': 'From Lot 14 — Blue Permit to S E Wimberly Library (LY-3)',
+        'which lots have smart curbs': 'FAU Lot 14 — Blue Permit: 3 curbs',
         'is parking free': 'The Smart Curb app is free',
         'where can visitors park': 'Visitor rules depend on the place',
         'motorcycle parking': "don't track motorcycle",
-        'is curb C-077 open': 'C-077 in Lot 14 is open right now',
-        'is curb C-095 open': 'C-095 in Lot 14 is taken',
-        'is curb C-001 free': 'C-001 in Lot 14 is offline',
+        'is curb C-077 open': 'C-077 in Lot 14 — Blue Permit is open right now',
+        'is curb C-095 open': 'C-095 in Lot 14 — Blue Permit is taken',
+        'is curb C-001 free': 'C-001 in Lot 14 — Blue Permit is offline',
         'is curb C-999 open': "couldn't find a curb called C-999",
         "what's the closest lot to me": "by where you're going",
         'can I park anywhere': 'parking rules',

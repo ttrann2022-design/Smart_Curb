@@ -20,6 +20,8 @@
     "test:assistant": "node --test scripts/test-assistant.mjs",
     "test:import": "node --test scripts/test-import.mjs",
     "test:scope": "node --test scripts/test-scope.mjs",
+    "test:schedule": "node --test scripts/test-schedule.mjs",
+    "scheduler:once": "node scheduler/once.mjs",
     "test:console-assistant": "node --test scripts/test-console-assistant.mjs",
     "lint": "eslint .",
     "preview": "vite preview"

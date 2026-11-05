@@ -9,6 +9,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:maplibre_gl/maplibre_gl.dart';
 import 'package:smart_curb/main.dart';
 
+import 'assistant_test.dart' show useTestLots;
+
 /// A walking graph: node -> [(neighbor, meters)].
 typedef Graph = Map<String, List<(String, double)>>;
 
@@ -214,6 +216,7 @@ int ratingFor(double occupancy) => occupancy >= 1
                 : 1;
 
 void main() {
+  useTestLots();
   TestWidgetsFlutterBinding.ensureInitialized();
   late RealNetwork fau;
   late RealNetwork mall;

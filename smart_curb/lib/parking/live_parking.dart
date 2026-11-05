@@ -13,8 +13,9 @@ String prettyLotName(String id) {
   return '${word[0].toUpperCase()}${word.substring(1).toLowerCase()} ${m.group(2)}';
 }
 
-/// "Lot 12 — Red Permit" -> "Lot 12": the short name fits the map label
-/// (the dashboard's lot sign splits names the same way).
+/// "Lot 12 — Red Permit" -> "Lot 12" (the dashboard's lot sign splits
+/// names the same way). Only for matching what people type: the app shows
+/// each lot's name exactly as `lots/` has it.
 String shortLotName(String name) => name.split(' — ').first.trim();
 
 LatLng? _readLatLng(Map<String, dynamic> data) {
@@ -27,15 +28,17 @@ LatLng? _readLatLng(Map<String, dynamic> data) {
 /// [place]'s lots from raw `lots/` and `units/` snapshots. Groups the curb
 /// units by their `lot` id: a lot's capacity is how many of its curbs are
 /// online, and its occupied count is how many of those are taken. Offline
-/// curbs count toward neither until they report again. `lots/` only
-/// supplies display names. Lots with no curbs at all are sensorless (see
+/// curbs count toward neither until they report again. `lots/` supplies
+/// the lots themselves: the ones with [place]'s `siteId`, with their
+/// positions and names. Without a `lots/` snapshot, the place's last known
+/// lots are used. Lots with no curbs at all are sensorless (see
 /// [sensorlessLot]).
 Map<String, Map<String, dynamic>> parseLiveLots(
   Place place,
   Object? rawLotsValue,
   Object? rawUnitsValue,
 ) {
-  final rawLots = rawLotsValue is Map ? rawLotsValue : const {};
+  final rawLots = place.siteLots(rawLotsValue);
   final rawUnits = rawUnitsValue is Map ? rawUnitsValue : const {};
 
   final capacity = <String, int>{};
@@ -68,22 +71,20 @@ Map<String, Map<String, dynamic>> parseLiveLots(
   }
 
   final result = <String, Map<String, dynamic>>{};
-  // Every lot the place knows, every lot in `lots/`, and any lot a unit
-  // points at that is in neither.
+  // The place's lots in `lots/` (or its last known ones, with no
+  // snapshot), and any lot a unit points at with a known position.
   final lotIds = {
-    ...place.lotPositions.keys,
-    for (final k in rawLots.keys) k.toString(),
+    ...(rawLotsValue is Map ? rawLots.keys : place.lotPositions.keys),
     ...spots.keys,
   };
   for (final lotId in lotIds) {
-    final val = rawLots[lotId];
-    final lotData =
-        val is Map ? Map<String, dynamic>.from(val) : <String, dynamic>{};
-    final pos = place.lotPositions[lotId] ?? _readLatLng(lotData);
+    final lotData = rawLots[lotId] ?? const <String, dynamic>{};
+    final pos = _readLatLng(lotData) ??
+        (rawLotsValue is Map ? null : place.lotPositions[lotId]);
     if (pos == null) continue;
-    final name = shortLotName(lotData['name']?.toString() ??
+    final name = lotData['name']?.toString() ??
         place.lotNames[lotId] ??
-        prettyLotName(lotId));
+        prettyLotName(lotId);
 
     // No curbs installed at all (online or not): a plain map point, like
     // a place without live parking (see [staticLots]).
@@ -122,8 +123,9 @@ Map<String, Map<String, dynamic>> parseLiveLots(
   return result;
 }
 
-/// A place without curbs (see [Place.liveParking]): all its lots are
-/// sensorless.
+/// [place]'s last known lots (see [Place.applyLots]), all sensorless: a
+/// place without curbs (see [Place.liveParking]), or any place before its
+/// live counts arrive.
 Map<String, Map<String, dynamic>> staticLots(Place place) => {
       for (final e in place.lotPositions.entries)
         e.key: sensorlessLot(

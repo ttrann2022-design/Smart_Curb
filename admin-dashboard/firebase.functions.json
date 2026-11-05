@@ -1,0 +1,8 @@
+{
+  "functions": {
+    "source": "functions",
+    "runtime": "nodejs22",
+    "predeploy": ["node scripts/vendor-functions.mjs"],
+    "ignore": ["node_modules", "*.log"]
+  }
+}

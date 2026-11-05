@@ -15,6 +15,7 @@ import NotFound from "./pages/NotFound";
 import Settings from "./pages/Settings";
 import Setup from "./pages/Setup";
 import Module from "./pages/Module";
+import Schedules from "./pages/Schedules";
 
 // The Assistant carries its phrase lists and examples, so it loads only when opened.
 const Assistant = lazy(() => import("./pages/Assistant"));
@@ -31,6 +32,7 @@ function App() {
         <Route element={<Layout />}>
           <Route path="/overview" element={<Overview />} />
           <Route path="/lots" element={<LotDetail />} />
+          <Route path="/schedules" element={<Schedules />} />
           <Route path="/units" element={<Units />} />
           <Route path="/assistant" element={<Suspense fallback={assistantLoading}><Assistant /></Suspense>} />
           <Route path="/analytics" element={<Analytics />} />
