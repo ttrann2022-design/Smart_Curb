@@ -23,6 +23,7 @@ const DASHBOARD_MARKERS = [
   "Load fresh simulated data",
   "Tell us about your parking",
   "A dashboard built around the curbs",
+  "Outside timed states, show",
 ];
 
 // Text from the console's own pages (Requests, Customers, Deployments, Home, Import lots, Settings).
@@ -98,6 +99,9 @@ if (expected === "demo" && !isDemo) {
 }
 
 // Neither app may carry the other's code. Look inside every script the build emitted.
+// The Schedules page's own styles: only customer builds may carry them.
+const SCHEDULE_CSS_MARKER = ".tm-week";
+const styles = readdirSync(join(dir, "assets")).filter((f) => f.endsWith(".css")).map((f) => readFileSync(join(dir, "assets", f), "utf8")).join("\n");
 const scripts = readdirSync(join(dir, "assets"))
   .filter((f) => f.endsWith(".js"))
   .map((f) => readFileSync(join(dir, "assets", f), "utf8"));
@@ -113,6 +117,7 @@ if (expected === "console") {
   if (otherAssistant.length) fail(`the console bundle contains the dashboard Assistant's answers: ${otherAssistant.map((m) => `"${m}"`).join(", ")}.`);
   const ownAssistant = CONSOLE_ASSISTANT_MARKERS.filter((m) => !bundle.includes(m));
   if (ownAssistant.length) fail(`the console bundle is missing the Console Assistant's text: ${ownAssistant.map((m) => `"${m}"`).join(", ")}. If you changed that text, update CONSOLE_ASSISTANT_MARKERS in scripts/check-build.mjs.`);
+  if (styles.includes(SCHEDULE_CSS_MARKER)) fail(`the console bundle contains the Schedules page's styles ("${SCHEDULE_CSS_MARKER}").`);
   // Import lots and the Console Assistant ship in this bundle; their tests take a second or two.
   runTests("./test-import.mjs", "the lot import's", "test:import");
   runTests("./test-console-assistant.mjs", "the Console Assistant's", "test:console-assistant");
@@ -128,6 +133,9 @@ if (expected === "console") {
   if (ownAssistant.length) fail(`the ${expected} bundle is missing the dashboard Assistant's text: ${ownAssistant.map((m) => `"${m}"`).join(", ")}. If you changed that text, update DASHBOARD_ASSISTANT_MARKERS in scripts/check-build.mjs.`);
   // The Assistant ships in this bundle: its phrasing tests take well under a second.
   runTests("./test-assistant.mjs", "the Assistant's", "test:assistant");
+  if (!styles.includes(SCHEDULE_CSS_MARKER)) fail(`the ${expected} bundle is missing the Schedules page's styles ("${SCHEDULE_CSS_MARKER}").`);
+  // Timed states ship in this bundle: the evaluator and runner tests need no network.
+  runTests("./test-schedule.mjs", "the timed states", "test:schedule");
   // Customer scoping decides which customer's lots and curbs each account sees.
   runTests("./test-scope.mjs", "the customer scoping", "test:scope");
 }
