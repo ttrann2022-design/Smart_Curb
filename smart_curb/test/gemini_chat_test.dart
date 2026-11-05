@@ -7,7 +7,7 @@ import 'package:smart_curb/assistant.dart';
 import 'package:smart_curb/gemini_chat.dart';
 import 'package:smart_curb/main.dart';
 
-import 'assistant_test.dart' show FakeData;
+import 'assistant_test.dart' show FakeData, useTestLots;
 
 /// A Gemini response whose answer is [json] (after a hidden reasoning part,
 /// as Gemma sends).
@@ -74,6 +74,7 @@ class FakeGoogle {
 }
 
 void main() {
+  useTestLots();
   TestWidgetsFlutterBinding.ensureInitialized();
   setUpAll(() async {
     for (final p in Place.all) {

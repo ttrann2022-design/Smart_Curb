@@ -248,13 +248,22 @@ class FirebaseAssistantData implements AssistantData {
 
   @override
   Future<Map<String, Map<String, dynamic>>> lots(Place place) async {
-    if (!place.liveParking) return staticLots(place);
     final cached = _lotCache[place.id];
     if (cached != null && DateTime.now().difference(cached.at) < _lotsFresh) {
       return cached.lots;
     }
-    final results = await Future.wait([_read('lots'), _read('units')]);
-    final lots = parseLiveLots(place, results[0], results[1]);
+    final List<Object?> results;
+    try {
+      results = await Future.wait(
+          [_read('lots'), if (place.liveParking) _read('units')]);
+    } catch (_) {
+      // No curbs to count here: the last known lots will do.
+      if (!place.liveParking) return staticLots(place);
+      rethrow;
+    }
+    place.applyLots(results[0]);
+    final lots =
+        parseLiveLots(place, results[0], place.liveParking ? results[1] : null);
     _lotCache[place.id] = (at: DateTime.now(), lots: lots);
     return lots;
   }
@@ -739,7 +748,7 @@ class SmartCurbAssistant {
     final faq = _faqFor(m);
     if (building.unique case final hit?) {
       // "How far is Lot 14 from the library?": that lot's walk.
-      final lotNamed = _findLot(m);
+      final lotNamed = await _findLot(m);
       if (lotNamed != null &&
           lotNamed.place == hit.place &&
           hit.place.lotPositions.containsKey(lotNamed.id)) {
@@ -766,7 +775,7 @@ class SmartCurbAssistant {
     if (m.anyPhrase(_wherePlacesPhrases)) return _wherePlaces();
 
     // ---- a lot: how full it is ----
-    final lot = _findLot(m);
+    final lot = await _findLot(m);
     if (lot != null) return _lotStatus(lot.place, lot.id, lot.label);
 
     if (m.anyPhrase(_curbCountPhrases)) return _curbCount();
@@ -1059,7 +1068,7 @@ HOW YOU TALK
 
 ABOUT SMART CURB (version $kAppVersion)
 - Smart Curbs are solar-powered devices that replace the concrete wheel stop at the front of a parking space. Each one senses whether its space is taken and reports it live.
-- The app works at ${places.map((p) => '${p.fullName} (${p.address})').join(' and ')}. Live curb counts are at FAU; at the mall it points to the closest lot.
+- The app works at ${places.map((p) => '${p.fullName} (${p.address})').join(' and ')}. Live curb counts are at FAU. The app only sends people to a lot with a counted open space: lots without sensors (all of the mall's, for now) and full lots are skipped, and when none is left the map says there's no available parking at the moment.
 - It picks the best lot (or exact open curb) for the building you're going to by real walking distance, gives turn-by-turn driving directions, switches lots if yours fills up on the way, then shows a walking path to the door.
 - Home tab: saved places ("Add more locations"); tap one to open its map. On the map, search for a building or tap it. Vehicle tab: your cars. Profile tab: contact info. ⋮ menu (top right): Settings (notifications, Contact Us) and About App. Log out: icon at the top left.
 - Map colors: green space = open, red = taken, gray = curb offline. Lot labels: green under 70% full, amber 70-90%, red 90%+, gray = no sensors.
@@ -1603,7 +1612,7 @@ Answer only with JSON: {"reply": "...", "action": null or a request}''';
   Future<String> _placeStatus(Place place) async {
     if (!place.liveParking) {
       return '${place.lotPositions.length} lots (no Smart Curb sensors yet, '
-          "I'll point you to the closest)";
+          "so I can't guide you to a space there)";
     }
     try {
       final lots = await data.lots(place);
@@ -1648,8 +1657,8 @@ Answer only with JSON: {"reply": "...", "action": null or a request}''';
       'Right now Smart Curb works at '
       '${places.map((p) => p.fullName).join(' and ')}. '
       '${live.isEmpty ? '' : 'Live curb counts are at ${live.join(' and ')}; '}'
-      'everywhere else I point you to the closest lot. More places can '
-      'join as Smart Curbs are installed.',
+      "elsewhere I can't see open spaces yet, so I can't guide you to one. "
+      'More places can join as Smart Curbs are installed.',
       const [
         ChatAction.ask('My saved places'),
         ChatAction.tab('Go to Home', kHomeTab),
@@ -1728,9 +1737,9 @@ Answer only with JSON: {"reply": "...", "action": null or a request}''';
     if (best == null || best.free == 0) {
       return const ChatReply(
         'Bad luck right now: '
-        "None of the lots with Smart Curbs has an open spot right now. Lots "
-        "without sensors may still have space: tell me your building and "
-        "I'll pick the closest one.",
+        "None of the lots with Smart Curbs has an open spot right now, and "
+        "I can't see inside the lots without sensors. I'd give it a few "
+        'minutes and check again.',
         actions,
       );
     }
@@ -1753,8 +1762,9 @@ Answer only with JSON: {"reply": "...", "action": null or a request}''';
     ];
     if (best == null) {
       return ChatReply(
-        "Oh no, all the lots near $where are full right now. I'd give it a "
-        "few minutes, or open the map and we'll watch for a spot together.",
+        "Sorry, there are no available parking lots for $where at this "
+        "moment: every lot nearby is either full or has no Smart Curb "
+        "sensors yet. I'd give it a few minutes and check again.",
         actions,
       );
     }
@@ -1895,8 +1905,8 @@ Answer only with JSON: {"reply": "...", "action": null or a request}''';
       if (onlyMall && place.liveParking) continue;
       if (!place.liveParking) {
         lines.add(
-            "• ${place.nickname}: no Smart Curb sensors yet. I'll still point "
-            'you to the closest lot.');
+            '• ${place.nickname}: no Smart Curb sensors yet, so no '
+            'available parking to guide you to.');
         continue;
       }
       final lots = await data.lots(place);
@@ -2743,25 +2753,35 @@ Answer only with JSON: {"reply": "...", "action": null or a request}''';
 
   // ---- lots named in a message ----
 
-  ({Place place, String id, String label})? _findLot(_Message m) {
+  /// The lot a message names ("lot 14", "garage II", "aqua lot"), found
+  /// by its name in `lots/`. Its id is '' when the place has no such lot.
+  Future<({Place place, String id, String label})?> _findLot(_Message m) async {
     final mall = m.anyPhrase(_browardWords);
     final fau = places.firstWhere((p) => p.liveParking, orElse: () => places.first);
     final broward =
         places.firstWhere((p) => !p.liveParking, orElse: () => places.last);
     final text = m.text;
 
+    Future<({Place place, String id, String label})> named(
+        Place place, String label) async {
+      // "Lot 1" is Broward's "Broward Mall - Parking Lot 1"; "Lot 14" is
+      // FAU's "Lot 14 — Blue Permit".
+      final want = label.toLowerCase();
+      for (final e in (await data.lots(place)).entries) {
+        final name = shortLotName(e.value['name'].toString()).toLowerCase();
+        if (name == want || name.endsWith(' $want')) {
+          return (place: place, id: e.key, label: e.value['name'].toString());
+        }
+      }
+      return (place: place, id: '', label: label);
+    }
+
     final lotMatch =
         RegExp(r'\b(?:parking\s+)?lot\s*#?\s*(\d{1,3})\s*(n)?\b').firstMatch(text);
     if (lotMatch != null) {
       final n = int.parse(lotMatch.group(1)!);
       final suffix = lotMatch.group(2) ?? '';
-      final label = 'Lot $n${suffix.toUpperCase()}';
-      if (mall) return (place: broward, id: 'lot$n', label: label);
-      return (
-        place: fau,
-        id: 'lot${n.toString().padLeft(2, '0')}$suffix',
-        label: label,
-      );
+      return named(mall ? broward : fau, 'Lot $n${suffix.toUpperCase()}');
     }
     final garage = RegExp(r'\bgarage\s*(\d|i{1,3}|one|two|three)\b')
         .firstMatch(text);
@@ -2771,16 +2791,12 @@ Answer only with JSON: {"reply": "...", "action": null or a request}''';
       };
       final g = garage.group(1)!;
       final n = int.tryParse(g) ?? numbers[g]!;
-      return (place: fau, id: 'garage$n', label: 'Garage $n');
+      return named(fau, 'Garage $n');
     }
-    final named = RegExp(r'\b(aqua|copper)\s+lot\b').firstMatch(text);
-    if (named != null) {
-      final id = named.group(1)!;
-      return (
-        place: fau,
-        id: id,
-        label: '${id[0].toUpperCase()}${id.substring(1)} Lot',
-      );
+    final lotName = RegExp(r'\b(aqua|copper)\s+lot\b').firstMatch(text);
+    if (lotName != null) {
+      final id = lotName.group(1)!;
+      return named(fau, '${id[0].toUpperCase()}${id.substring(1)} Lot');
     }
     return null;
   }
@@ -4415,9 +4431,10 @@ Answer only with JSON: {"reply": "...", "action": null or a request}''';
         'Happy to explain! '
         'I pick the open lot (or curb) that gives you the shortest walk to '
         "the building's door, measured along the real walking paths. Full "
-        "lots and offline curbs are skipped, so the nearest lot isn't always "
-        "the pick when it has no space. If it fills while you drive, I "
-        'switch you to the next best one.',
+        "lots, offline curbs and lots without sensors are skipped, so the "
+        "nearest lot isn't always the pick. If none is left, the map tells you "
+        "there's no available parking right now. If yours fills while you "
+        "drive, I switch you to the next best one.",
         [ChatAction.ask('Where should I park?')],
       ),
     ),

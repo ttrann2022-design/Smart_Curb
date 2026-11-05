@@ -16,7 +16,7 @@ import 'package:maplibre_gl/maplibre_gl.dart';
 import 'package:smart_curb/assistant.dart';
 import 'package:smart_curb/main.dart';
 
-import 'assistant_test.dart' show FakeData;
+import 'assistant_test.dart' show FakeData, openLots, useTestLots;
 
 /// Records a measurement and checks it's within [budget].
 void perf(String area, String what, double value, double budget, String unit,
@@ -66,6 +66,7 @@ double growth(double Function(int n) timeAt, int n) {
 }
 
 void main() {
+  useTestLots();
   TestWidgetsFlutterBinding.ensureInitialized();
   setUpAll(() async {
     for (final p in Place.all) {
@@ -107,7 +108,7 @@ void main() {
     });
 
     test('best spot for a building within the response budget', () {
-      final lots = staticLots(fauBoca);
+      final lots = openLots(fauBoca);
       var worst = 0.0;
       for (final b in fauBoca.buildings) {
         worst = math.max(worst,
@@ -179,7 +180,7 @@ void main() {
       final sw = Stopwatch()..start();
       var n = 0;
       for (final p in Place.all) {
-        final lots = staticLots(p);
+        final lots = openLots(p);
         for (final b in p.buildings) {
           bestParkingFor(p, b, lots);
           n++;

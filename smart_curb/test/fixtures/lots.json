@@ -1,0 +1,316 @@
+{
+  "aqua": {
+    "latitude": 26.37936,
+    "longitude": -80.099444,
+    "name": "Aqua Lot",
+    "siteId": "-P52M40pbO0wEo92LGcK"
+  },
+  "broward1": {
+    "latitude": 26.119498,
+    "longitude": -80.256565,
+    "name": "Broward Mall - Parking Lot 1",
+    "siteId": "-P52MJbV4GX-1cAesso6"
+  },
+  "broward2": {
+    "latitude": 26.118063,
+    "longitude": -80.253161,
+    "name": "Broward Mall - Parking Lot 2",
+    "siteId": "-P52MJbV4GX-1cAesso6"
+  },
+  "broward3": {
+    "latitude": 26.115663,
+    "longitude": -80.253942,
+    "name": "Broward Mall - Parking Lot 3",
+    "siteId": "-P52MJbV4GX-1cAesso6"
+  },
+  "broward4": {
+    "latitude": 26.116812,
+    "longitude": -80.256363,
+    "name": "Broward Mall - Parking Lot 4",
+    "siteId": "-P52MJbV4GX-1cAesso6"
+  },
+  "copper": {
+    "latitude": 26.37753,
+    "longitude": -80.099187,
+    "name": "Copper Lot",
+    "siteId": "-P52M40pbO0wEo92LGcK"
+  },
+  "garage1": {
+    "latitude": 26.372192,
+    "longitude": -80.10603,
+    "name": "Garage 1",
+    "siteId": "-P52M40pbO0wEo92LGcK"
+  },
+  "garage2": {
+    "latitude": 26.368955,
+    "longitude": -80.099541,
+    "name": "Garage 2 — 4 levels",
+    "openSpots": 42,
+    "siteId": "-P52M40pbO0wEo92LGcK",
+    "totalSpots": 160
+  },
+  "garage3": {
+    "latitude": 26.375169,
+    "longitude": -80.104009,
+    "name": "Garage 3",
+    "siteId": "-P52M40pbO0wEo92LGcK"
+  },
+  "lot01": {
+    "latitude": 26.370548,
+    "longitude": -80.099284,
+    "name": "Lot 1",
+    "siteId": "-P52M40pbO0wEo92LGcK"
+  },
+  "lot02": {
+    "latitude": 26.372916,
+    "longitude": -80.099578,
+    "name": "Lot 2",
+    "siteId": "-P52M40pbO0wEo92LGcK"
+  },
+  "lot03": {
+    "latitude": 26.371307,
+    "longitude": -80.101397,
+    "name": "Lot 3",
+    "siteId": "-P52M40pbO0wEo92LGcK"
+  },
+  "lot04": {
+    "latitude": 26.374155,
+    "longitude": -80.099734,
+    "name": "Lot 4",
+    "siteId": "-P52M40pbO0wEo92LGcK"
+  },
+  "lot05": {
+    "latitude": 26.379985,
+    "longitude": -80.101641,
+    "name": "Lot 5",
+    "siteId": "-P52M40pbO0wEo92LGcK"
+  },
+  "lot06": {
+    "latitude": 26.374074,
+    "longitude": -80.104246,
+    "name": "Lot 6",
+    "siteId": "-P52M40pbO0wEo92LGcK"
+  },
+  "lot07": {
+    "latitude": 26.374039,
+    "longitude": -80.105947,
+    "name": "Lot 7",
+    "siteId": "-P52M40pbO0wEo92LGcK"
+  },
+  "lot08": {
+    "latitude": 26.37326,
+    "longitude": -80.106791,
+    "name": "Lot 8",
+    "siteId": "-P52M40pbO0wEo92LGcK"
+  },
+  "lot10": {
+    "latitude": 26.372522,
+    "longitude": -80.108251,
+    "name": "Lot 10",
+    "siteId": "-P52M40pbO0wEo92LGcK"
+  },
+  "lot102": {
+    "latitude": 26.36736,
+    "longitude": -80.099337,
+    "name": "Lot 102",
+    "siteId": "-P52M40pbO0wEo92LGcK"
+  },
+  "lot12": {
+    "latitude": 26.373825,
+    "longitude": -80.110753,
+    "name": "Lot 12 — Red Permit",
+    "openSpots": 16,
+    "siteId": "-P52M40pbO0wEo92LGcK",
+    "totalSpots": 80
+  },
+  "lot13": {
+    "latitude": 26.372919,
+    "longitude": -80.111539,
+    "name": "Lot 13",
+    "siteId": "-P52M40pbO0wEo92LGcK"
+  },
+  "lot14": {
+    "latitude": 26.372338,
+    "longitude": -80.110426,
+    "name": "Lot 14 — Blue Permit",
+    "openSpots": 40,
+    "siteId": "-P52M40pbO0wEo92LGcK",
+    "totalSpots": 96
+  },
+  "lot15": {
+    "latitude": 26.370655,
+    "longitude": -80.108325,
+    "name": "Lot 15",
+    "siteId": "-P52M40pbO0wEo92LGcK"
+  },
+  "lot16": {
+    "latitude": 26.368944,
+    "longitude": -80.106239,
+    "name": "Lot 16",
+    "siteId": "-P52M40pbO0wEo92LGcK"
+  },
+  "lot17": {
+    "latitude": 26.367668,
+    "longitude": -80.10679,
+    "name": "Lot 17",
+    "siteId": "-P52M40pbO0wEo92LGcK"
+  },
+  "lot18": {
+    "latitude": 26.368141,
+    "longitude": -80.105545,
+    "name": "Lot 18",
+    "siteId": "-P52M40pbO0wEo92LGcK"
+  },
+  "lot19": {
+    "latitude": 26.371296,
+    "longitude": -80.104582,
+    "name": "Lot 19",
+    "siteId": "-P52M40pbO0wEo92LGcK"
+  },
+  "lot20": {
+    "latitude": 26.371033,
+    "longitude": -80.104776,
+    "name": "Lot 20 — Visitor",
+    "openSpots": 25,
+    "siteId": "-P52M40pbO0wEo92LGcK",
+    "totalSpots": 76
+  },
+  "lot21": {
+    "latitude": 26.367677,
+    "longitude": -80.104817,
+    "name": "Lot 21",
+    "siteId": "-P52M40pbO0wEo92LGcK"
+  },
+  "lot22": {
+    "latitude": 26.36768,
+    "longitude": -80.10295,
+    "name": "Lot 22",
+    "siteId": "-P52M40pbO0wEo92LGcK"
+  },
+  "lot23": {
+    "latitude": 26.367113,
+    "longitude": -80.102026,
+    "name": "Lot 23",
+    "siteId": "-P52M40pbO0wEo92LGcK"
+  },
+  "lot24": {
+    "latitude": 26.366514,
+    "longitude": -80.100685,
+    "name": "Lot 24",
+    "siteId": "-P52M40pbO0wEo92LGcK"
+  },
+  "lot25": {
+    "latitude": 26.369226,
+    "longitude": -80.098988,
+    "name": "Lot 25",
+    "siteId": "-P52M40pbO0wEo92LGcK"
+  },
+  "lot26n": {
+    "latitude": 26.375429,
+    "longitude": -80.096293,
+    "name": "Lot 26N",
+    "siteId": "-P52M40pbO0wEo92LGcK"
+  },
+  "lot27": {
+    "latitude": 26.37061,
+    "longitude": -80.098295,
+    "name": "Lot 27",
+    "siteId": "-P52M40pbO0wEo92LGcK"
+  },
+  "lot28": {
+    "latitude": 26.368689,
+    "longitude": -80.098128,
+    "name": "Lot 28",
+    "siteId": "-P52M40pbO0wEo92LGcK"
+  },
+  "lot29": {
+    "latitude": 26.377618,
+    "longitude": -80.096624,
+    "name": "Lot 29",
+    "siteId": "-P52M40pbO0wEo92LGcK"
+  },
+  "lot30": {
+    "latitude": 26.376335,
+    "longitude": -80.096356,
+    "name": "Lot 30",
+    "siteId": "-P52M40pbO0wEo92LGcK"
+  },
+  "lot31": {
+    "latitude": 26.376868,
+    "longitude": -80.096083,
+    "name": "Lot 31",
+    "siteId": "-P52M40pbO0wEo92LGcK"
+  },
+  "lot32": {
+    "latitude": 26.376943,
+    "longitude": -80.096885,
+    "name": "Lot 32",
+    "siteId": "-P52M40pbO0wEo92LGcK"
+  },
+  "lot33": {
+    "latitude": 26.376499,
+    "longitude": -80.097328,
+    "name": "Lot 33",
+    "siteId": "-P52M40pbO0wEo92LGcK"
+  },
+  "lot34": {
+    "latitude": 26.374992,
+    "longitude": -80.096988,
+    "name": "Lot 34",
+    "siteId": "-P52M40pbO0wEo92LGcK"
+  },
+  "lot35": {
+    "latitude": 26.375031,
+    "longitude": -80.097781,
+    "name": "Lot 35",
+    "siteId": "-P52M40pbO0wEo92LGcK"
+  },
+  "lot36": {
+    "latitude": 26.375505,
+    "longitude": -80.099596,
+    "name": "Lot 36",
+    "siteId": "-P52M40pbO0wEo92LGcK"
+  },
+  "lot45": {
+    "latitude": 26.377852,
+    "longitude": -80.097683,
+    "name": "Lot 45",
+    "siteId": "-P52M40pbO0wEo92LGcK"
+  },
+  "lot46": {
+    "latitude": 26.378737,
+    "longitude": -80.097365,
+    "name": "Lot 46",
+    "siteId": "-P52M40pbO0wEo92LGcK"
+  },
+  "lot47": {
+    "latitude": 26.378205,
+    "longitude": -80.094938,
+    "name": "Lot 47",
+    "siteId": "-P52M40pbO0wEo92LGcK"
+  },
+  "lot51": {
+    "latitude": 26.371994,
+    "longitude": -80.104955,
+    "name": "Lot 51",
+    "siteId": "-P52M40pbO0wEo92LGcK"
+  },
+  "lot60": {
+    "latitude": 26.368668,
+    "longitude": -80.096215,
+    "name": "Lot 60",
+    "siteId": "-P52M40pbO0wEo92LGcK"
+  },
+  "lot92": {
+    "latitude": 26.366769,
+    "longitude": -80.10405,
+    "name": "Lot 92",
+    "siteId": "-P52M40pbO0wEo92LGcK"
+  },
+  "lot96n": {
+    "latitude": 26.373468,
+    "longitude": -80.098182,
+    "name": "Lot 96N",
+    "siteId": "-P52M40pbO0wEo92LGcK"
+  }
+}
