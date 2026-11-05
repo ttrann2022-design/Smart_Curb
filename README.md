@@ -174,6 +174,7 @@ units/<curbId>
     panelText      up to 16 characters
 
 users/<uid>        Dashboard accounts: email, role, last active, siteId (see Customer scoping)
+schedules/<siteId> Timed states: settings, rules, applied (see Timed states)
 invites/<email>    Pending dashboard invites (dots in the email become commas)
 drivers/<uid>      Driver app accounts
 demo/              Same shape as above, used only for demos
@@ -219,6 +220,48 @@ Future work, if customers must be kept apart by the database itself:
 
 - **Per-customer read rules**: group data by customer (for example `customers/<siteId>/units/<id>` and `customers/<siteId>/lots/<id>`) so a rule can grant `users/<uid>/siteId === $siteId`. Rules can't filter a list, so today's flat `units/` can't be split per customer. The Receiver, the sign, the driver app and the simulator would all need to read and write the new paths.
 - **A separate Firebase project per customer**, with its own database, accounts and hosting.
+
+## Timed states
+
+Managers schedule how vacant curbs look: "10 PM to 6 AM: dim to 10%", or "Mon to Fri, 7 AM to 5 PM: show RESERVED in gold". The curbs have no clock, so a runner on the server writes each change when it's due, using the same three fields the manual LED control writes (`ledColor`, `panelText`, `ledBrightness`), so nothing changes for the Receiver. Curbs already turn their LEDs off when occupied, so this only sets the vacant look.
+
+### Data model
+
+```
+schedules/<siteId>/settings          { enabled, timezone (IANA), default: look }
+schedules/<siteId>/rules/<ruleId>    { name, enabled, days: [0-6, 0 = Sunday], start: "HH:MM", end: "HH:MM",
+                                       target: { type: "site" | "lots" | "units", ids: [...] },
+                                       look, priority: 0-9, updatedAt, updatedBy }
+schedules/<siteId>/applied/<unitId>  { key, at }   what was last applied
+look                                 { ledColor, panelText, ledBrightness }
+```
+
+The limits are the manual control's: colours red, blue, green, gold and white; 16 characters of panel text; brightness a whole percent from 0 to 100. A site can't be switched on without a default look. Anyone linked to the site and platform admins read it; that site's managers and platform admins write it.
+
+### How a look is chosen
+
+`admin-dashboard/shared/schedule.js` is pure, and the page, the runner and the tests all use it. Times are wall-clock times in the site's timezone. A window's start is inclusive and its end exclusive, and a window crossing midnight belongs to the day it starts, so Friday 22:00 to 06:00 is active on Saturday at 03:00. Start equal to end is refused. When several match: highest priority, then the more specific target (curbs, then lots, then the whole site), then the later start. With none active, the default look shows. Disabled rules are ignored, and a disabled site isn't touched at all.
+
+### The runner
+
+`admin-dashboard/scheduler/runOnce.js` goes through each enabled site's curbs and writes a look only when it differs from what was last applied, in batched multi-path updates. A manual LED edit therefore stays until the next scheduled change. Three things run it:
+
+- **`functions/`**: a scheduled Cloud Function, every minute, with the Admin SDK. Deploy it with `firebase deploy --only functions --config firebase.functions.json` from `admin-dashboard/` (needs the Blaze plan). A plain `firebase deploy` doesn't include it.
+- **`npm run scheduler:once`**: one pass against the local emulator. Add `-- --at 2026-11-06T23:00:00-05:00` to pretend it's another time. It refuses any other host.
+- **Apply now** on the Schedules page: the same code from the browser, for that one site, as the signed-in manager.
+
+The page is in the customer dashboard only, not the company console. In Simulation, timed states stay in the browser tab: they try out the timeline and preview on simulated curbs and write nothing.
+
+### Known limits
+
+- **A scheduler has to be running.** With no function deployed, nothing changes on its own; Apply now is the only trigger, and a change due overnight waits until someone presses it. The page says when curbs haven't got their look yet.
+- **A curb that reboots shows its default** until the Receiver resends its settings. The runner doesn't see this: it compares against what it last applied, not what the panel shows.
+- **Changes land up to a minute late**, and only while the function runs.
+- **Daylight saving follows the clock.** A window inside the skipped hour doesn't run that night, one inside the repeated hour runs twice, and an overnight window is an hour shorter or longer in real time.
+- **There's no all-day window.** Start can't equal end, so 00:00 to 23:59 leaves one minute a day; use the default look for what should always show.
+- **Reads cost bandwidth.** While any site is on, each run downloads `lots/` and `units/`, once a minute. With no site on, it reads only `schedules/`.
+- **Curb writes aren't limited per customer.** As with the manual control, the rules let any operator or manager write any curb's LED fields; `schedules/` itself is per site. See *The honest limit* above.
+- **Apply now needs a role that can set LEDs.** A platform admin whose dashboard role is viewer can edit schedules, but the database refuses their Apply now.
 
 ## Live and Simulation data
 
