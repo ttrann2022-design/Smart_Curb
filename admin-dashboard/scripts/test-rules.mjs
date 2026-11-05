@@ -107,7 +107,7 @@ async function seed() {
 // update() in the SDK is a PATCH: it only touches the fields it names.
 const patchUnit = (who, fields, id = "C-001") => call("PATCH", `units/${id}`, AS[who], fields);
 const allowed = (r) => assert.ok(r.ok, `expected allowed, got ${r.status} ${JSON.stringify(r.body)}`);
-const denied = (r) => assert.ok(!r.ok, `expected denied, got ${r.status}`);
+const denied = (r, what = "") => assert.ok(!r.ok, `expected denied, got ${r.status} ${what}`);
 
 before(async () => {
   try {
@@ -1190,4 +1190,175 @@ test("demo/users is closed: no siteId (or anything else) can be written or read 
   }
   // The rest of demo/ is unchanged: staff still write simulated curbs.
   allowed(await call("PATCH", "demo/units/C-001", AS.operator, { ledColor: "red" }));
+});
+
+// ---------- Timed states: schedules/<siteId> ----------
+
+const LOOK = { ledColor: "blue", panelText: "OPEN", ledBrightness: 100 };
+const SCHEDULE_SETTINGS = { enabled: true, timezone: "America/New_York", default: LOOK };
+// What the page saves. updatedBy must be the writer, so it's filled in for each account.
+const timedRule = (uid, over = {}) => ({
+  name: "Night dim", enabled: true, days: [0, 1, 2, 3, 4, 5, 6], start: "22:00", end: "06:00", target: { type: "site" },
+  look: { ...LOOK, ledBrightness: 10 }, priority: 5, updatedAt: SERVER_TIME, updatedBy: uid, ...over,
+});
+// mgrA manages site1, mgrB manages site2; opA and viewA are site1's operator and viewer;
+// mgr (from seed) is a manager with no siteId, and pa a platform admin.
+const SCHEDULE_ACCOUNTS = {
+  mgrA: mockToken("mgrA", "mgra@example.com"), mgrB: mockToken("mgrB", "mgrb@example.com"),
+  opA: mockToken("opA", "opa@example.com"), viewA: mockToken("viewA", "viewa@example.com"),
+};
+async function seedSchedules() {
+  await call("PATCH", "", OWNER, {
+    "sites/site2": { ...CUSTOMER, name: "Second" },
+    "users/mgrA": { email: "mgra@example.com", role: "manager", siteId: "site1" },
+    "users/mgrB": { email: "mgrb@example.com", role: "manager", siteId: "site2" },
+    "users/opA": { email: "opa@example.com", role: "operator", siteId: "site1" },
+    "users/viewA": { email: "viewa@example.com", role: "viewer", siteId: "site1" },
+    "schedules/site1": { settings: SCHEDULE_SETTINGS, rules: { r1: { ...timedRule("mgrA"), updatedAt: 1760000000000 } }, applied: { "C-001": { key: "blue|OPEN|100", at: 1 } } },
+    "schedules/site2": { settings: SCHEDULE_SETTINGS },
+  });
+}
+const nobodyLinked = ["manager", "operator", "viewer", "driver", "signedOut"];
+
+test("schedules are read by accounts linked to that site and platform admins only", async () => {
+  await seedSchedules();
+  for (const who of ["mgrA", "opA", "viewA"]) {
+    const r = await call("GET", "schedules/site1", SCHEDULE_ACCOUNTS[who]);
+    allowed(r);
+    assert.deepEqual(r.body.settings, SCHEDULE_SETTINGS);
+    // Another customer's schedule, and the list of all of them, stay closed.
+    denied(await call("GET", "schedules/site2", SCHEDULE_ACCOUNTS[who]));
+    denied(await call("GET", "schedules", SCHEDULE_ACCOUNTS[who]));
+  }
+  denied(await call("GET", "schedules/site1", SCHEDULE_ACCOUNTS.mgrB));
+  allowed(await call("GET", "schedules/site1", AS.platformAdmin));
+  allowed(await call("GET", "schedules/site2", AS.platformAdmin));
+  // Unlinked staff, drivers and signed-out requests read nothing.
+  for (const who of nobodyLinked) denied(await call("GET", "schedules/site1", AS[who]));
+});
+
+test("that site's managers and platform admins write settings, rules and applied", async () => {
+  await seedSchedules();
+  for (const [token, uid] of [[SCHEDULE_ACCOUNTS.mgrA, "mgrA"], [AS.platformAdmin, "pa"]]) {
+    allowed(await call("PUT", "schedules/site1/rules/new1", token, timedRule(uid)));
+    assert.equal((await call("GET", "schedules/site1/rules/new1/updatedBy", OWNER)).body, uid);
+    allowed(await call("PATCH", "schedules/site1/rules/new1", token, { enabled: false, updatedAt: SERVER_TIME, updatedBy: uid }));
+    allowed(await call("DELETE", "schedules/site1/rules/new1", token));
+    allowed(await call("PUT", "schedules/site1/settings", token, { enabled: false, timezone: "Europe/London", default: LOOK }));
+    allowed(await call("PATCH", "schedules/site1/settings", token, { enabled: true, timezone: "America/New_York" }));
+    allowed(await call("PUT", "schedules/site1/applied/C-001", token, { key: "gold|X|5", at: 123 }));
+  }
+  // A platform admin isn't tied to one site.
+  allowed(await call("PUT", "schedules/site2/rules/new2", AS.platformAdmin, timedRule("pa")));
+});
+
+test("operators, viewers, other sites' managers, unlinked staff, drivers and signed-out requests can't write", async () => {
+  await seedSchedules();
+  const before = (await call("GET", "schedules/site1", OWNER)).body;
+  const tokens = { opA: SCHEDULE_ACCOUNTS.opA, viewA: SCHEDULE_ACCOUNTS.viewA, mgrB: SCHEDULE_ACCOUNTS.mgrB, mgr: AS.manager, op: AS.operator, view: AS.viewer, driver: AS.driver, signedOut: null };
+  for (const [uid, token] of Object.entries(tokens)) {
+    denied(await call("PUT", "schedules/site1/rules/x", token, timedRule(uid)), uid);
+    denied(await call("PATCH", "schedules/site1/rules/r1", token, { enabled: false, updatedAt: SERVER_TIME, updatedBy: uid }), uid);
+    denied(await call("DELETE", "schedules/site1/rules/r1", token), uid);
+    denied(await call("PUT", "schedules/site1/settings", token, SCHEDULE_SETTINGS), uid);
+    denied(await call("PATCH", "schedules/site1/settings", token, { enabled: false }), uid);
+    denied(await call("PUT", "schedules/site1/applied/C-001", token, { key: "x", at: 1 }), uid);
+    denied(await call("DELETE", "schedules/site1", token), uid);
+    denied(await call("PATCH", "", token, { "schedules/site1/settings/enabled": false }), uid);
+  }
+  assert.deepEqual((await call("GET", "schedules/site1", OWNER)).body, before);
+  // Nobody replaces a whole schedule or the whole tree, not even a platform admin.
+  for (const token of [SCHEDULE_ACCOUNTS.mgrA, AS.platformAdmin]) {
+    denied(await call("PUT", "schedules/site1", token, { settings: SCHEDULE_SETTINGS }));
+    denied(await call("DELETE", "schedules", token));
+    denied(await call("PUT", "schedules/site1/other", token, { a: 1 }));
+  }
+  // A manager can't move themselves to another site to get in (siteId rules, above).
+  denied(await call("PUT", "users/mgrB/siteId", SCHEDULE_ACCOUNTS.mgrB, "site1"));
+});
+
+test("a timed state's values are checked", async () => {
+  await seedSchedules();
+  const put = (over) => call("PUT", "schedules/site1/rules/bad", SCHEDULE_ACCOUNTS.mgrA, timedRule("mgrA", over));
+  const look = (over) => ({ look: { ...LOOK, ...over } });
+  const bad = [
+    { name: "" }, { name: "x".repeat(61) }, { name: 5 }, { enabled: "yes" },
+    { days: [7] }, { days: [-1] }, { days: [1.5] }, { days: ["1"] }, { days: "1" }, { days: null },
+    { start: "24:00" }, { start: "9:00" }, { start: "09:60" }, { start: "0900" }, { start: 900 }, { start: null },
+    { end: "25:00" }, { end: "" }, { end: null },
+    { start: "10:00", end: "10:00" },
+    { target: { type: "zone" } }, { target: { type: "lots" } }, { target: { type: "units" } }, { target: { type: "site", ids: ["lot14"] } },
+    { target: { type: "lots", ids: [5] } }, { target: { type: "lots", ids: ["a/b"] } }, { target: { ids: ["lot14"] } }, { target: { type: "site", extra: 1 } }, { target: null },
+    look({ ledColor: "amber" }), look({ ledColor: 3 }), look({ panelText: "X".repeat(17) }), look({ panelText: 7 }),
+    look({ ledBrightness: -1 }), look({ ledBrightness: 101 }), look({ ledBrightness: 255 }), look({ ledBrightness: 1.5 }), look({ ledBrightness: "10" }),
+    { look: { ledColor: "blue", panelText: "X" } }, look({ extra: 1 }), { look: null },
+    { priority: 10 }, { priority: -1 }, { priority: 1.5 }, { priority: "1" }, { priority: null },
+    { updatedAt: 1 }, { updatedAt: "now" }, { updatedAt: null }, { updatedBy: "someoneElse" }, { updatedBy: null },
+    { notes: "extra" },
+  ];
+  for (const over of bad) denied(await put(over), JSON.stringify(over));
+  assert.equal((await call("GET", "schedules/site1/rules/bad", OWNER)).body, null);
+  // The limits themselves pass, and so do targets with IDs and empty panel text.
+  for (const over of [
+    { days: [0] }, { days: [6] }, { start: "00:00", end: "23:59" }, { start: "23:59", end: "00:00" }, { priority: 0 }, { priority: 9 },
+    look({ ledBrightness: 0 }), look({ ledBrightness: 100 }), look({ panelText: "" }), look({ panelText: "X".repeat(16) }),
+    { target: { type: "lots", ids: ["lot14", "lot06"] } }, { target: { type: "units", ids: ["C-001"] } },
+    { name: "x".repeat(60) },
+  ]) allowed(await put(over));
+  // Editing a saved rule into an invalid one is refused too.
+  denied(await call("PATCH", "schedules/site1/rules/r1", SCHEDULE_ACCOUNTS.mgrA, { end: "22:00", updatedAt: SERVER_TIME, updatedBy: "mgrA" }));
+  denied(await call("PUT", "schedules/site1/rules/r1/start", SCHEDULE_ACCOUNTS.mgrA, "06:00"));
+});
+
+test("schedule settings are checked, and a site can't be on without a default", async () => {
+  await seedSchedules();
+  const token = SCHEDULE_ACCOUNTS.mgrA;
+  const put = (body) => call("PUT", "schedules/site1/settings", token, body);
+  for (const body of [
+    { enabled: true, timezone: "America/New_York" }, // no default
+    { timezone: "America/New_York" }, { enabled: false }, { enabled: "true", timezone: "UTC" },
+    { enabled: false, timezone: "not a zone" }, { enabled: false, timezone: 5 }, { enabled: false, timezone: `A/${"x".repeat(70)}` },
+    { enabled: false, timezone: "UTC", default: { ledColor: "blue" } },
+    { enabled: false, timezone: "UTC", default: { ...LOOK, ledColor: "amber" } },
+    { enabled: false, timezone: "UTC", default: { ...LOOK, ledBrightness: 101 } },
+    { enabled: false, timezone: "UTC", default: { ...LOOK, panelText: "X".repeat(17) } },
+    { enabled: false, timezone: "UTC", default: { ...LOOK, extra: 1 } },
+    { enabled: false, timezone: "UTC", extra: 1 },
+  ]) denied(await put(body), JSON.stringify(body));
+  // Turning on, or taking the default away while on, is refused without a default.
+  denied(await call("DELETE", "schedules/site1/settings/default", token));
+  allowed(await put({ enabled: false, timezone: "America/Argentina/Buenos_Aires" }));
+  denied(await call("PUT", "schedules/site1/settings/enabled", token, true));
+  allowed(await call("PUT", "schedules/site1/settings/default", token, LOOK));
+  allowed(await call("PUT", "schedules/site1/settings/enabled", token, true));
+  // A schedule needs a real customer behind it.
+  denied(await call("PUT", "schedules/ghost/settings", AS.platformAdmin, SCHEDULE_SETTINGS));
+  denied(await call("PUT", "schedules/ghost/rules/r", AS.platformAdmin, timedRule("pa")));
+  // Applied entries are checked as well.
+  for (const body of [{ key: "x" }, { at: 1 }, { key: 5, at: 1 }, { key: "x", at: "1" }, { key: "x".repeat(65), at: 1 }, { key: "x", at: 1, extra: 1 }]) {
+    denied(await call("PUT", "schedules/site1/applied/C-001", token, body), JSON.stringify(body));
+  }
+});
+
+test("Apply now: a manager's one multi-path write of look fields and applied passes", async () => {
+  await seedSchedules();
+  const before = (await call("GET", "units/C-001", OWNER)).body;
+  allowed(await call("PATCH", "", SCHEDULE_ACCOUNTS.mgrA, {
+    "units/C-001/ledColor": "gold", "units/C-001/panelText": "RESERVED", "units/C-001/ledBrightness": 10,
+    "schedules/site1/applied/C-001": { key: "gold|RESERVED|10", at: 1760000000000 },
+  }));
+  assert.deepEqual((await call("GET", "units/C-001", OWNER)).body, { ...before, ledColor: "gold", panelText: "RESERVED", ledBrightness: 10 });
+  // One refused path refuses the whole write.
+  denied(await call("PATCH", "", SCHEDULE_ACCOUNTS.opA, { "units/C-001/ledColor": "red", "schedules/site1/applied/C-001": { key: "red", at: 1 } }));
+  assert.equal((await call("GET", "units/C-001/ledColor", OWNER)).body, "gold");
+  // An operator can still set LEDs by hand: that's the existing manual control.
+  allowed(await call("PATCH", "units/C-001", SCHEDULE_ACCOUNTS.opA, { ledColor: "red" }));
+});
+
+test("demo/schedules is closed: Simulation keeps timed states in the browser", async () => {
+  await seedSchedules();
+  for (const token of [SCHEDULE_ACCOUNTS.mgrA, AS.platformAdmin, AS.operator, AS.driver, null]) {
+    denied(await call("PUT", "demo/schedules/site1/settings", token, SCHEDULE_SETTINGS));
+    denied(await call("GET", "demo/schedules", token));
+  }
 });

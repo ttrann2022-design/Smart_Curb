@@ -143,6 +143,76 @@
       }
     },
 
+    // Timed states (scheduled LED looks), per customer site. Anyone linked to the site
+    // and platform admins read; that site's managers and platform admins write. The
+    // look uses the same limits as units/<id> below: colour list, 16 characters of panel
+    // text, whole percent 0 to 100. The runner's Admin SDK skips these rules.
+    "schedules": {
+      "$siteId": {
+        ".read": "auth != null && (root.child('users').child(auth.uid).child('siteId').val() === $siteId || root.child('platformAdmins').child(auth.uid).val() === true)",
+        // A site can't be switched on without a default look.
+        "settings": {
+          ".write": "auth != null && (root.child('platformAdmins').child(auth.uid).val() === true || (root.child('users').child(auth.uid).child('role').val() === 'manager' && root.child('users').child(auth.uid).child('siteId').val() === $siteId))",
+          ".validate": "root.child('sites').child($siteId).exists() && newData.hasChildren(['enabled', 'timezone']) && (newData.child('enabled').val() === false || newData.hasChild('default'))",
+          "enabled": { ".validate": "newData.isBoolean()" },
+          "timezone": { ".validate": "newData.isString() && newData.val().length <= 64 && newData.val().matches(/^[A-Za-z0-9_+-]+(\\/[A-Za-z0-9_+-]+)*$/)" },
+          "default": {
+            ".validate": "newData.hasChildren(['ledColor', 'panelText', 'ledBrightness'])",
+            "ledColor": { ".validate": "newData.isString() && newData.val().matches(/^(red|blue|green|gold|white)$/)" },
+            "panelText": { ".validate": "newData.isString() && newData.val().length <= 16" },
+            "ledBrightness": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100 && newData.val() % 1 === 0" },
+            "$other": { ".validate": false }
+          },
+          "$other": { ".validate": false }
+        },
+        "rules": {
+          ".write": "auth != null && (root.child('platformAdmins').child(auth.uid).val() === true || (root.child('users').child(auth.uid).child('role').val() === 'manager' && root.child('users').child(auth.uid).child('siteId').val() === $siteId))",
+          "$ruleId": {
+            // A window with the same start and end means nothing, so it's refused.
+            ".validate": "root.child('sites').child($siteId).exists() && newData.hasChildren(['name', 'enabled', 'days', 'start', 'end', 'target', 'look', 'priority', 'updatedAt', 'updatedBy']) && newData.child('start').val() !== newData.child('end').val()",
+            "name": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 60" },
+            "enabled": { ".validate": "newData.isBoolean()" },
+            "days": {
+              ".validate": "newData.hasChildren()",
+              "$i": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 6 && newData.val() % 1 === 0" }
+            },
+            "start": { ".validate": "newData.isString() && newData.val().matches(/^([01][0-9]|2[0-3]):[0-5][0-9]$/)" },
+            "end": { ".validate": "newData.isString() && newData.val().matches(/^([01][0-9]|2[0-3]):[0-5][0-9]$/)" },
+            "target": {
+              ".validate": "newData.hasChild('type') && (newData.child('type').val() === 'site' ? !newData.hasChild('ids') : newData.hasChild('ids'))",
+              "type": { ".validate": "newData.isString() && newData.val().matches(/^(site|lots|units)$/)" },
+              "ids": {
+                ".validate": "newData.hasChildren()",
+                "$i": { ".validate": "newData.isString() && newData.val().matches(/^[A-Za-z0-9_-]{1,128}$/)" }
+              },
+              "$other": { ".validate": false }
+            },
+            "look": {
+              ".validate": "newData.hasChildren(['ledColor', 'panelText', 'ledBrightness'])",
+              "ledColor": { ".validate": "newData.isString() && newData.val().matches(/^(red|blue|green|gold|white)$/)" },
+              "panelText": { ".validate": "newData.isString() && newData.val().length <= 16" },
+              "ledBrightness": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100 && newData.val() % 1 === 0" },
+              "$other": { ".validate": false }
+            },
+            "priority": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 9 && newData.val() % 1 === 0" },
+            "updatedAt": { ".validate": "newData.isNumber() && newData.val() === now" },
+            "updatedBy": { ".validate": "newData.isString() && newData.val() === auth.uid" },
+            "$other": { ".validate": false }
+          }
+        },
+        // What the runner last applied to each curb (the dashboard's Apply now writes it too).
+        "applied": {
+          ".write": "auth != null && (root.child('platformAdmins').child(auth.uid).val() === true || (root.child('users').child(auth.uid).child('role').val() === 'manager' && root.child('users').child(auth.uid).child('siteId').val() === $siteId))",
+          "$unitId": {
+            ".validate": "newData.hasChildren(['key', 'at'])",
+            "key": { ".validate": "newData.isString() && newData.val().length <= 64" },
+            "at": { ".validate": "newData.isNumber()" },
+            "$other": { ".validate": false }
+          }
+        }
+      }
+    },
+
     // Customer deployments, managed in the company console. Platform admins only.
     "sites": {
       ".read": "auth != null && root.child('platformAdmins').child(auth.uid).val() === true",
@@ -412,6 +482,12 @@
       // Accounts are live only (users/). Named here so demo/$other can't be used to
       // write a users/<uid>/siteId look-alike under demo/: no client reads or writes it.
       "users": {
+        ".read": false,
+        ".write": false
+      },
+      // Timed states are live only: Simulation keeps them in the browser tab and never
+      // writes. Named here so demo/$other can't be used to store them.
+      "schedules": {
         ".read": false,
         ".write": false
       },
