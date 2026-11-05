@@ -1023,6 +1023,8 @@ for (const root of ["", "demo/"]) {
     await setup();
     allowed(await convert("platformAdmin", root, "lead1", "conv1"));
     denied(await convert("platformAdmin", root, "lead1", "conv2"));
+    // In the same millisecond this would be an identical write that changes nothing.
+    await new Promise((resolve) => setTimeout(resolve, 5));
     denied(await convert("platformAdmin", root, "lead1", "conv1"));
     assert.equal((await call("GET", `${root}sites/conv2`, OWNER)).body, null);
     denied(await call("PATCH", `${root}leads/lead1`, AS.platformAdmin, { siteId: "site1" }));
