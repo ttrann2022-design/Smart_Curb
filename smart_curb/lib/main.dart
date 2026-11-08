@@ -65,6 +65,8 @@ void main() async {
   );
   // Each place's parking lots, kept up to date from `lots/`.
   Place.watchLots();
+  // Which of those lots have curbs (so which places count live).
+  Place.watchUnits();
   // Each place's walking network for A*.
   await Future.wait([for (final p in Place.all) p.pathfinder.load()]);
   runApp(const MyApp());

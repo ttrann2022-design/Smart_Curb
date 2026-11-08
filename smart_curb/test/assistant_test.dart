@@ -10,9 +10,20 @@ import 'package:smart_curb/main.dart';
 final Map<String, dynamic> testLots =
     jsonDecode(File('test/fixtures/lots.json').readAsStringSync());
 
-/// Gives every place its lots from [testLots], as the app's `lots/`
-/// listener does.
-void useTestLots() => Place.applyLotsToAll(testLots);
+/// `units/` for the tests: Lot 14's curbs at FAU (C-095 taken, C-077 open,
+/// C-001 offline). No curbs at the mall.
+const Map<String, dynamic> testUnits = {
+  'C-095': {'lot': 'lot14', 'occupied': true, 'online': true},
+  'C-077': {'lot': 'lot14', 'occupied': false, 'online': true},
+  'C-001': {'lot': 'lot14', 'occupied': false, 'online': false},
+};
+
+/// Gives every place its lots from [testLots] and its curbs from
+/// [testUnits], as the app's `lots/` and `units/` listeners do.
+void useTestLots() {
+  Place.applyLotsToAll(testLots);
+  Place.applyUnitsToAll(testUnits);
+}
 
 /// [place]'s lots from [testLots], each with one free curb: every lot can
 /// be recommended, so routing to any of them can be checked.
@@ -40,12 +51,7 @@ class FakeData implements AssistantData {
 
   @override
   Future<Map<String, Map<String, dynamic>>> lots(Place place) async {
-    if (!place.liveParking) return parseLiveLots(place, testLots, null);
-    return parseLiveLots(place, testLots, {
-      'C-095': {'lot': 'lot14', 'occupied': true, 'online': true},
-      'C-077': {'lot': 'lot14', 'occupied': false, 'online': true},
-      'C-001': {'lot': 'lot14', 'occupied': false, 'online': false},
-    });
+    return parseLiveLots(place, testLots, testUnits);
   }
 
   @override

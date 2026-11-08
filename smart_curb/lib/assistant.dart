@@ -254,16 +254,15 @@ class FirebaseAssistantData implements AssistantData {
     }
     final List<Object?> results;
     try {
-      results = await Future.wait(
-          [_read('lots'), if (place.liveParking) _read('units')]);
+      results = await Future.wait([_read('lots'), _read('units')]);
     } catch (_) {
-      // No curbs to count here: the last known lots will do.
+      // No curbs known here: the last known lots will do.
       if (!place.liveParking) return staticLots(place);
       rethrow;
     }
     place.applyLots(results[0]);
-    final lots =
-        parseLiveLots(place, results[0], place.liveParking ? results[1] : null);
+    Place.applyUnitsToAll(results[1]);
+    final lots = parseLiveLots(place, results[0], results[1]);
     _lotCache[place.id] = (at: DateTime.now(), lots: lots);
     return lots;
   }
@@ -1052,6 +1051,13 @@ Rules and money: "Can I reserve a spot?" | "Is parking free?" | "Where can visit
 Other: "Contact support" | "Start over"
 Greetings: when the user only says hello ("hi", "good morning"), set action to their greeting (action "good morning") and reply "" (the app greets them by name).''';
 
+  /// The places with curbs right now ("FAU and Broward Mall"), or "none
+  /// of them yet".
+  String _livePlaces() {
+    final live = [for (final p in places) if (p.liveParking) p.nickname];
+    return live.isEmpty ? 'none of them yet' : live.join(' and ');
+  }
+
   /// What the model needs to know to answer as Smart Curb AI Agent.
   String _aiInstructions() => '''
 You are Smart Curb AI Agent, the assistant inside the Smart Curb parking app, and a genuinely friendly companion to chat with.
@@ -1068,7 +1074,7 @@ HOW YOU TALK
 
 ABOUT SMART CURB (version $kAppVersion)
 - Smart Curbs are solar-powered devices that replace the concrete wheel stop at the front of a parking space. Each one senses whether its space is taken and reports it live.
-- The app works at ${places.map((p) => '${p.fullName} (${p.address})').join(' and ')}. Live curb counts are at FAU. The app only sends people to a lot with a counted open space: lots without sensors (all of the mall's, for now) and full lots are skipped, and when none is left the map says there's no available parking at the moment.
+- The app works at ${places.map((p) => '${p.fullName} (${p.address})').join(' and ')}. Live curb counts are at ${_livePlaces()}. The app only sends people to a lot with a counted open space: lots without sensors and full lots are skipped, and when none is left the map says there's no available parking at the moment.
 - It picks the best lot (or exact open curb) for the building you're going to by real walking distance, gives turn-by-turn driving directions, switches lots if yours fills up on the way, then shows a walking path to the door.
 - Home tab: saved places ("Add more locations"); tap one to open its map. On the map, search for a building or tap it. Vehicle tab: your cars. Profile tab: contact info. ⋮ menu (top right): Settings (notifications, Contact Us) and About App. Log out: icon at the top left.
 - Map colors: green space = open, red = taken, gray = curb offline. Lot labels: green under 70% full, amber 70-90%, red 90%+, gray = no sensors.
@@ -1902,7 +1908,7 @@ Answer only with JSON: {"reply": "...", "action": null or a request}''';
     final onlyMall = m.anyPhrase(_browardWords);
     final lines = <String>[];
     for (final place in places) {
-      if (onlyMall && place.liveParking) continue;
+      if (onlyMall && place.id != browardMall.id) continue;
       if (!place.liveParking) {
         lines.add(
             '• ${place.nickname}: no Smart Curb sensors yet, so no '
@@ -2757,9 +2763,10 @@ Answer only with JSON: {"reply": "...", "action": null or a request}''';
   /// by its name in `lots/`. Its id is '' when the place has no such lot.
   Future<({Place place, String id, String label})?> _findLot(_Message m) async {
     final mall = m.anyPhrase(_browardWords);
-    final fau = places.firstWhere((p) => p.liveParking, orElse: () => places.first);
-    final broward =
-        places.firstWhere((p) => !p.liveParking, orElse: () => places.last);
+    final fau =
+        places.firstWhere((p) => p.id == fauBoca.id, orElse: () => places.first);
+    final broward = places.firstWhere((p) => p.id == browardMall.id,
+        orElse: () => places.last);
     final text = m.text;
 
     Future<({Place place, String id, String label})> named(
@@ -3500,7 +3507,8 @@ Answer only with JSON: {"reply": "...", "action": null or a request}''';
       const ChatReply(
         'Smart Curb is at version $kAppVersion and still growing! Here\'s '
         'where it is:\n'
-        '✓ Working now: live Smart Curb counts at FAU, maps of FAU and '
+        '✓ Working now: live Smart Curb counts wherever curbs are '
+        'installed, maps of FAU and '
         'Westfield Broward Mall, the best lot (or exact curb) picked by real '
         'walking distance, turn-by-turn driving and walking directions, '
         'your cars, places and contact info, and me, the AI assistant.\n'

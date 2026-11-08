@@ -63,10 +63,12 @@ class Place {
   final Map<String, LatLng> lotPositions = {};
   final Map<String, String> lotNames = {};
 
-  /// True: lot occupancy comes live from the curbs in `units/`. False: no
-  /// curbs here yet, so the lots are plain map points, and the closest one
-  /// to the destination by walking distance is recommended.
-  final bool liveParking;
+  /// True when any curb in `units/` (online or not) names one of this
+  /// place's lots: its lot counts come live from those curbs. False: no
+  /// curbs here yet, so the lots are plain map points with nothing to
+  /// count. Worked out from the database (see [applyUnitsToAll]), so moving
+  /// a curb into a lot there is all it takes.
+  bool get liveParking => lotPositions.keys.any(_lotsWithCurbs.contains);
 
   /// Rows of parking spaces with a curb unit in each (see [CurbSpotRow]).
   final List<CurbSpotRow> spotRows;
@@ -93,7 +95,6 @@ class Place {
     required this.minZoom,
     required this.buildings,
     required this.siteId,
-    required this.liveParking,
     this.spotRows = const [],
     required this.pathfinder,
   });
@@ -166,6 +167,34 @@ class Place {
     for (final p in all) {
       p.applyLots(rawLots);
     }
+  }
+
+  /// Every lot id that at least one curb in `units/` names, at any place.
+  static final Set<String> _lotsWithCurbs = {};
+
+  static StreamSubscription<DatabaseEvent>? _unitsSub;
+
+  /// Keeps [liveParking] in step with `units/` while the app runs, so a
+  /// curb moved into a lot (or out of it) counts there without an update.
+  static void watchUnits() {
+    _unitsSub ??= FirebaseDatabase.instance.ref('units').onValue.listen(
+          (event) => applyUnitsToAll(event.snapshot.value),
+          onError: (_) {}, // keeps what it knows
+        );
+  }
+
+  /// Takes which lots have curbs from a raw `units/` snapshot. Null means
+  /// there are no curbs at all; anything else that isn't a map is ignored.
+  static void applyUnitsToAll(Object? rawUnits) {
+    if (rawUnits != null && rawUnits is! Map) return;
+    _lotsWithCurbs
+      ..clear()
+      ..addAll([
+        if (rawUnits is Map)
+          for (final unit in rawUnits.values)
+            if (unit is Map && '${unit['lot'] ?? ''}'.isNotEmpty)
+              unit['lot'].toString(),
+      ]);
   }
 }
 
