@@ -24,3 +24,5 @@ export const mono = "'IBM Plex Mono', ui-monospace, monospace";
 // theme colours, so they're the same in every theme.
 export const LED_HEX = { red: "#E5483A", blue: "#3B7DD8", green: "#35A96B", gold: "#E0A63C", white: "#E8E6DE" };
 export const LED_COLORS = Object.keys(LED_HEX);
+// Text on a block of LED colour (the Schedules timeline): dark, whatever the site theme.
+export const LED_INK = "#0F0F0D";

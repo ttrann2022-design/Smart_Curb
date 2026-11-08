@@ -11,12 +11,15 @@
 //   - small labels listed in LABELS, using the colour their rule in index.css sets (4.5:1)
 //   - the company console's text, badges and chips (CONSOLE_RULES, read from
 //     src/console/console.css), and that its curb status marks are inset or ringed on Paper
+//   - the Schedules page's text (SCHEDULE_RULES, read from src/pages/schedules.css), and
+//     the fixed dark ink on its timeline blocks in every LED colour
 // Status colours are fixed on :root and may not be overridden by any theme. A theme
 // whose own surfaces can't carry them (Paper) declares dark "status insets" with
 // [data-theme="x"] :is(...), and the status checks run against those instead.
 import { readFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { THEME_IDS } from "../src/themes.js";
+import { LED_HEX, LED_INK } from "../src/theme.js";
 
 const CSS = new URL("../src/themes.css", import.meta.url);
 const APP_CSS = new URL("../src/index.css", import.meta.url);
@@ -78,6 +81,23 @@ const CONSOLE_RULES = [
   // A highlighted curb row: body text on the selection tint.
   { selector: ".cn-curb.is-sel", fg: "--text" },
 ];
+// The customer dashboard's Schedules page (src/pages/schedules.css), read the same way.
+// Its timeline blocks are physical LED colours with fixed dark ink, checked below.
+const SCHEDULE_CSS = new URL("../src/pages/schedules.css", import.meta.url);
+const SCHEDULE_RULES = [
+  { selector: ".tm-dim", surfaces: PANELS },
+  { selector: ".tm-warn", surfaces: ["--panel"] },
+  { selector: ".tm-err", surfaces: ["--panel"] },
+  { selector: ".tm-now-next", surfaces: ["--panel"] },
+  { selector: ".tm-hours", surfaces: ["--panel"] },
+  { selector: ".tm-day", surfaces: ["--panel"] },
+  { selector: ".tm-row.is-today .tm-day", surfaces: ["--panel"] },
+  { selector: ".tm-block.is-off", surfaces: ["--panel-2"] },
+  { selector: ".tm-linkbtn", surfaces: ["--panel"] },
+  { selector: ".tm-rule.is-off .tm-rule-name", surfaces: ["--panel"] },
+  { selector: ".tm-template" },
+];
+const LED_TOKENS = Object.fromEntries([["--led-ink", LED_INK], ...Object.entries(LED_HEX).map(([name, hex]) => [`--led-${name}`, hex])]);
 // Console parts that draw curb status in the fixed colours. Paper must either turn
 // them into a dark status inset (themes.css) or ring them with --status-ring (console.css).
 const CONSOLE_STATUS_INSETS = [".cn-health-bar", ".cn-dots"];
@@ -111,7 +131,7 @@ export function contrast(a, b) {
 }
 
 // Every check for one theme: [group, fgToken, bgToken, minimum, tokens to read from].
-function checksFor(theme, tokens, inset, labels = [], consoleRules = []) {
+function checksFor(theme, tokens, inset, labels = [], consoleRules = [], scheduleRules = []) {
   const out = [];
   const add = (group, fg, bgs, min, t = tokens) => bgs.forEach((bg) => out.push({ group, fg, bg, min, t }));
 
@@ -151,6 +171,9 @@ function checksFor(theme, tokens, inset, labels = [], consoleRules = []) {
 
   for (const r of consoleRules) add(r.own ? "Console badges" : "Console text", r.fg, r.surfaces, 4.5);
 
+  for (const r of scheduleRules) add("Schedules text", r.fg, r.surfaces, 4.5);
+  add("Schedules blocks", "--led-ink", Object.keys(LED_TOKENS).filter((k) => k !== "--led-ink"), 4.5, LED_TOKENS);
+
   return out.map((c) => ({ ...c, theme, ratio: contrast(hex(c.t, c.fg), hex(c.t, c.bg)) }));
 }
 
@@ -168,20 +191,26 @@ function rules(css) {
   return [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([, sel, body]) => ({ selectors: sel.split(",").map((x) => x.trim().replace(/\s+/g, " ")), body }));
 }
 
+// Rules of one stylesheet to check, each with the colour and background it sets.
+function ruleChecks(css, list, file, problems) {
+  const all = rules(css);
+  return list.flatMap((c) => {
+    const rule = all.find((r) => r.selectors.includes(c.selector));
+    if (!rule) { problems.push(`${file} has no "${c.selector}" rule.`); return []; }
+    const fg = c.fg || /(?<![-\w])color:\s*var\((--[\w-]+)\)/.exec(rule.body)?.[1];
+    const bg = /(?<![-\w])background(?:-color)?:\s*var\((--[\w-]+)\)/.exec(rule.body)?.[1];
+    if (!fg) { problems.push(`${file} "${c.selector}" has no "color: var(--…)".`); return []; }
+    const surfaces = bg ? [bg] : c.surfaces || [];
+    if (!surfaces.length) { problems.push(`${file} "${c.selector}" sets no background and the check lists no surfaces.`); return []; }
+    return [{ selector: c.selector, fg, surfaces, own: !!bg && !c.surfaces }];
+  });
+}
+
 // The console rules to check, each with the colour and background its rule in
 // console.css sets, plus the structural rules for curb status on Paper.
 function consoleChecks(consoleCss, themesCss, problems) {
   const all = rules(consoleCss);
-  const checks = CONSOLE_RULES.flatMap((c) => {
-    const rule = all.find((r) => r.selectors.includes(c.selector));
-    if (!rule) { problems.push(`console.css has no "${c.selector}" rule.`); return []; }
-    const fg = c.fg || /(?<![-\w])color:\s*var\((--[\w-]+)\)/.exec(rule.body)?.[1];
-    const bg = /(?<![-\w])background(?:-color)?:\s*var\((--[\w-]+)\)/.exec(rule.body)?.[1];
-    if (!fg) { problems.push(`console.css "${c.selector}" has no "color: var(--…)".`); return []; }
-    const surfaces = bg ? [bg] : c.surfaces || [];
-    if (!surfaces.length) { problems.push(`console.css "${c.selector}" sets no background and the check lists no surfaces.`); return []; }
-    return [{ selector: c.selector, fg, surfaces, own: !!bg && !c.surfaces }];
-  });
+  const checks = ruleChecks(consoleCss, CONSOLE_RULES, "console.css", problems);
   const insetList = /\[data-theme="paper"\] :is\(([^)]*)\)/.exec(themesCss.replace(/\/\*[\s\S]*?\*\//g, ""))?.[1].split(",").map((x) => x.trim()) || [];
   for (const sel of CONSOLE_STATUS_INSETS) {
     if (!insetList.includes(sel)) problems.push(`${sel} draws curb status but isn't one of Paper's status insets in themes.css.`);
@@ -205,11 +234,12 @@ function labelTokens(appCss, problems) {
   });
 }
 
-export function checkContrast(css = readFileSync(CSS, "utf8"), appCss = readFileSync(APP_CSS, "utf8"), consoleCss = readFileSync(CONSOLE_CSS, "utf8")) {
+export function checkContrast(css = readFileSync(CSS, "utf8"), appCss = readFileSync(APP_CSS, "utf8"), consoleCss = readFileSync(CONSOLE_CSS, "utf8"), scheduleCss = readFileSync(SCHEDULE_CSS, "utf8")) {
   const blocks = parse(css);
   const problems = [];
   const labels = labelTokens(appCss, problems);
   const consoleRules = consoleChecks(consoleCss, css, problems);
+  const scheduleRules = ruleChecks(scheduleCss, SCHEDULE_RULES, "schedules.css", problems);
   const fixed = Object.assign({}, ...blocks.filter((b) => b.selector === ":root").map((b) => b.tokens));
   const aliases = blocks.find((b) => b.selector === ":root, [data-theme]")?.tokens || {};
   const lime = blocks.find((b) => b.selector.split(",").map((s) => s.trim()).includes('[data-theme="lime"]'));
@@ -228,7 +258,7 @@ export function checkContrast(css = readFileSync(CSS, "utf8"), appCss = readFile
     const tokens = { ...fixed, ...aliases, ...lime.tokens, ...own.tokens };
     const insetBlock = blocks.find((b) => b.selector.startsWith(`[data-theme="${theme}"] :is(`));
     const inset = insetBlock ? { ...tokens, ...insetBlock.tokens } : null;
-    results.push(...checksFor(theme, tokens, inset, labels, consoleRules));
+    results.push(...checksFor(theme, tokens, inset, labels, consoleRules, scheduleRules));
   }
   const failures = results.filter((r) => r.ratio < r.min);
   return { results, failures, problems };

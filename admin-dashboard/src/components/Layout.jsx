@@ -20,6 +20,7 @@ import { ScopeContext, useCustomerNames, useViewing } from "../useScope";
 const navItems = [
   { label: "Overview", to: "/overview", icon: "overview" },
   { label: "Parking lots", to: "/lots", icon: "lots" },
+  { label: "Schedules", to: "/schedules", icon: "clock" },
   { label: "Curb units", to: "/units", icon: "units" },
   { label: "Assistant", to: "/assistant", icon: "assistant" },
   { label: "Analytics", to: "/analytics", icon: "analytics" },
@@ -218,7 +219,7 @@ function Layout() {
         </header>
         {mode === "sim" && <SimBanner />}
         <main id="main" tabIndex={-1} className="su-main">
-          <ScopeContext.Provider value={scope}><Outlet key={scopeKey} context={{ role, mode, siteConfig, theme, previewTheme, scope }} /></ScopeContext.Provider>
+          <ScopeContext.Provider value={scope}><Outlet key={scopeKey} context={{ role, mode, siteConfig, theme, previewTheme, scope, isPlatformAdmin }} /></ScopeContext.Provider>
         </main>
       </div>
     );
@@ -341,7 +342,7 @@ function Layout() {
         <main id="main" tabIndex={-1} className="sws-main" style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
           {/* Keyed by path so each route fades in (.sws-route); query changes don't refade. */}
           <div key={location.pathname} className="sws-route">
-            <ScopeContext.Provider value={scope}><Outlet key={scopeKey} context={{ role, mode, siteConfig, theme, previewTheme, scope }} /></ScopeContext.Provider>
+            <ScopeContext.Provider value={scope}><Outlet key={scopeKey} context={{ role, mode, siteConfig, theme, previewTheme, scope, isPlatformAdmin }} /></ScopeContext.Provider>
           </div>
         </main>
       </div>

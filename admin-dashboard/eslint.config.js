@@ -5,7 +5,7 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist', 'dist-demo', 'dist-console']),
+  globalIgnores(['dist', 'dist-demo', 'dist-console', 'functions/vendor']),
   {
     files: ['**/*.{js,jsx}'],
     extends: [
@@ -19,7 +19,7 @@ export default defineConfig([
     },
   },
   {
-    files: ['scripts/**/*.{js,mjs}', 'vite.config.js'],
+    files: ['scripts/**/*.{js,mjs}', 'scheduler/**/*.{js,mjs}', 'functions/**/*.js', 'vite.config.js'],
     languageOptions: { globals: globals.node },
   },
 ])
