@@ -1,0 +1,6 @@
+# Firebase service account keys (used by npm run history:record). Never commit one:
+# keep it outside this repo. These patterns are a safety net if one lands here anyway.
+*-firebase-adminsdk-*.json
+*service-account*.json
+*serviceAccount*.json
+*service_account*.json

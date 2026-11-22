@@ -268,6 +268,45 @@ test("no client can write latency samples, even a manager", async () => {
   assert.deepEqual((await call("GET", "latency/C-001/s1", OWNER)).body, SAMPLE);
 });
 
+// ---------- Occupancy history (written only by the recorder, with the Admin SDK) ----------
+
+const LIVE_READING = { t: 1760000000000, pct: 63 };
+const WEEK = Object.fromEntries(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => [d, new Array(14).fill(50)]));
+
+test("staff can read history/; signed-out users and drivers cannot", async () => {
+  await call("PUT", "history", OWNER, { live: { a1: LIVE_READING }, week: WEEK });
+  for (const who of ["viewer", "operator", "manager"]) {
+    allowed(await call("GET", "history/live", AS[who]));
+    allowed(await call("GET", "history/week", AS[who]));
+  }
+  for (const who of ["signedOut", "driver"]) {
+    denied(await call("GET", "history", AS[who]));
+    denied(await call("GET", "history/live", AS[who]));
+  }
+});
+
+test("no client can write history/, even a manager or platform admin", async () => {
+  await call("PUT", "history", OWNER, { live: { a1: LIVE_READING }, week: WEEK });
+  for (const who of ["platformAdmin", "manager", "operator", "viewer", "driver", "signedOut"]) {
+    denied(await call("POST", "history/live", AS[who], LIVE_READING));
+    denied(await call("PUT", "history/live/a2", AS[who], LIVE_READING));
+    denied(await call("DELETE", "history/live/a1", AS[who]));
+    denied(await call("PUT", "history/week", AS[who], WEEK));
+    denied(await call("PATCH", "", AS[who], { "history/week/Mon/0": 0 }));
+  }
+  assert.deepEqual((await call("GET", "history/live/a1", OWNER)).body, LIVE_READING);
+});
+
+test("the recorder's historySamples/ is closed to every client", async () => {
+  await call("PUT", "historySamples/days/2026-11-20/0", OWNER, { sum: 120, n: 2 });
+  for (const who of ["platformAdmin", "manager", "operator", "viewer", "driver", "signedOut"]) {
+    denied(await call("GET", "historySamples", AS[who]));
+    denied(await call("GET", "historySamples/days/2026-11-20", AS[who]));
+    denied(await call("PUT", "historySamples/days/2026-11-20/1", AS[who], { sum: 1, n: 1 }));
+    denied(await call("DELETE", "historySamples", AS[who]));
+  }
+});
+
 // The Analytics latency card reads each curb's last hour as a query ordered by
 // lastUpdated, which needs the ".indexOn" on latency/$unitId (and demo/latency/$unitId).
 async function windowed(path, token, since) {

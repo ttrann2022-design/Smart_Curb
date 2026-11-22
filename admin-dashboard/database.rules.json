@@ -340,7 +340,12 @@
       ".read": "auth != null && root.child('users').child(auth.uid).exists()"
     },
 
-    // Occupancy history for Analytics (nothing writes the real one yet).
+    // Occupancy history for Analytics and the Assistant: history/live/<pushId> = { t, pct }
+    // and history/week = { Mon..Sun: 14 hourly percents }. Written by the history recorder
+    // (npm run history:record, scheduler/recordHistory.js) with the Admin SDK, which bypasses
+    // these rules, only while it's running. Staff read it; no client writes it (no .write
+    // here and the root denies writes). The recorder's working data, historySamples/, has
+    // no entry at all, so the root's default deny keeps every client out of it.
     "history": {
       ".read": "auth != null && root.child('users').child(auth.uid).exists()"
     },
