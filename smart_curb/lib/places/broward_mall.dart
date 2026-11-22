@@ -1,8 +1,8 @@
 // Westfield Broward Mall: lots and stores.
 part of '../main.dart';
 
-/// No curbs installed yet: the four lots are plain map points, and the
-/// closest one to the destination (by walking distance) is recommended.
+/// Lots with curbs in `units/` show live counts; the rest are plain map
+/// points (see [Place.liveParking]).
 final Place browardMall = Place(
   id: 'broward_mall',
   shortName: 'BWD',
@@ -28,8 +28,27 @@ final Place browardMall = Place(
   // Lots: the ones in `lots/` with this siteId (broward1-4, the biggest
   // surface lot on each side of the mall, numbered clockwise from the north).
   siteId: '-P52MJbV4GX-1cAesso6',
-  liveParking: false,
+  // Placed the same way as FAU's (see there): guidance drives into each
+  // space from its open end, along the lane behind its row.
+  spotRows: [_browardLot1East],
   pathfinder: CampusPathfinder('assets/broward_walkways.json'),
+);
+
+const CurbSpotRow _browardLot1East = CurbSpotRow(
+  lotId: 'broward1',
+  // Broward Lot 1, east end. Nose-in spaces on the south side of an
+  // east-west aisle (OSM line at 26.119729), starting at its corner with
+  // the lot's north-south road (-80.255755): each space's aisle end is 1 m
+  // off the aisle line, and the first space's side is 0.45 m off the road
+  // line (as at FAU Lot 14).
+  first: LatLng(26.119690, -80.255774),
+  // Along the aisle, westward (OSM: 270.5°).
+  rowBearing: 270.5,
+  unitIds: ['C-201'],
+  // Curbs at the aisle (north) end; cars pull in from the south.
+  enterFromRight: false,
+  // The lane behind the row meets the north-south road here.
+  laneLeadIn: 1.9,
 );
 
 /// Westfield Broward Mall: the mall itself, its anchor stores, the cinema

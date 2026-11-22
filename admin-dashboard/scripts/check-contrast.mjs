@@ -30,6 +30,11 @@ const LABELS = [
   { selector: ".sws-nav-badge", name: "nav badge", surfaces: ["--side", "--bg"] },
   { selector: ".lp-readout-k", name: "lot plan Last change", surfaces: ["--bg", "--panel", "--panel-2", "--card"], inset: true },
   { selector: ".un-meta", name: "units count", surfaces: ["--bg", "--panel", "--panel-2", "--card"], inset: true },
+  // Analytics latency card: stage titles, source tags and "Not enough data" on its panels.
+  { selector: ".lt-leg-k", name: "latency stage title", surfaces: ["--panel"] },
+  { selector: ".lt-src-measured", name: "latency Measured tag", surfaces: ["--card"] },
+  { selector: ".lt-src-bench", name: "latency Benchmark tag", surfaces: ["--panel"] },
+  { selector: ".lt-empty", name: "latency not-enough-data text", surfaces: ["--panel"] },
 ];
 // The company console (src/console/console.css) uses the same themes. Each rule
 // below is read from that file: its colour is checked on its own background if it

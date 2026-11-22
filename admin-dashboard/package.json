@@ -18,6 +18,7 @@
     "check:contrast": "node scripts/check-contrast.mjs",
     "test:rules": "node --test scripts/test-rules.mjs",
     "test:assistant": "node --test scripts/test-assistant.mjs",
+    "test:latency": "node --test scripts/test-latency.mjs",
     "test:import": "node --test scripts/test-import.mjs",
     "test:scope": "node --test scripts/test-scope.mjs",
     "test:schedule": "node --test scripts/test-schedule.mjs",

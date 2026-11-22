@@ -27,7 +27,6 @@ final Place fauBoca = Place(
   // as the dashboard has them). Ids match the `lot` field of the curbs in
   // `units/`.
   siteId: '-P52M40pbO0wEo92LGcK',
-  liveParking: true,
   // To place a row, tap the centre of its first space in dev mode and copy
   // the coordinate. Guidance always drives into a space from its open end
   // (the end away from its curb), along the lane behind its row.

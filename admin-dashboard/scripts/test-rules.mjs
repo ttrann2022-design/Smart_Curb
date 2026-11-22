@@ -268,6 +268,33 @@ test("no client can write latency samples, even a manager", async () => {
   assert.deepEqual((await call("GET", "latency/C-001/s1", OWNER)).body, SAMPLE);
 });
 
+// The Analytics latency card reads each curb's last hour as a query ordered by
+// lastUpdated, which needs the ".indexOn" on latency/$unitId (and demo/latency/$unitId).
+async function windowed(path, token, since) {
+  const auth = token ? `&auth=${token}` : "";
+  const q = `orderBy=${encodeURIComponent('"lastUpdated"')}&startAt=${since}&limitToLast=200`;
+  const res = await fetch(`http://${HOST}/${path}.json?ns=${NS}${auth}&${q}`);
+  const text = await res.text();
+  return { ok: res.ok, status: res.status, body: text ? JSON.parse(text) : null };
+}
+
+test("staff can run the windowed latency query; it returns only recent samples", async () => {
+  await call("PUT", "latency/C-095", OWNER, {
+    old: { rxToWriteMs: 610, lastUpdated: 1000 },
+    recent: { rxToWriteMs: 48, lastUpdated: 5000 },
+  });
+  for (const who of ["viewer", "operator", "manager"]) {
+    const r = await windowed("latency/C-095", AS[who], 2000);
+    allowed(r);
+    assert.deepEqual(Object.keys(r.body), ["recent"]);
+  }
+});
+
+test("signed-out users and driver accounts cannot run the windowed latency query", async () => {
+  denied(await windowed("latency/C-001", null, 0));
+  denied(await windowed("latency/C-001", AS.driver, 0));
+});
+
 // ---------- Site config (Setup wizard) ----------
 
 const patchSite = (who, fields) => call("PATCH", "config/site", AS[who], fields);
@@ -529,6 +556,26 @@ test("staff can write simulated latency under demo/latency, others cannot", asyn
   allowed(await call("PUT", "demo/latency/C-001/s0", AS.viewer, SAMPLE));
   denied(await call("PUT", "demo/latency/C-001/s1", null, SAMPLE));
   denied(await call("PUT", "demo/latency/C-001/s1", AS.driver, SAMPLE));
+});
+
+test("demo/latency's own entry keeps exactly the access demo/$other gave it", async () => {
+  // Staff write, update and delete simulated samples, as the simulator does.
+  for (const who of ["viewer", "operator", "manager"]) {
+    allowed(await call("PUT", "demo/latency/C-002/s0", AS[who], SAMPLE));
+    allowed(await call("PATCH", "demo/latency/C-002/s0", AS[who], { rxToWriteMs: 60 }));
+    allowed(await call("DELETE", "demo/latency/C-002", AS[who]));
+  }
+  allowed(await call("PATCH", "", AS.operator, { "demo/latency": { "C-003": { s0: SAMPLE } } }));
+  // Nobody else writes; everyone reads, including the windowed query.
+  for (const who of ["driver", "signedOut"]) {
+    denied(await call("PUT", "demo/latency/C-003/s1", AS[who], SAMPLE));
+    denied(await call("DELETE", "demo/latency", AS[who]));
+  }
+  for (const who of ["signedOut", "driver", "viewer"]) {
+    const r = await windowed("demo/latency/C-003", AS[who], 0);
+    allowed(r);
+    assert.deepEqual(r.body.s0, SAMPLE);
+  }
 });
 
 test("staff can write ledBrightness under demo/, signed-out users cannot", async () => {

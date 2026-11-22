@@ -1742,21 +1742,20 @@ class _PlaceMapScreenState extends State<PlaceMapScreen>
   bool _gotLots = false;
   bool _gotUnits = false;
 
-  /// The place's lots in `lots/` (positions and names) and, where there
-  /// are curbs, every unit in `units/` (each names its lot). Recomputed
-  /// whenever either one changes.
+  /// The place's lots in `lots/` (positions and names) and every unit in
+  /// `units/` (each names its lot), at every place: a curb moved into one
+  /// of its lots counts there straight away. Recomputed whenever either
+  /// one changes.
   void _listenToFirebaseParking() {
     final db = FirebaseDatabase.instance;
-    if (_place.liveParking) {
-      _unitsSub = db.ref('units').onValue.listen((event) {
-        _rawUnits = event.snapshot.value;
-        _gotUnits = true;
-        _onParkingData();
-      });
-    } else {
-      _liveLots = _staticLots(); // the lots known so far, until `lots/` arrives
-      _gotUnits = true; // no curbs to wait for
-    }
+    // No curbs known here yet: show the lots known so far until the
+    // snapshots arrive (with curbs, wait so no lot flashes as empty).
+    if (!_place.liveParking) _liveLots = _staticLots();
+    _unitsSub = db.ref('units').onValue.listen((event) {
+      _rawUnits = event.snapshot.value;
+      _gotUnits = true;
+      _onParkingData();
+    });
     _lotsSub = db.ref('lots').onValue.listen((event) {
       _rawLots = event.snapshot.value;
       _gotLots = true;

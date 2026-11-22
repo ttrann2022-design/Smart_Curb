@@ -1,44 +1,45 @@
 import { useEffect, useRef, useState } from "react";
-import { useScope, useScoped } from "../useScope";
-import { ref, onValue } from "firebase/database";
+import { ref, onValue, query, orderByChild, startAt, limitToLast } from "firebase/database";
 import { database } from "../firebase";
 import { dataPath } from "../dataMode";
+import { useNow } from "../units";
 import useWidth from "../useWidth";
-import { Button, Chips, EmptyState, Notice } from "./ui";
+import { Button, Chips, Notice } from "./ui";
+import {
+  MIN_SAMPLES, WINDOW_MS, WINDOW_MAX, isMs, summarize, recentWindow, mergeSamples,
+  flattenLatency, deliveryDelay, sumOfMedians,
+} from "../analytics/latencyStats";
+import { CURB_TO_RECEIVER_BENCHMARK as BENCH } from "../analytics/latencyBenchmarks";
 
-// Transmission latency for Analytics. Three legs, each optional:
-//   eventAgeMs   from latency/<unitId>/<sampleId> (written by the Receiver)
-//   rxToWriteMs  from the same samples
-//   fbToDash     measured in this browser: server-corrected "now" minus a unit's
-//                lastUpdated, each time lastUpdated changes. Kept in memory only.
-// In Simulation the samples come from demo/latency (synthetic, from the simulator).
+// Transmission latency for Analytics, by pipeline stage:
+//   curb -> LoRa -> Receiver -> Firebase RTDB -> this dashboard
+//
+// Live:
+//   Curb to Receiver       Benchmark (Brad's event-age tests, analytics/latencyBenchmarks.js).
+//   Receiver to Firebase   Measured. The Receiver writes rxToWriteMs (receive the LoRa packet
+//                          -> finish the Firebase write) on units/<id> with each lastUpdated.
+//                          One sample per new lastUpdated while this page is open, plus any
+//                          history under latency/<unitId>/<sampleId> from the last hour.
+//   Firebase to dashboard  Measured in this browser: server-corrected time when a curb's
+//                          lastUpdated listener fires, minus that lastUpdated. Memory only.
+// Simulation: every stage comes from the simulator (demo/latency, demo/units) and is
+// labelled Simulated. Simulated numbers are never shown as measured.
+//
+// Light on the database: per-curb listeners on units/<id>/lastUpdated and rxToWriteMs only
+// (never the whole unit, so lastSnapshot images aren't downloaded; Analytics' own units
+// listener already holds this data, so these add no download), and a windowed query per
+// curb on latency/<id> (last hour, at most 200).
 
-const LEGS = [
-  { id: "eventAgeMs", label: "Event age", note: "How old the curb's event was when the Receiver handled it." },
-  { id: "rxToWriteMs", label: "Receiver to Firebase", note: "From the Receiver getting the event to its database write." },
-  { id: "fbToDash", label: "Firebase to dashboard", note: "Measured in this browser when a curb's lastUpdated changes. Not stored." },
-];
+const SOURCE = {
+  measured: { label: "Measured · live data", cls: "lt-src lt-src-measured" },
+  benchmark: { label: "Benchmark · measured by Brad", cls: "lt-src lt-src-bench" },
+  simulated: { label: "Simulated", cls: "lt-src lt-sim" },
+};
+
 const CHART_KEEP = 100;
-const DASH_KEEP = 500;
 const TABLE_ROWS = 8;
 
-const isMs = (v) => typeof v === "number" && Number.isFinite(v) && v >= 0;
-
-// Median, nearest-rank 95th percentile, slowest and count; null when there's no data.
-function stats(values) {
-  if (!values.length) return null;
-  const s = [...values].sort((a, b) => a - b);
-  const mid = s.length >> 1;
-  return {
-    median: s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2,
-    p95: s[Math.min(s.length - 1, Math.ceil(0.95 * s.length) - 1)],
-    max: s[s.length - 1],
-    count: s.length,
-  };
-}
-
 const fmtMs = (v) => (v == null ? "n/a" : v < 1000 ? `${Math.round(v)} ms` : `${(v / 1000).toFixed(v < 10000 ? 2 : 1)} s`);
-// Axis ticks keep one decimal under 10 ms, so a 0 to 1 ms axis doesn't read 0 / 1 / 1.
 const fmtTick = (v) => (v > 0 && v < 10 && v % 1 ? `${v.toFixed(1)} ms` : fmtMs(v));
 const fmtTime = (t) => (isMs(t) ? new Date(t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" }) : null);
 
@@ -74,7 +75,7 @@ function LegChart({ points, label }) {
           viewBox={`0 0 ${W} ${H}`}
           className="an-svg"
           role="img"
-          aria-label={`${label}: last ${points.length} ${points.length === 1 ? "sample" : "samples"}, from ${fmtMs(Math.min(...points.map((p) => p.v)))} to ${fmtMs(Math.max(...points.map((p) => p.v)))}.`}
+          aria-label={`${label}: last ${points.length} samples, from ${fmtMs(Math.min(...points.map((p) => p.v)))} to ${fmtMs(Math.max(...points.map((p) => p.v)))}.`}
           onMouseMove={onMove}
           onMouseLeave={() => setHover(null)}
         >
@@ -104,83 +105,136 @@ function LegChart({ points, label }) {
   );
 }
 
-function LatencySection({ mode, delay = 0 }) {
+function SourceTag({ source }) {
+  const s = SOURCE[source];
+  return <span className={s.cls}>{s.label}</span>;
+}
+
+// One stage: source tag, sample count, median and p95, or "not enough data".
+function StageCard({ stage, delay }) {
+  const st = stage.stats;
+  return (
+    <div className="lt-leg sws-enter" style={{ "--d": `${delay}ms` }}>
+      <div className="lt-leg-top">
+        <div className="lt-leg-k">{stage.label}</div>
+        <SourceTag source={stage.source} />
+      </div>
+      <p className="lt-leg-note">{stage.note}</p>
+      {stage.pending ? (
+        <>
+          <div className="lt-empty">Benchmark pending</div>
+          <p className="lt-leg-note">Brad's event-age numbers haven't been added yet (src/analytics/latencyBenchmarks.js).</p>
+        </>
+      ) : st.enough ? (
+        <>
+          <div className="lt-median"><span className="sws-mono">{fmtMs(st.median)}</span> <small>median</small></div>
+          <dl className="lt-stats">
+            <div><dt>p95</dt><dd className="sws-mono">{fmtMs(st.p95)}</dd></div>
+            <div><dt>Samples</dt><dd className="sws-mono">{st.count}</dd></div>
+            {stage.when && <div><dt>Measured</dt><dd>{stage.when}</dd></div>}
+          </dl>
+          {stage.chart?.length > 0 && <LegChart points={stage.chart} label={`${SOURCE[stage.source].label}: ${stage.label}`} />}
+        </>
+      ) : (
+        <>
+          <div className="lt-empty">Not enough data</div>
+          <p className="lt-leg-note">
+            {st.count} of {MIN_SAMPLES} samples needed{stage.waiting ? `. ${stage.waiting}` : "."}
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
+// units: the curbs in scope (from Analytics' own listener), used for their IDs only.
+function LatencySection({ mode, units, delay = 0 }) {
   const sim = mode === "sim";
-  const [allSamples, setSamples] = useState([]);
-  const [loaded, setLoaded] = useState(false);
-  const [error, setError] = useState(false);
-  const [allDash, setDash] = useState([]);
-  const [leg, setLeg] = useState("rxToWriteMs");
+  const now = useNow(15000);
+  const offset = useRef(0); // for listeners (no re-render needed)
+  const [offsetMs, setOffsetMs] = useState(0); // for render
+  const seen = useRef({}); // unit -> last lastUpdated seen (the baseline is never a sample)
+  const rx = useRef({}); // unit -> latest rxToWriteMs on the unit record
+  const [observed, setObserved] = useState([]); // rxToWriteMs paired with each new lastUpdated
+  const [delivery, setDelivery] = useState([]); // Firebase-to-dashboard delays
+  const [history, setHistory] = useState({}); // unit -> latency/<unit> samples in the window
+  const [historyError, setHistoryError] = useState(false);
+  const [leg, setLeg] = useState("rx");
   const [showAll, setShowAll] = useState(false);
-  const offset = useRef(0);
-  const seen = useRef(null);
-  // Curbs in scope, for filtering the samples below (src/scope.js).
-  const [allLots, setLots] = useState({});
-  const [allUnits, setUnits] = useState({});
-  const scope = useScope();
-  const { units: scopedUnits } = useScoped(allLots, allUnits);
+  const unitIds = Object.keys(units || {}).sort();
+  const unitKey = unitIds.join("|");
+
+  useEffect(() => onValue(ref(database, ".info/serverTimeOffset"), (snap) => {
+    offset.current = Number(snap.val()) || 0;
+    setOffsetMs(offset.current);
+  }), []);
 
   useEffect(() => {
-    const stopSamples = onValue(ref(database, dataPath("latency")), (snap) => {
-      const list = [];
-      Object.entries(snap.val() || {}).forEach(([unit, byId]) => {
-        if (!byId || typeof byId !== "object") return;
-        Object.entries(byId).forEach(([id, s]) => {
-          if (!s || typeof s !== "object") return;
-          list.push({ unit, id, eventAgeMs: s.eventAgeMs, rxToWriteMs: s.rxToWriteMs, at: s.lastUpdated });
-        });
-      });
-      // Oldest first; samples without a timestamp keep their key order at the start.
-      list.sort((a, b) => (isMs(a.at) ? a.at : -1) - (isMs(b.at) ? b.at : -1) || a.id.localeCompare(b.id));
-      setSamples(list);
-      setError(false);
-      setLoaded(true);
-    }, () => { setError(true); setLoaded(true); });
+    const ids = unitKey ? unitKey.split("|") : [];
+    const keep = (list) => list.slice(-WINDOW_MAX * 2);
+    const stops = ids.flatMap((id) => [
+      onValue(ref(database, dataPath(`units/${id}/rxToWriteMs`)), (snap) => { rx.current[id] = snap.val(); }, () => {}),
+      onValue(ref(database, dataPath(`units/${id}/lastUpdated`)), (snap) => {
+        // Time this listener fired, before anything else runs.
+        const firedAt = Date.now();
+        const lu = snap.val();
+        const prev = seen.current[id];
+        seen.current[id] = lu;
+        if (prev === undefined || !isMs(lu) || lu === prev) return; // first value is the baseline
+        const d = deliveryDelay(lu, firedAt, offset.current);
+        if (d !== null) setDelivery((list) => keep([...list, { unit: id, at: firedAt + offset.current, v: d }]));
+        // rxToWriteMs arrives in the same write; read it once this event's listeners have run.
+        setTimeout(() => {
+          const v = rx.current[id];
+          if (isMs(v)) setObserved((list) => keep([...list, { unit: id, at: lu, v }]));
+        }, 0);
+      }, () => {}),
+      onValue(
+        query(ref(database, dataPath(`latency/${id}`)), orderByChild("lastUpdated"), startAt(Date.now() - WINDOW_MS), limitToLast(WINDOW_MAX)),
+        (snap) => { setHistory((h) => ({ ...h, [id]: snap.val() || {} })); setHistoryError(false); },
+        () => setHistoryError(true),
+      ),
+    ]);
+    return () => stops.forEach((stop) => stop());
+  }, [unitKey]);
 
-    const stopOffset = onValue(ref(database, ".info/serverTimeOffset"), (snap) => { offset.current = Number(snap.val()) || 0; });
+  // Only curbs still in scope count.
+  const inScope = (x) => Object.hasOwn(units || {}, x.unit);
+  const serverNow = now + offsetMs;
+  const win = (list) => recentWindow(list.filter(inScope), serverNow);
 
-    // Firebase to dashboard: compare each changed lastUpdated with server-corrected now.
-    // The first snapshot only sets the baseline; old timestamps aren't delays.
-    const stopLots = onValue(ref(database, dataPath("lots")), (snap) => setLots(snap.val() || {}), () => {});
-    const stopUnits = onValue(ref(database, dataPath("units")), (snap) => {
-      setUnits(snap.val() || {});
-      const now = Date.now() + offset.current;
-      const latest = {};
-      const fresh = [];
-      Object.entries(snap.val() || {}).forEach(([unit, u]) => {
-        const lu = u?.lastUpdated;
-        if (!isMs(lu)) return;
-        latest[unit] = lu;
-        if (seen.current && seen.current[unit] !== lu) fresh.push({ unit, v: Math.max(0, now - lu), at: now });
-      });
-      seen.current = latest;
-      if (fresh.length) setDash((d) => [...d, ...fresh].slice(-DASH_KEEP));
-    }, () => {});
+  const historyTree = Object.fromEntries(Object.entries(history).filter(([u]) => Object.hasOwn(units || {}, u)));
+  const rxPoints = win(mergeSamples(flattenLatency(historyTree, "rxToWriteMs"), observed));
+  const ageSimPoints = win(flattenLatency(historyTree, "eventAgeMs"));
+  const deliveryPoints = win(delivery);
 
-    return () => { stopSamples(); stopOffset(); stopUnits(); stopLots(); };
-  }, []);
+  const benchStats = {
+    count: BENCH.samples ?? 0,
+    enough: isMs(BENCH.medianMs) && isMs(BENCH.p95Ms) && Number.isInteger(BENCH.samples) && BENCH.samples >= MIN_SAMPLES,
+    median: BENCH.medianMs,
+    p95: BENCH.p95Ms,
+  };
+  const benchPending = BENCH.samples == null || BENCH.medianMs == null || BENCH.p95Ms == null;
 
-  // Only curbs in scope: another customer's samples never reach the chart or table.
-  const inScope = (x) => scope.kind === "all" || Object.hasOwn(scopedUnits, x.unit);
-  const samples = allSamples.filter(inScope);
-  const dash = allDash.filter(inScope);
+  const stages = [
+    sim
+      ? { id: "age", label: "Curb to Receiver", source: "simulated", note: "Event age: how old the curb's event was when the Receiver got the LoRa packet.", points: ageSimPoints, waiting: "Start the simulation on the Simulation page." }
+      : { id: "age", label: "Curb to Receiver", source: "benchmark", note: "Event age: how old the curb's event is when the Receiver gets the LoRa packet. From Brad's bench tests, not live data.", stats: benchStats, pending: benchPending, when: BENCH.measured || null },
+    { id: "rx", label: "Receiver to Firebase", source: sim ? "simulated" : "measured", note: "From the Receiver getting the LoRa packet to finishing its Firebase write.", points: rxPoints, waiting: sim ? "Start the simulation on the Simulation page." : "A sample arrives each time a curb reports." },
+    { id: "fb", label: "Firebase to dashboard", source: sim ? "simulated" : "measured", note: "From the write's timestamp to this page's listener firing, corrected for this browser's clock. Not stored.", points: deliveryPoints, waiting: "Counted while this page is open, each time a curb reports." },
+  ].map((s) => (s.points ? { ...s, stats: summarize(s.points.map((p) => p.v)), chart: s.points.slice(-CHART_KEEP) } : s));
 
-  // Points per leg, oldest first.
-  const pointsFor = (id) => (id === "fbToDash"
-    ? dash
-    : samples.filter((s) => isMs(s[id])).map((s) => ({ unit: s.unit, v: s[id], at: s.at })));
-  const legData = LEGS.map((l) => {
-    const pts = pointsFor(l.id);
-    return { ...l, stats: stats(pts.map((p) => p.v)), chart: pts.slice(-CHART_KEEP) };
-  });
+  const total = sumOfMedians(stages.map((s) => ({ label: s.label, median: s.pending || !s.stats?.enough ? null : s.stats.median })));
+  const sources = [...new Set(stages.map((s) => s.source))];
 
-  const units = [...new Set([...samples.map((s) => s.unit), ...dash.map((d) => d.unit)])];
-  const tableRows = units
-    .map((unit) => ({ unit, stats: stats(pointsFor(leg).filter((p) => p.unit === unit).map((p) => p.v)) }))
-    .sort((a, b) => (b.stats?.p95 ?? -1) - (a.stats?.p95 ?? -1) || a.unit.localeCompare(b.unit, undefined, { numeric: true }));
+  // Per-curb table for the stages measured per curb.
+  const tableStages = stages.filter((s) => s.points);
+  const tableStage = tableStages.find((s) => s.id === leg) || tableStages[0];
+  const tableUnits = [...new Set(tableStage.points.map((p) => p.unit))];
+  const tableRows = tableUnits
+    .map((unit) => ({ unit, stats: summarize(tableStage.points.filter((p) => p.unit === unit).map((p) => p.v)) }))
+    .sort((a, b) => (b.stats.p95 ?? -1) - (a.stats.p95 ?? -1) || a.unit.localeCompare(b.unit, undefined, { numeric: true }));
   const shownRows = showAll ? tableRows : tableRows.slice(0, TABLE_ROWS);
-  const empty = loaded && !error && samples.length === 0 && dash.length === 0;
-  const legName = LEGS.find((l) => l.id === leg).label;
 
   return (
     <section className="an-section sws-enter" style={{ "--d": `${delay}ms` }} aria-labelledby="lt-h">
@@ -189,73 +243,54 @@ function LatencySection({ mode, delay = 0 }) {
           Transmission latency
           {sim && <span className="sws-badge lt-sim">SIMULATED</span>}
         </h2>
-        {loaded && !empty && (
-          <span className="an-meta">{samples.length} {sim ? "simulated " : ""}{samples.length === 1 ? "sample" : "samples"}</span>
-        )}
+        <span className="an-meta">Last hour · up to {WINDOW_MAX} samples per stage</span>
       </div>
       <p className="an-sub">
         {sim
-          ? "Simulated samples from the simulator, so you can see how this card behaves. They are not measurements of real hardware."
-          : "How long a curb event takes to reach this dashboard, leg by leg. Each leg shows n/a until there's data for it."}
+          ? "Simulated by the simulator so you can see how this card behaves. None of these numbers are measurements of real hardware."
+          : "How long a curb event takes to reach this dashboard, stage by stage. Each number says where it comes from: measured from live data, or a benchmark from Brad's tests."}
       </p>
 
-      {error ? (
-        <div className="an-panel"><Notice tone="busy" title="Couldn't read latency samples">Your account may not have access, or the connection dropped. Reload the page to try again.</Notice></div>
-      ) : !loaded ? (
-        <div className="an-panel"><p className="sws-note" role="status">Loading…</p></div>
-      ) : empty ? (
-        <div className="an-panel">
-          <EmptyState icon="clock" title="No samples yet">
-            {sim
-              ? "Waiting for the simulation to report latency. Load fresh simulated data or start the simulation on the Simulation page."
-              : "Waiting for the Receiver to report latency."}
-          </EmptyState>
-        </div>
-      ) : (
-        <div className="lt-stack">
-          <div className="lt-legs">
-            {legData.map((l, i) => (
-              <div key={l.id} className="lt-leg sws-enter" style={{ "--d": `${delay + 40 + i * 40}ms` }}>
-                <div className="lt-leg-k">{l.label}{sim && " · Simulated"}</div>
-                <p className="lt-leg-note">{l.note}</p>
-                {l.stats ? (
-                  <>
-                    <div className="lt-median"><span className="sws-mono">{fmtMs(l.stats.median)}</span> <small>median</small></div>
-                    <dl className="lt-stats">
-                      <div><dt>p95</dt><dd className="sws-mono">{fmtMs(l.stats.p95)}</dd></div>
-                      <div><dt>Slowest</dt><dd className="sws-mono">{fmtMs(l.stats.max)}</dd></div>
-                      <div><dt>Samples</dt><dd className="sws-mono">{l.stats.count}</dd></div>
-                    </dl>
-                    <LegChart points={l.chart} label={`${sim ? "Simulated " : ""}${l.label}`} />
-                  </>
-                ) : (
-                  <>
-                    <div className="lt-median lt-na"><span className="sws-mono">n/a</span></div>
-                    <p className="lt-leg-note">
-                      {l.id === "fbToDash"
-                        ? "Appears when a curb changes while this page is open."
-                        : "No samples include this field yet."}
-                    </p>
-                  </>
-                )}
-              </div>
-            ))}
-          </div>
+      {historyError && !sim && (
+        <div className="an-panel"><Notice tone="warn" title="Couldn't read the latency history">Showing only what this page measures while it's open. Your account may not have access to latency/.</Notice></div>
+      )}
 
+      <div className="lt-stack">
+        <div className="lt-legs">
+          {stages.map((s, i) => <StageCard key={s.id} stage={s} delay={delay + 40 + i * 40} />)}
+        </div>
+
+        <div className="an-panel lt-total">
+          <div className="lt-leg-top">
+            <div className="lt-leg-k">Total · sum of the three medians</div>
+            <span className="lt-src-group">{sources.map((src) => <SourceTag key={src} source={src} />)}</span>
+          </div>
+          {total.value !== null ? (
+            <div className="lt-median"><span className="sws-mono">{fmtMs(total.value)}</span> <small>sum of medians</small></div>
+          ) : (
+            <div className="lt-empty">Not enough data</div>
+          )}
+          <p className="lt-leg-note">
+            {total.value !== null
+              ? `Adds each stage's median${sim ? "" : ", mixing a benchmark with live measurements"}. It is not a measured end-to-end time, and medians don't add up to the median of a whole trip.`
+              : `Needs a median for every stage. Missing: ${total.missing.join(", ")}.`}
+          </p>
+        </div>
+
+        {tableRows.length > 0 && (
           <div className="an-panel lt-units">
             <div className="lt-units-head">
-              <h3 className="lt-h3">By unit{sim && " · Simulated"}</h3>
-              <Chips label="Latency leg" options={LEGS.map((l) => ({ id: l.id, label: l.label }))} value={leg} onChange={setLeg} />
+              <h3 className="lt-h3">By curb · {SOURCE[tableStage.source].label}</h3>
+              <Chips label="Latency stage" options={tableStages.map((s) => ({ id: s.id, label: s.label }))} value={tableStage.id} onChange={setLeg} />
             </div>
             <div className="sws-table-scroll">
               <table className="lt-table">
-                <caption className="sws-sr-only">{sim ? "Simulated " : ""}{legName} latency by unit, slowest 95th percentile first</caption>
+                <caption className="sws-sr-only">{SOURCE[tableStage.source].label}: {tableStage.label} latency by curb, slowest 95th percentile first</caption>
                 <thead>
                   <tr>
-                    <th scope="col" className="sws-th">Unit</th>
+                    <th scope="col" className="sws-th">Curb</th>
                     <th scope="col" className="sws-th">Median</th>
                     <th scope="col" className="sws-th">p95</th>
-                    <th scope="col" className="sws-th">Slowest</th>
                     <th scope="col" className="sws-th">Samples</th>
                   </tr>
                 </thead>
@@ -263,21 +298,26 @@ function LatencySection({ mode, delay = 0 }) {
                   {shownRows.map(({ unit, stats: s }) => (
                     <tr key={unit}>
                       <th scope="row" className="sws-mono" translate="no">{unit}</th>
-                      <td className={`sws-mono${s ? "" : " lt-na"}`}>{fmtMs(s?.median)}</td>
-                      <td className={`sws-mono${s ? "" : " lt-na"}`}>{fmtMs(s?.p95)}</td>
-                      <td className={`sws-mono${s ? "" : " lt-na"}`}>{fmtMs(s?.max)}</td>
-                      <td className="sws-mono">{s?.count ?? 0}</td>
+                      {s.enough ? (
+                        <>
+                          <td className="sws-mono">{fmtMs(s.median)}</td>
+                          <td className="sws-mono">{fmtMs(s.p95)}</td>
+                        </>
+                      ) : (
+                        <td colSpan={2} className="lt-na">Not enough data</td>
+                      )}
+                      <td className="sws-mono">{s.count}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
             {tableRows.length > TABLE_ROWS && (
-              <div><Button size="sm" onClick={() => setShowAll((v) => !v)}>{showAll ? `Show slowest ${TABLE_ROWS}` : `Show all ${tableRows.length} units`}</Button></div>
+              <div><Button size="sm" onClick={() => setShowAll((v) => !v)}>{showAll ? `Show slowest ${TABLE_ROWS}` : `Show all ${tableRows.length} curbs`}</Button></div>
             )}
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </section>
   );
 }

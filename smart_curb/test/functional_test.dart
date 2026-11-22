@@ -8,7 +8,7 @@ import 'package:maplibre_gl/maplibre_gl.dart';
 import 'package:smart_curb/assistant.dart';
 import 'package:smart_curb/main.dart';
 
-import 'assistant_test.dart' show FakeData, openLots, testLots, useTestLots;
+import 'assistant_test.dart' show FakeData, openLots, testLots, testUnits, useTestLots;
 import 'gemini_chat_test.dart' show FakeGoogle, ok, limited;
 import 'performance_test.dart' show perf;
 
@@ -286,6 +286,49 @@ void main() {
           'of ${fauBoca.buildings.length + none.length}', 'only lots with a counted space');
     });
 
+    test('a curb moved into a lot in the database counts there', () {
+      // C-201 moved into broward1 in `units/`, with no code change: the mall
+      // now counts live, broward1 shows its curb, and it's recommended.
+      final units = <String, dynamic>{
+        ...testUnits,
+        'C-201': {'lot': 'broward1', 'occupied': false, 'online': true},
+      };
+      addTearDown(() => Place.applyUnitsToAll(testUnits));
+      Place.applyUnitsToAll(units);
+      expect(browardMall.liveParking, isTrue);
+      final lots = parseLiveLots(browardMall, testLots, units);
+      expect(lots['broward1']!['sensors'], isTrue);
+      expect(lotFreeText(lots['broward1']!), '1 free');
+      // Its own curb, not just the lot, for every store.
+      for (final b in browardMall.buildings) {
+        final best = bestParkingFor(browardMall, b, lots)!;
+        expect((best.lotId, best.unitId), ('broward1', 'C-201'));
+      }
+      // Its space: south of the aisle (26.119729), west of the road
+      // (-80.255755), curb at the aisle end; the car drives in from the south.
+      final space = browardMall.spotShapes.single;
+      expect(space.center.latitude, lessThan(26.119729));
+      expect(space.center.longitude, lessThan(-80.255755));
+      for (final c in space.ring) {
+        expect(c.latitude, inInclusiveRange(26.119580, 26.119729));
+        expect(c.longitude, lessThan(-80.255755));
+      }
+      expect(Geo.shortestAngle(space.curbBearing, 0).abs(), lessThan(5));
+      final drive = browardMall.spotApproach['C-201']!;
+      expect(drive[1].latitude, lessThan(space.center.latitude)); // behind it, south
+      expect(Geo.meters(drive.last, space.center), lessThan(0.5));
+      // Its curb taken: nowhere at the mall to send anyone.
+      final full = parseLiveLots(browardMall, testLots, {
+        ...units,
+        'C-201': {'lot': 'broward1', 'occupied': true, 'online': true},
+      });
+      expect(bestParkingFor(browardMall, browardMall.buildings.first, full), isNull);
+      // Moved out again: the mall has no curbs, FAU still does.
+      Place.applyUnitsToAll(testUnits);
+      expect(browardMall.liveParking, isFalse);
+      expect(fauBoca.liveParking, isTrue);
+    });
+
     test('every building gets a reachable lot with a sensible walk', () {
       var unreachable = 0;
       var worstDetour = 0.0;
@@ -323,9 +366,11 @@ void main() {
 
     test('curb spaces lead the car right into the right space', () {
       var worst = 0.0;
-      for (final s in fauBoca.spotShapes) {
-        final d = Geo.meters(fauBoca.spotApproach[s.unitId]!.last, s.center);
-        if (d > worst) worst = d;
+      for (final p in Place.all) {
+        for (final s in p.spotShapes) {
+          final d = Geo.meters(p.spotApproach[s.unitId]!.last, s.center);
+          if (d > worst) worst = d;
+        }
       }
       perf('Accuracy', 'Drive-in ends off the space center', worst, 0.5, 'm', 'parks in the space');
     });
