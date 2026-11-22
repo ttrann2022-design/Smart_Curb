@@ -351,7 +351,12 @@
     // The Receiver writes with the legacy database secret, which bypasses these
     // rules. Simulated samples live under demo/latency (see "demo" below).
     "latency": {
-      ".read": "auth != null && root.child('users').child(auth.uid).exists()"
+      ".read": "auth != null && root.child('users').child(auth.uid).exists()",
+      // Analytics reads each curb's last hour of samples, ordered by lastUpdated.
+      // An index only speeds up that query; it grants nothing.
+      "$unitId": {
+        ".indexOn": ["lastUpdated"]
+      }
     },
 
     // Driver-app accounts: each driver reads and writes only their own data.
@@ -491,7 +496,16 @@
         ".read": false,
         ".write": false
       },
-      // Everything else under demo/ (units, history, latency, simLock): any staff account.
+      // Simulated latency samples. Same access as $other below (public read, staff
+      // write); named only so it can carry the same lastUpdated index as latency/.
+      "latency": {
+        ".read": true,
+        ".write": "auth != null && root.child('users').child(auth.uid).exists()",
+        "$unitId": {
+          ".indexOn": ["lastUpdated"]
+        }
+      },
+      // Everything else under demo/ (units, history, simLock): any staff account.
       "$other": {
         ".read": true,
         ".write": "auth != null && root.child('users').child(auth.uid).exists()"

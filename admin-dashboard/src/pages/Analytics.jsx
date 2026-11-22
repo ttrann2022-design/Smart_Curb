@@ -288,7 +288,7 @@ function Analytics() {
         )}
 
         {/* Shown whether or not there is occupancy history. */}
-        <LatencySection mode={mode} delay={180} />
+        <LatencySection mode={mode} units={units} delay={180} />
       </div>
     </>
   );
