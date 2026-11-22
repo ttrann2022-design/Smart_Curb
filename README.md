@@ -272,7 +272,10 @@ Analytics' live occupancy line and day-by-hour heatmap read `history/`. On the l
 cd admin-dashboard
 npm run history:record                  # a reading every 30 seconds
 npm run history:record -- --interval 60 # or every 60
+npm run history:record -- --units C-095,C-201   # count only these curbs
 ```
+
+- **Which curbs count:** every curb in `units/`, unless you name some with `--units C-095,C-201` (or the `RECORD_UNITS` environment variable; the flag wins). The recorder prints the list when it starts, and warns about any named ID that isn't in `units/`. Use it while placeholder curbs are in the database: a curb whose `online` was set to `true` by hand counts as online, because the rule is the dashboard's, which goes by `online` alone.
 
 - **It only records while it's running.** Close the window, sleep the laptop or lose the network and there's a gap. Nothing is back-filled.
 - **The live line appears within a minute** (Analytics needs two readings). Each reading is the percent full across all online curbs, by the same rule as every dashboard page. Ticks with no online curbs are skipped, not recorded as 0.

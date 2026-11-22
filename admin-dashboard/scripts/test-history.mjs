@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   DAYS, SLOTS, LIVE_KEEP, percentFull, localSlot, addDays, dowOf, addToCell, addSample,
-  rollingWeek, staleDates, keysToTrim, pickTimezone,
+  rollingWeek, staleDates, keysToTrim, pickTimezone, parseUnitList, unitsOption,
 } from "../scheduler/history.js";
 import { lotCounts } from "../src/unitStatus.js";
 
@@ -216,4 +216,38 @@ test("time zone: env, then the site's schedule settings, then America/New_York",
   assert.match(split.source, /disagree/);
   assert.equal(pickTimezone({}).tz, NY);
   assert.equal(pickTimezone({ schedules: { s1: { settings: { timezone: "nonsense" } } } }).tz, NY);
+});
+
+// ---------- which curbs count (the allowlist) ----------
+test("parseUnitList trims, drops blanks and duplicates, and keeps order", () => {
+  assert.deepEqual(parseUnitList("C-095,C-201"), ["C-095", "C-201"]);
+  assert.deepEqual(parseUnitList(" C-095 , ,C-201,C-095 "), ["C-095", "C-201"]);
+  assert.deepEqual(parseUnitList("C-201"), ["C-201"]);
+});
+
+test("parseUnitList: nothing given means no allowlist (every curb counts)", () => {
+  for (const blank of [undefined, null, "", "   ", ",", " , "]) assert.equal(parseUnitList(blank), null, JSON.stringify(blank));
+});
+
+test("parseUnitList rejects IDs the database can't have", () => {
+  for (const bad of ["C.095", "C-095,lots/x", "C#1", "C$", "C[1]"]) assert.throws(() => parseUnitList(bad), /Not a curb ID/, bad);
+});
+
+test("unitsOption: --units wins over RECORD_UNITS, in both flag forms", () => {
+  const env = { RECORD_UNITS: "C-001" };
+  assert.deepEqual(unitsOption(["--units", "C-095,C-201"], env), { units: ["C-095", "C-201"], source: "--units" });
+  assert.deepEqual(unitsOption(["--interval", "60", "--units=C-095"], env), { units: ["C-095"], source: "--units" });
+  assert.deepEqual(unitsOption([], env), { units: ["C-001"], source: "RECORD_UNITS" });
+});
+
+test("unitsOption: neither given keeps the current behaviour", () => {
+  assert.deepEqual(unitsOption([], {}), { units: null, source: null });
+  assert.deepEqual(unitsOption(["--interval", "60"], { RECORD_UNITS: "  " }), { units: null, source: null });
+});
+
+test("unitsOption: --units without a list is an error, not 'count everything'", () => {
+  assert.throws(() => unitsOption(["--units"], {}), /--units needs/);
+  assert.throws(() => unitsOption(["--units", "--interval", "5"], {}), /--units needs/);
+  assert.throws(() => unitsOption(["--units="], {}), /--units needs/);
+  assert.throws(() => unitsOption(["--units", " , "], {}), /--units needs/);
 });
