@@ -123,6 +123,7 @@ Open http://localhost:5173. Sign-up is invite-only: a Manager invites you from *
 | `npm run dev:demo` | Run locally as the demo site (simulated data only) |
 | `npm run emulators` | Start local Auth + Database emulators with the draft rules (needs Java 21+) |
 | `npm run dev:emulator` | Run locally against the emulators instead of the real database |
+| `npm run history:record` | Record occupancy history for Analytics (see *Occupancy history*) |
 | `npm run build` | Build the real site into `dist/` |
 | `npm run build:demo` | Build the demo site into `dist-demo/` |
 
@@ -262,6 +263,46 @@ The page is in the customer dashboard only, not the company console. In Simulati
 - **Reads cost bandwidth.** While any site is on, each run downloads `lots/` and `units/`, once a minute. With no site on, it reads only `schedules/`.
 - **Curb writes aren't limited per customer.** As with the manual control, the rules let any operator or manager write any curb's LED fields; `schedules/` itself is per site. See *The honest limit* above.
 - **Apply now needs a role that can set LEDs.** A platform admin whose dashboard role is viewer can edit schedules, but the database refuses their Apply now.
+
+## Occupancy history
+
+Analytics' live occupancy line and day-by-hour heatmap read `history/`. On the live site it's written by the **history recorder**, a small Node program you run on a computer (the project is on the Spark plan, so there are no Cloud Functions):
+
+```bash
+cd admin-dashboard
+npm run history:record                  # a reading every 30 seconds
+npm run history:record -- --interval 60 # or every 60
+```
+
+- **It only records while it's running.** Close the window, sleep the laptop or lose the network and there's a gap. Nothing is back-filled.
+- **The live line appears within a minute** (Analytics needs two readings). Each reading is the percent full across all online curbs, by the same rule as every dashboard page. Ticks with no online curbs are skipped, not recorded as 0.
+- **The heatmap needs about a week of running.** `history/week` is written only once every one of the 98 day-and-hour slots (7 AM to 8 PM, all 7 days) of the last 7 days has real readings. Until then it stays absent, and Analytics shows the live line with "—" for the weekly figures. Gaps are never filled in.
+- **Time zone:** `HISTORY_TIMEZONE` if set, else `schedules/<id>/settings/timezone` (`HISTORY_SITE_ID` picks the site when there are several), else America/New_York.
+- **Downloads stay small:** it lists curbs with a shallow query every 5 minutes and listens only to each curb's `online` and `occupied`, never to the whole record (which can carry `lastSnapshot` images).
+- **Its working data** is `historySamples/`, which no dashboard account can read or write. It trims `history/live` to the newest 200 readings and drops samples older than 8 days.
+
+### The service account key
+
+The recorder writes with the Admin SDK, so it needs a service account key. **The key gives full admin access to the whole Firebase project: treat it like a password and never commit it.**
+
+1. Firebase console → **Project settings** (gear icon) → **Service accounts** → **Firebase Admin SDK** → **Generate new private key** → **Generate key**. A JSON file downloads.
+2. Move it **outside this repo, and outside OneDrive** (this repo lives in OneDrive, which syncs everything), for example `C:\Users\<you>\.secrets\smartcurb-recorder.json`. The recorder refuses to start with a key inside the repo, and `.gitignore` ignores key file names as a safety net.
+3. Point the recorder at it, then run it (PowerShell):
+
+```powershell
+$env:GOOGLE_APPLICATION_CREDENTIALS = "C:\Users\<you>\.secrets\smartcurb-recorder.json"
+npm run history:record
+```
+
+If a key ever leaks, delete it in Google Cloud console → IAM & Admin → Service accounts → the `firebase-adminsdk` account → Keys, and generate a new one.
+
+### Testing it locally
+
+`npm run test:history` checks the logic (percent, trim, rolling week, the 98-slot rule, local time and daylight saving). With the emulator running (`npm run emulators`), `npm run test:history-recorder` runs the recorder against fake curbs, and `FIREBASE_DATABASE_EMULATOR_HOST=127.0.0.1:9000 npm run history:record` records into the emulator with no key.
+
+### Later: the Receiver
+
+The Receiver could write the same shape itself (`history/live/<pushId> = { t, pct }`, and `history/week` with `Mon`..`Sun`, each 14 whole-number percents for 7 AM to 8 PM local time, written only when complete), and then the recorder isn't needed. Run only one of them, or the live line gets two readings per tick.
 
 ## Live and Simulation data
 
