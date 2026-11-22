@@ -5,6 +5,7 @@ import {
 import { auth, database } from "../firebase";
 import { SIM_ROOT } from "../dataMode";
 import { lotCounts } from "../unitStatus";
+import { latencySample } from "./latencySample";
 
 // Everything in this file reads and writes ONLY under SIM_ROOT ("demo/").
 // It deliberately never uses dataPath(), so switching the dashboard to Live
@@ -34,17 +35,6 @@ const LIVE_KEEP = 200;
 // so demo/latency stays bounded however long the simulation runs.
 const LATENCY_KEEP = 25;
 let latencySeq = 0;
-
-// One synthetic sample, shaped like the Receiver's latency/<unitId>/<sampleId>.
-// Mostly quick, with an occasional slow outlier; about 1 in 10 lacks eventAgeMs,
-// as a Receiver that can't tell when the curb saw the event would send.
-function latencySample(lastUpdated) {
-  const sample = { rxToWriteMs: Math.round(35 + Math.random() * 55 + (Math.random() < 0.06 ? 250 + Math.random() * 600 : 0)), lastUpdated };
-  if (Math.random() < 0.9) {
-    sample.eventAgeMs = Math.round(140 + Math.random() * 220 + (Math.random() < 0.05 ? 700 + Math.random() * 1500 : 0));
-  }
-  return sample;
-}
 
 // A few recent samples for each curb, spread over the last half hour.
 function buildLatency(unitIds) {

@@ -6,8 +6,8 @@ import { useNow } from "../units";
 import useWidth from "../useWidth";
 import { Button, Chips, Notice } from "./ui";
 import {
-  MIN_SAMPLES, WINDOW_MS, WINDOW_MAX, isMs, summarize, recentWindow, mergeSamples,
-  flattenLatency, deliveryDelay, deliveryVerdict, sumOfMedians,
+  MIN_SAMPLES, WINDOW_MS, WINDOW_MAX, isMs, summarize,
+  deliveryDelay, deliveryStageVerdict, sumOfMedians, stagePoints,
 } from "../analytics/latencyStats";
 import { CURB_TO_RECEIVER_BENCHMARK as BENCH } from "../analytics/latencyBenchmarks";
 
@@ -22,8 +22,10 @@ import { CURB_TO_RECEIVER_BENCHMARK as BENCH } from "../analytics/latencyBenchma
 //                          history under latency/<unitId>/<sampleId> from the last hour.
 //   Firebase to dashboard  Measured in this browser: server-corrected time when a curb's
 //                          lastUpdated listener fires, minus that lastUpdated. Memory only.
-// Simulation: every stage comes from the simulator (demo/latency, demo/units) and is
-// labelled Simulated. Simulated numbers are never shown as measured.
+// Simulation: every stage comes from the simulator's samples in demo/latency, Firebase to
+// dashboard included, and is labelled Simulated. Simulated numbers are never shown as
+// measured. Its hour ends at the newest simulated sample, so a stopped simulation (leaving
+// Simulation stops it) keeps its numbers, with a note (stagePoints in latencyStats.js).
 //
 // Light on the database: per-curb listeners on units/<id>/lastUpdated and rxToWriteMs only
 // (never the whole unit, so lastSnapshot images aren't downloaded; Analytics' own units
@@ -194,7 +196,9 @@ function LatencySection({ mode, units, delay = 0 }) {
         seen.current[id] = lu;
         if (prev === undefined || !isMs(lu) || lu === prev) return; // first value is the baseline
         const d = deliveryDelay(lu, firedAt, offset.current);
-        if (d !== null) setDelivery((list) => keep([...list, { unit: id, at: firedAt + offset.current, v: d }]));
+        // In Simulation this stage comes from the samples: the simulator stamps lastUpdated with
+        // this browser's clock, so timing it here would only measure the clock gap.
+        if (d !== null && !sim) setDelivery((list) => keep([...list, { unit: id, at: firedAt + offset.current, v: d }]));
         // rxToWriteMs arrives in the same write; read it once this event's listeners have run.
         setTimeout(() => {
           const v = rx.current[id];
@@ -202,23 +206,23 @@ function LatencySection({ mode, units, delay = 0 }) {
         }, 0);
       }, () => {}),
       onValue(
-        query(ref(database, dataPath(`latency/${id}`)), orderByChild("lastUpdated"), startAt(Date.now() - WINDOW_MS), limitToLast(WINDOW_MAX)),
+        sim
+          ? query(ref(database, dataPath(`latency/${id}`)), orderByChild("lastUpdated"), limitToLast(WINDOW_MAX))
+          : query(ref(database, dataPath(`latency/${id}`)), orderByChild("lastUpdated"), startAt(Date.now() - WINDOW_MS), limitToLast(WINDOW_MAX)),
         (snap) => { setHistory((h) => ({ ...h, [id]: snap.val() || {} })); setHistoryError(false); },
         () => setHistoryError(true),
       ),
     ]);
     return () => stops.forEach((stop) => stop());
-  }, [unitKey]);
+  }, [unitKey, sim]);
 
   // Only curbs still in scope count.
   const inScope = (x) => Object.hasOwn(units || {}, x.unit);
   const serverNow = now + offsetMs;
-  const win = (list) => recentWindow(list.filter(inScope), serverNow);
 
   const historyTree = Object.fromEntries(Object.entries(history).filter(([u]) => Object.hasOwn(units || {}, u)));
-  const rxPoints = win(mergeSamples(flattenLatency(historyTree, "rxToWriteMs"), observed));
-  const ageSimPoints = win(flattenLatency(historyTree, "eventAgeMs"));
-  const deliveryPoints = win(delivery);
+  const points = stagePoints({ sim, history: historyTree, observed: observed.filter(inScope), delivery: delivery.filter(inScope), now: serverNow });
+  const { rx: rxPoints, age: ageSimPoints, fb: deliveryPoints, stoppedAt } = points;
 
   const benchStats = {
     count: BENCH.samples ?? 0,
@@ -233,14 +237,17 @@ function LatencySection({ mode, units, delay = 0 }) {
       ? { id: "age", label: "Curb to Receiver", source: "simulated", note: "Event age: how old the curb's event was when the Receiver got the LoRa packet.", points: ageSimPoints, waiting: "Start the simulation on the Simulation page." }
       : { id: "age", label: "Curb to Receiver", source: "benchmark", note: "Event age: how old the curb's event is when the Receiver gets the LoRa packet. From Brad's bench tests, not live data.", stats: benchStats, pending: benchPending, when: BENCH.measured || null },
     { id: "rx", label: "Receiver to Firebase", source: sim ? "simulated" : "measured", note: "From the Receiver getting the LoRa packet to finishing its Firebase write.", points: rxPoints, waiting: sim ? "Start the simulation on the Simulation page." : "A sample arrives each time a curb reports." },
-    { id: "fb", label: "Firebase to dashboard", source: sim ? "simulated" : "measured", note: "From the write's timestamp to this page's listener firing, corrected for this browser's clock. Not stored.", points: deliveryPoints, waiting: "Counted while this page is open, each time a curb reports." },
+    sim
+      ? { id: "fb", label: "Firebase to dashboard", source: "simulated", note: "From a write to this page's listener firing, as the simulator models it.", points: deliveryPoints, waiting: "Load fresh simulated data or start the simulation on the Simulation page." }
+      : { id: "fb", label: "Firebase to dashboard", source: "measured", note: "From the write's timestamp to this page's listener firing, corrected for this browser's clock. Not stored.", points: deliveryPoints, waiting: "Counted while this page is open, each time a curb reports." },
   ].map((s) => (s.points ? { ...s, stats: summarize(s.points.map((p) => p.v)), chart: s.points.slice(-CHART_KEEP) } : s))
-    // Firebase to dashboard keeps raw values. If any is negative the stage can't be measured:
-    // say so instead of showing a clamped 0 (see deliveryVerdict).
+    // Live, Firebase to dashboard keeps raw values. If any is negative the stage can't be
+    // measured: say so instead of showing a clamped 0. Never in Simulation (see
+    // deliveryStageVerdict), so its clock explanation never shows there.
     .map((s) => {
       if (s.id !== "fb") return s;
-      const verdict = deliveryVerdict(s.points.map((p) => p.v));
-      return verdict.measurable ? s : { ...s, unmeasurable: verdict, chart: [] };
+      const verdict = deliveryStageVerdict({ sim, points: s.points });
+      return verdict ? { ...s, unmeasurable: verdict, chart: [] } : s;
     });
 
   const total = sumOfMedians(stages.map((s) => ({
@@ -265,13 +272,17 @@ function LatencySection({ mode, units, delay = 0 }) {
           Transmission latency
           {sim && <span className="sws-badge lt-sim">SIMULATED</span>}
         </h2>
-        <span className="an-meta">Last hour · up to {WINDOW_MAX} samples per stage</span>
+        <span className="an-meta">{sim ? "Latest hour of simulated samples" : "Last hour"} · up to {WINDOW_MAX} samples per stage</span>
       </div>
       <p className="an-sub">
         {sim
           ? "Simulated by the simulator so you can see how this card behaves. None of these numbers are measurements of real hardware."
           : "How long a curb event takes to reach this dashboard, stage by stage. Each number says where it comes from: measured from live data, or a benchmark from Brad's tests."}
       </p>
+
+      {sim && stoppedAt !== null && (
+        <div className="an-panel"><Notice tone="sim" title="The simulation isn't running">Showing its last hour of simulated samples, up to {fmtTime(stoppedAt)}. Start the simulation on the Simulation page for new ones.</Notice></div>
+      )}
 
       {historyError && !sim && (
         <div className="an-panel"><Notice tone="warn" title="Couldn't read the latency history">Showing only what this page measures while it's open. Your account may not have access to latency/.</Notice></div>
