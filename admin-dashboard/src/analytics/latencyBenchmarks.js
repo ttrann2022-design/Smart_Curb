@@ -1,22 +1,24 @@
-// Benchmark numbers for the latency card: measured by Brad in his tests, NOT live data.
-// The dashboard labels every value from this file "Benchmark · measured by Brad".
+// Benchmark numbers for the latency card. NOT live data, and NOT measured on the curbs:
+// the dashboard labels every value from this file "Benchmark · simulated, from Brad's report".
 //
-// Curb to Receiver ("event age"): how old a curb's event is when the Receiver gets
-// the LoRa packet. Nothing in the live database measures this leg, so it comes from
-// Brad's bench tests.
-//
-// TODO(Brad): fill in the numbers from your event-age benchmark. Leave a value null
-// until you have it; the card shows "Benchmark pending" while any of them is null.
-//   samples:  how many packets the benchmark measured (a whole number)
-//   medianMs: median event age, in milliseconds
-//   p95Ms:    95th-percentile event age, in milliseconds
-//   measured: when the benchmark ran, e.g. "2026-11-20"
-//   setup:    one line on the conditions, e.g. "SF7, 125 kHz, 40 m, line of sight"
+// Curb to Receiver ("event age"): how old a curb's event is when the Receiver gets the
+// LoRa packet. Nothing in the live database measures this leg. These numbers come from
+// Brad's 10/30 report (task 8.2), which ran the event-age test in the simulator, not on
+// the real hardware. Replace them if a hardware benchmark is ever run, and change
+// `source` and the card's wording with them.
+//   source:    "simulated": where the numbers came from (shown on the card)
+//   by:        who ran the benchmark
+//   report:    which report they come from (shown on the card)
+//   samples:   how many events the benchmark measured
+//   medianMs:  median event age, in milliseconds
+//   p95Ms:     95th-percentile event age, in milliseconds
+//   slowestMs: the slowest event age seen, in milliseconds
 export const CURB_TO_RECEIVER_BENCHMARK = {
-  measuredBy: "Brad",
-  samples: null, // TODO
-  medianMs: null, // TODO
-  p95Ms: null, // TODO
-  measured: null, // TODO
-  setup: null, // TODO
+  source: "simulated",
+  by: "Brad",
+  report: "Brad's 10/30 report (task 8.2)",
+  samples: 50,
+  medianMs: 259,
+  p95Ms: 359,
+  slowestMs: 2530,
 };

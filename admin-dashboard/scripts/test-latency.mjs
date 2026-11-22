@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import {
   MIN_SAMPLES, WINDOW_MS, WINDOW_MAX, isMs, summarize, recentWindow, mergeSamples,
   flattenLatency, deliveryDelay, deliveryVerdict, sumOfMedians, stagePoints, newestAt, simulatedDeliveryMs, deliveryStageVerdict,
+  createRxPairer, RX_FINAL_WAIT_MS,
 } from "../src/analytics/latencyStats.js";
 import { latencySample } from "../src/demo/latencySample.js";
 import { CURB_TO_RECEIVER_BENCHMARK } from "../src/analytics/latencyBenchmarks.js";
@@ -175,13 +176,32 @@ test("the total is the sum of the medians, and only when every stage has one", (
   assert.deepEqual(sumOfMedians([{ label: "A", median: 0 }]), { value: 0, missing: [] });
 });
 
-// ---------- Brad's benchmark placeholders ----------
-test("the benchmark is labelled as Brad's and stays TODO (null) until numbers are provided", () => {
+// ---------- Brad's Curb to Receiver benchmark (simulated) ----------
+test("the Curb to Receiver benchmark holds Brad's 10/30 report numbers", () => {
   const b = CURB_TO_RECEIVER_BENCHMARK;
-  assert.equal(b.measuredBy, "Brad");
-  for (const k of ["samples", "medianMs", "p95Ms"]) {
-    assert.ok(b[k] === null || (typeof b[k] === "number" && b[k] >= 0), `${k} must be null (TODO) or a number`);
-  }
+  assert.equal(b.by, "Brad");
+  assert.equal(b.samples, 50);
+  assert.equal(b.medianMs, 259);
+  assert.equal(b.p95Ms, 359);
+  assert.equal(b.slowestMs, 2530);
+  assert.match(b.report, /10\/30/);
+  // Enough samples for the card to show it, and the figures are in a sane order.
+  assert.ok(Number.isInteger(b.samples) && b.samples >= MIN_SAMPLES);
+  assert.ok(b.medianMs <= b.p95Ms && b.p95Ms <= b.slowestMs);
+});
+
+test("the benchmark is marked simulated, and the card never calls it measured or live", async () => {
+  assert.equal(CURB_TO_RECEIVER_BENCHMARK.source, "simulated");
+  const { readFile } = await import("node:fs/promises");
+  const card = await readFile(new URL("../src/components/LatencySection.jsx", import.meta.url), "utf8");
+  const badge = /benchmark: \{ label: "([^"]+)"/.exec(card)?.[1];
+  assert.equal(badge, "Benchmark · simulated, from Brad's report");
+  assert.doesNotMatch(badge, /measured|live/i);
+  const note = /id: "age", label: "Curb to Receiver", source: "benchmark", note: "([^"]+)"/.exec(card)?.[1];
+  assert.match(note, /Run in the simulator, not on the curbs/);
+  assert.doesNotMatch(note.replace("not live data", ""), /measured|live/i);
+  // The benchmark's date row used to be labelled "Measured".
+  assert.doesNotMatch(card, /<dt>Measured<\/dt>/);
 });
 
 // ---------- Simulation: every stage from the simulator's samples ----------
@@ -352,4 +372,154 @@ test("newestAt ignores samples without a usable time", () => {
   assert.equal(newestAt([{ at: 5 }, { at: null }, { at: 9 }, null, { at: -1 }]), 9);
   assert.equal(newestAt([]), null);
   assert.equal(newestAt(undefined), null);
+});
+
+// ---------- Receiver to Firebase: the two-write sequence ----------
+// The Receiver writes rxToWriteMs twice per packet: write 1 (updateNode batch, with
+// lastUpdated) carries a provisional few ms; write 2 (Firebase.setInt, after write 1
+// completes) carries the real latency. Firebase delivers one write's changes as one batch
+// of listener events, which this fake clock models with endOfBatch().
+function fakeClock() {
+  let now = 0;
+  let nextId = 0;
+  const timers = [];
+  const deferred = [];
+  return {
+    setTimer: (fn, ms) => { nextId += 1; timers.push({ id: nextId, at: now + ms, fn }); return nextId; },
+    clearTimer: (id) => { const i = timers.findIndex((t) => t.id === id); if (i !== -1) timers.splice(i, 1); },
+    defer: (fn) => deferred.push(fn),
+    endOfBatch() { while (deferred.length) deferred.shift()(); },
+    advance(ms) {
+      const until = now + ms;
+      for (;;) {
+        timers.sort((a, b) => a.at - b.at);
+        if (!timers.length || timers[0].at > until) break;
+        const t = timers.shift();
+        now = t.at;
+        t.fn();
+      }
+      now = until;
+    },
+  };
+}
+
+function pairerWithClock() {
+  const clock = fakeClock();
+  const samples = [];
+  const pairer = createRxPairer({ onSample: (x) => samples.push(x), setTimer: clock.setTimer, clearTimer: clock.clearTimer, defer: clock.defer });
+  return { clock, samples, pairer };
+}
+
+// One packet from the Receiver: write 1 as a batch, then write 2 `after` ms later.
+function packet({ clock, pairer }, unit, at, provisional, final, after = 400, rxFirst = false) {
+  if (rxFirst) { pairer.rx(unit, provisional); pairer.lastUpdated(unit, at); } else { pairer.lastUpdated(unit, at); pairer.rx(unit, provisional); }
+  clock.endOfBatch();
+  if (final !== undefined) {
+    clock.advance(after);
+    pairer.rx(unit, final);
+    clock.endOfBatch();
+  }
+}
+
+test("two-write sequence: the sample uses the second (real) rxToWriteMs, not the first", () => {
+  const t = pairerWithClock();
+  packet(t, "C-095", 1000, 4, 480);
+  assert.deepEqual(t.samples, [{ unit: "C-095", at: 1000, v: 480 }]);
+});
+
+test("the provisional value is ignored whichever listener fires first within write 1", () => {
+  const t = pairerWithClock();
+  packet(t, "C-095", 1000, 3, 455, 400, true);
+  assert.deepEqual(t.samples, [{ unit: "C-095", at: 1000, v: 455 }]);
+});
+
+test(`no second write within ${RX_FINAL_WAIT_MS} ms: the event is skipped, never sampled with the first value`, () => {
+  const t = pairerWithClock();
+  packet(t, "C-095", 1000, 4);
+  t.clock.advance(RX_FINAL_WAIT_MS + 1);
+  assert.deepEqual(t.samples, []);
+  assert.equal(t.pairer.stats.skippedNoFinal, 1);
+  // A late write 2 after the wait doesn't revive it.
+  t.pairer.rx("C-095", 470);
+  assert.deepEqual(t.samples, []);
+});
+
+test("the wait is about 3 seconds: just inside is sampled, just outside is skipped", () => {
+  assert.equal(RX_FINAL_WAIT_MS, 3000);
+  const inside = pairerWithClock();
+  packet(inside, "C-095", 1000, 4, 2900, RX_FINAL_WAIT_MS - 1);
+  assert.equal(inside.samples.length, 1);
+  const outside = pairerWithClock();
+  packet(outside, "C-095", 1000, 4, 2900, RX_FINAL_WAIT_MS + 1);
+  assert.equal(outside.samples.length, 0);
+});
+
+test("a new event before the final value arrives: the old event is skipped, the new one gets its own", () => {
+  const t = pairerWithClock();
+  packet(t, "C-095", 1000, 4); // no write 2 yet
+  t.clock.advance(500);
+  packet(t, "C-095", 2000, 5, 510);
+  assert.deepEqual(t.samples, [{ unit: "C-095", at: 2000, v: 510 }]);
+  assert.equal(t.pairer.stats.skippedReplaced, 1);
+});
+
+test("curbs are paired independently", () => {
+  const t = pairerWithClock();
+  t.pairer.lastUpdated("C-095", 1000); t.pairer.rx("C-095", 4);
+  t.pairer.lastUpdated("C-201", 1100); t.pairer.rx("C-201", 6);
+  t.clock.endOfBatch();
+  t.clock.advance(300);
+  t.pairer.rx("C-201", 620); t.clock.endOfBatch();
+  t.clock.advance(100);
+  t.pairer.rx("C-095", 410); t.clock.endOfBatch();
+  assert.deepEqual(t.samples, [{ unit: "C-201", at: 1100, v: 620 }, { unit: "C-095", at: 1000, v: 410 }]);
+});
+
+test("a cleared or bad rxToWriteMs isn't taken as final; the next good one is", () => {
+  const t = pairerWithClock();
+  packet(t, "C-095", 1000, 4);
+  t.clock.advance(100);
+  for (const bad of [null, undefined, -5, NaN, "480"]) t.pairer.rx("C-095", bad);
+  t.pairer.rx("C-095", 480);
+  assert.deepEqual(t.samples, [{ unit: "C-095", at: 1000, v: 480 }]);
+});
+
+test("rxToWriteMs changes with no new lastUpdated (including the page-load value) make no sample", () => {
+  const t = pairerWithClock();
+  t.pairer.rx("C-095", 610); // baseline value when the listener attaches
+  t.clock.endOfBatch();
+  t.pairer.rx("C-095", 620);
+  assert.deepEqual(t.samples, []);
+});
+
+test("dispose cancels pending waits", () => {
+  const t = pairerWithClock();
+  packet(t, "C-095", 1000, 4);
+  t.pairer.dispose();
+  t.pairer.rx("C-095", 480);
+  t.clock.advance(RX_FINAL_WAIT_MS * 2);
+  assert.deepEqual(t.samples, []);
+});
+
+test("with real timers: write 1 then write 2 gives the second value", async () => {
+  const samples = [];
+  const pairer = createRxPairer({ onSample: (x) => samples.push(x), waitMs: 200 });
+  pairer.lastUpdated("C-095", 1000); pairer.rx("C-095", 4); // write 1, delivered together
+  await new Promise((r) => setTimeout(r, 20));
+  pairer.rx("C-095", 492); // write 2
+  assert.deepEqual(samples, [{ unit: "C-095", at: 1000, v: 492 }]);
+  pairer.lastUpdated("C-095", 2000); pairer.rx("C-095", 4);
+  await new Promise((r) => setTimeout(r, 260)); // no write 2 in time
+  assert.equal(samples.length, 1);
+  pairer.dispose();
+});
+
+test("the reported case: five packets no longer give a 4 ms median", () => {
+  const t = pairerWithClock();
+  const finals = [430, 512, 468, 501, 455];
+  finals.forEach((v, i) => { packet(t, "C-095", 1000 + i * 10000, 4, v); t.clock.advance(9000); });
+  const s = summarize(t.samples.map((x) => x.v));
+  assert.equal(s.count, 5);
+  assert.equal(s.median, 468);
+  assert.ok(t.samples.every((x) => x.v > 100), "no provisional value was sampled");
 });

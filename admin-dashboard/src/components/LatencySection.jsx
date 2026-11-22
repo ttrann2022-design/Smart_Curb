@@ -7,7 +7,7 @@ import useWidth from "../useWidth";
 import { Button, Chips, Notice } from "./ui";
 import {
   MIN_SAMPLES, WINDOW_MS, WINDOW_MAX, isMs, summarize,
-  deliveryDelay, deliveryStageVerdict, sumOfMedians, stagePoints,
+  deliveryDelay, deliveryStageVerdict, sumOfMedians, stagePoints, createRxPairer,
 } from "../analytics/latencyStats";
 import { CURB_TO_RECEIVER_BENCHMARK as BENCH } from "../analytics/latencyBenchmarks";
 
@@ -15,11 +15,14 @@ import { CURB_TO_RECEIVER_BENCHMARK as BENCH } from "../analytics/latencyBenchma
 //   curb -> LoRa -> Receiver -> Firebase RTDB -> this dashboard
 //
 // Live:
-//   Curb to Receiver       Benchmark (Brad's event-age tests, analytics/latencyBenchmarks.js).
-//   Receiver to Firebase   Measured. The Receiver writes rxToWriteMs (receive the LoRa packet
-//                          -> finish the Firebase write) on units/<id> with each lastUpdated.
-//                          One sample per new lastUpdated while this page is open, plus any
-//                          history under latency/<unitId>/<sampleId> from the last hour.
+//   Curb to Receiver       Benchmark, simulated: Brad's 10/30 event-age report, run in the
+//                          simulator, not on the curbs (analytics/latencyBenchmarks.js).
+//   Receiver to Firebase   Measured. The Receiver writes rxToWriteMs on units/<id> twice per
+//                          packet: a provisional value with lastUpdated, then the real
+//                          receive-to-write time once the write completes. One sample per new
+//                          lastUpdated while this page is open, using that second value (up to
+//                          3 s later, else skipped: createRxPairer), plus any history under
+//                          latency/<unitId>/<sampleId> from the last hour.
 //   Firebase to dashboard  Measured in this browser: server-corrected time when a curb's
 //                          lastUpdated listener fires, minus that lastUpdated. Memory only.
 // Simulation: every stage comes from the simulator's samples in demo/latency, Firebase to
@@ -34,7 +37,8 @@ import { CURB_TO_RECEIVER_BENCHMARK as BENCH } from "../analytics/latencyBenchma
 
 const SOURCE = {
   measured: { label: "Measured · live data", cls: "lt-src lt-src-measured" },
-  benchmark: { label: "Benchmark · measured by Brad", cls: "lt-src lt-src-bench" },
+  // Brad's event-age numbers were run in the simulator, not on the curbs: never "measured".
+  benchmark: { label: "Benchmark · simulated, from Brad's report", cls: "lt-src lt-src-bench" },
   simulated: { label: "Simulated", cls: "lt-src lt-sim" },
 };
 
@@ -144,8 +148,9 @@ function StageCard({ stage, delay }) {
           <div className="lt-median"><span className="sws-mono">{fmtMs(st.median)}</span> <small>median</small></div>
           <dl className="lt-stats">
             <div><dt>p95</dt><dd className="sws-mono">{fmtMs(st.p95)}</dd></div>
+            {isMs(stage.slowest) && <div><dt>Slowest</dt><dd className="sws-mono">{fmtMs(stage.slowest)}</dd></div>}
             <div><dt>Samples</dt><dd className="sws-mono">{st.count}</dd></div>
-            {stage.when && <div><dt>Measured</dt><dd>{stage.when}</dd></div>}
+            {stage.from && <div><dt>From</dt><dd>{stage.from}</dd></div>}
           </dl>
           {stage.chart?.length > 0 && <LegChart points={stage.chart} label={`${SOURCE[stage.source].label}: ${stage.label}`} />}
         </>
@@ -168,8 +173,7 @@ function LatencySection({ mode, units, delay = 0 }) {
   const offset = useRef(0); // for listeners (no re-render needed)
   const [offsetMs, setOffsetMs] = useState(0); // for render
   const seen = useRef({}); // unit -> last lastUpdated seen (the baseline is never a sample)
-  const rx = useRef({}); // unit -> latest rxToWriteMs on the unit record
-  const [observed, setObserved] = useState([]); // rxToWriteMs paired with each new lastUpdated
+  const [observed, setObserved] = useState([]); // each event's final rxToWriteMs (see createRxPairer)
   const [delivery, setDelivery] = useState([]); // Firebase-to-dashboard delays
   const [history, setHistory] = useState({}); // unit -> latency/<unit> samples in the window
   const [historyError, setHistoryError] = useState(false);
@@ -186,8 +190,10 @@ function LatencySection({ mode, units, delay = 0 }) {
   useEffect(() => {
     const ids = unitKey ? unitKey.split("|") : [];
     const keep = (list) => list.slice(-WINDOW_MAX * 2);
+    // The Receiver writes rxToWriteMs twice per packet; only the second is the latency.
+    const pairer = createRxPairer({ onSample: (sample) => setObserved((list) => keep([...list, sample])) });
     const stops = ids.flatMap((id) => [
-      onValue(ref(database, dataPath(`units/${id}/rxToWriteMs`)), (snap) => { rx.current[id] = snap.val(); }, () => {}),
+      onValue(ref(database, dataPath(`units/${id}/rxToWriteMs`)), (snap) => pairer.rx(id, snap.val()), () => {}),
       onValue(ref(database, dataPath(`units/${id}/lastUpdated`)), (snap) => {
         // Time this listener fired, before anything else runs.
         const firedAt = Date.now();
@@ -199,11 +205,8 @@ function LatencySection({ mode, units, delay = 0 }) {
         // In Simulation this stage comes from the samples: the simulator stamps lastUpdated with
         // this browser's clock, so timing it here would only measure the clock gap.
         if (d !== null && !sim) setDelivery((list) => keep([...list, { unit: id, at: firedAt + offset.current, v: d }]));
-        // rxToWriteMs arrives in the same write; read it once this event's listeners have run.
-        setTimeout(() => {
-          const v = rx.current[id];
-          if (isMs(v)) setObserved((list) => keep([...list, { unit: id, at: lu, v }]));
-        }, 0);
+        // Wait for this event's final rxToWriteMs (the Receiver's second write).
+        pairer.lastUpdated(id, lu);
       }, () => {}),
       onValue(
         sim
@@ -213,7 +216,7 @@ function LatencySection({ mode, units, delay = 0 }) {
         () => setHistoryError(true),
       ),
     ]);
-    return () => stops.forEach((stop) => stop());
+    return () => { stops.forEach((stop) => stop()); pairer.dispose(); };
   }, [unitKey, sim]);
 
   // Only curbs still in scope count.
@@ -235,7 +238,7 @@ function LatencySection({ mode, units, delay = 0 }) {
   const stages = [
     sim
       ? { id: "age", label: "Curb to Receiver", source: "simulated", note: "Event age: how old the curb's event was when the Receiver got the LoRa packet.", points: ageSimPoints, waiting: "Start the simulation on the Simulation page." }
-      : { id: "age", label: "Curb to Receiver", source: "benchmark", note: "Event age: how old the curb's event is when the Receiver gets the LoRa packet. From Brad's bench tests, not live data.", stats: benchStats, pending: benchPending, when: BENCH.measured || null },
+      : { id: "age", label: "Curb to Receiver", source: "benchmark", note: "Event age: how old the curb's event is when the Receiver gets the LoRa packet. Run in the simulator, not on the curbs, and not live data.", stats: benchStats, pending: benchPending, slowest: BENCH.slowestMs, from: BENCH.report || null },
     { id: "rx", label: "Receiver to Firebase", source: sim ? "simulated" : "measured", note: "From the Receiver getting the LoRa packet to finishing its Firebase write.", points: rxPoints, waiting: sim ? "Start the simulation on the Simulation page." : "A sample arrives each time a curb reports." },
     sim
       ? { id: "fb", label: "Firebase to dashboard", source: "simulated", note: "From a write to this page's listener firing, as the simulator models it.", points: deliveryPoints, waiting: "Load fresh simulated data or start the simulation on the Simulation page." }
@@ -277,7 +280,7 @@ function LatencySection({ mode, units, delay = 0 }) {
       <p className="an-sub">
         {sim
           ? "Simulated by the simulator so you can see how this card behaves. None of these numbers are measurements of real hardware."
-          : "How long a curb event takes to reach this dashboard, stage by stage. Each number says where it comes from: measured from live data, or a benchmark from Brad's tests."}
+          : "How long a curb event takes to reach this dashboard, stage by stage. Each number says where it comes from: measured from live data, or a simulated benchmark from Brad's report."}
       </p>
 
       {sim && stoppedAt !== null && (
@@ -305,7 +308,7 @@ function LatencySection({ mode, units, delay = 0 }) {
           )}
           <p className="lt-leg-note">
             {total.value !== null
-              ? `Adds each stage's median${sim ? "" : ", mixing a benchmark with live measurements"}. It is not a measured end-to-end time, and medians don't add up to the median of a whole trip.`
+              ? `Adds each stage's median${sim ? "" : ", mixing a simulated benchmark with live measurements"}. It is not a measured end-to-end time, and medians don't add up to the median of a whole trip.`
               : `Needs a median for every stage. Missing: ${total.missing.join(", ")}.`}
           </p>
         </div>
