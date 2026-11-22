@@ -153,6 +153,72 @@ export function stagePoints({ sim, history, observed = [], delivery = [], now })
   };
 }
 
+// ---------- Receiver to Firebase: which rxToWriteMs belongs to an event ----------
+//
+// The Receiver writes rxToWriteMs twice per packet:
+//   1. in the updateNode batch, together with lastUpdated: the time elapsed BEFORE that
+//      write completed (a few ms, not the latency)
+//   2. a moment later, on its own (Firebase.setInt): the real receive-to-write time
+// So the value that arrives with a new lastUpdated is never used. The pairer waits up to
+// RX_FINAL_WAIT_MS for the next change to rxToWriteMs on that curb and samples that one;
+// if none arrives, or another event starts first, the event is skipped rather than
+// sampled with the provisional value.
+export const RX_FINAL_WAIT_MS = 3000;
+
+// createRxPairer({ onSample, waitMs, setTimer, clearTimer, defer })
+//   lastUpdated(unit, at)  call when a curb's lastUpdated changes (not for the baseline)
+//   rx(unit, value)        call whenever a curb's rxToWriteMs listener fires
+//   dispose()              cancel every pending wait
+// onSample({ unit, at, v }) gets each event's final value. Timers are injectable for tests.
+// `defer` runs once the current batch of listener events has been delivered: Firebase
+// delivers one write's changes together, so an rxToWriteMs change seen before then came
+// in the same write as lastUpdated (write 1) and is not the final value.
+export function createRxPairer({
+  onSample,
+  waitMs = RX_FINAL_WAIT_MS,
+  setTimer = (fn, ms) => setTimeout(fn, ms),
+  clearTimer = (t) => clearTimeout(t),
+  defer = (fn) => setTimeout(fn, 0),
+} = {}) {
+  const pending = new Map(); // unit -> { at, armed, timer }
+  const stats = { sampled: 0, skippedNoFinal: 0, skippedReplaced: 0 };
+
+  const drop = (unit) => {
+    const p = pending.get(unit);
+    if (p?.timer !== undefined) clearTimer(p.timer);
+    pending.delete(unit);
+  };
+
+  return {
+    stats,
+    lastUpdated(unit, at) {
+      if (pending.has(unit)) { drop(unit); stats.skippedReplaced += 1; } // the last event never got its final value
+      const p = { at, armed: false, timer: undefined };
+      pending.set(unit, p);
+      defer(() => {
+        if (pending.get(unit) !== p) return;
+        p.armed = true;
+        p.timer = setTimer(() => {
+          if (pending.get(unit) !== p) return;
+          pending.delete(unit);
+          stats.skippedNoFinal += 1;
+        }, waitMs);
+      });
+    },
+    rx(unit, value) {
+      const p = pending.get(unit);
+      if (!p || !p.armed) return; // no event waiting, or this value came with lastUpdated (write 1)
+      if (!isMs(value)) return; // a cleared or bad value isn't the final one: keep waiting
+      drop(unit);
+      stats.sampled += 1;
+      onSample?.({ unit, at: p.at, v: value });
+    },
+    dispose() {
+      for (const unit of [...pending.keys()]) drop(unit);
+    },
+  };
+}
+
 // Total of the stage medians. It is a sum of separate medians, not a measured
 // end-to-end time, and it only exists when every stage has a median.
 export function sumOfMedians(stages) {
