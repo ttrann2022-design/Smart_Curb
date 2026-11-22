@@ -63,14 +63,27 @@ export function flattenLatency(tree, field) {
   return out;
 }
 
-// Firebase-to-dashboard delay for one write: server-corrected "now" when the listener
-// fired, minus the write's timestamp. `offset` is .info/serverTimeOffset. A small
-// negative result (clock jitter) counts as 0; a clearly negative one is unusable.
+// Firebase-to-dashboard delay for one write, RAW: server-corrected "now" when the
+// listener fired (firedAt + .info/serverTimeOffset) minus the write's timestamp.
+// It is not clamped or rounded, so it can be negative: see deliveryVerdict.
 export function deliveryDelay(writtenAt, firedAt, offset) {
   if (!isMs(writtenAt) || typeof firedAt !== "number" || !Number.isFinite(firedAt)) return null;
-  const d = firedAt + (Number.isFinite(offset) ? offset : 0) - writtenAt;
-  if (d < -1000) return null;
-  return Math.max(0, d);
+  return firedAt + (Number.isFinite(offset) ? offset : 0) - writtenAt;
+}
+
+// Whether raw Firebase-to-dashboard delays can be shown at all. A real delay is never
+// negative. lastUpdated is Firebase's server timestamp (the Receiver writes it with
+// Firebase.setTimestamp), so a negative raw value means the delay is below the accuracy
+// of this browser's clock estimate: .info/serverTimeOffset ignores network travel time.
+// Then no number is honest: the stage says "Not measurable here" instead of clamping
+// to 0. Returns
+//   { measurable: true }  or
+//   { measurable: false, negative, count, min, max }   (min/max of the raw values, ms)
+export function deliveryVerdict(raws) {
+  const vals = (Array.isArray(raws) ? raws : []).filter((v) => typeof v === "number" && Number.isFinite(v));
+  const negative = vals.filter((v) => v < 0).length;
+  if (!negative) return { measurable: true };
+  return { measurable: false, negative, count: vals.length, min: Math.min(...vals), max: Math.max(...vals) };
 }
 
 // Total of the stage medians. It is a sum of separate medians, not a measured

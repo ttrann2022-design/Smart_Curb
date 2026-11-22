@@ -7,7 +7,7 @@ import useWidth from "../useWidth";
 import { Button, Chips, Notice } from "./ui";
 import {
   MIN_SAMPLES, WINDOW_MS, WINDOW_MAX, isMs, summarize, recentWindow, mergeSamples,
-  flattenLatency, deliveryDelay, sumOfMedians,
+  flattenLatency, deliveryDelay, deliveryVerdict, sumOfMedians,
 } from "../analytics/latencyStats";
 import { CURB_TO_RECEIVER_BENCHMARK as BENCH } from "../analytics/latencyBenchmarks";
 
@@ -40,6 +40,8 @@ const CHART_KEEP = 100;
 const TABLE_ROWS = 8;
 
 const fmtMs = (v) => (v == null ? "n/a" : v < 1000 ? `${Math.round(v)} ms` : `${(v / 1000).toFixed(v < 10000 ? 2 : 1)} s`);
+// Raw values can be negative: show a real minus sign.
+const fmtSigned = (v) => (v < 0 ? `−${fmtMs(-v)}` : fmtMs(v));
 const fmtTick = (v) => (v > 0 && v < 10 && v % 1 ? `${v.toFixed(1)} ms` : fmtMs(v));
 const fmtTime = (t) => (isMs(t) ? new Date(t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" }) : null);
 
@@ -120,7 +122,17 @@ function StageCard({ stage, delay }) {
         <SourceTag source={stage.source} />
       </div>
       <p className="lt-leg-note">{stage.note}</p>
-      {stage.pending ? (
+      {stage.unmeasurable ? (
+        <>
+          <div className="lt-empty">Not measurable here</div>
+          <p className="lt-leg-note">
+            {stage.unmeasurable.negative} of {stage.unmeasurable.count} readings arrived before the time they say they were written
+            (raw {fmtSigned(stage.unmeasurable.min)} to {fmtSigned(stage.unmeasurable.max)}). A real delay can't be negative: the delay is
+            below the accuracy of this browser's estimate of Firebase's clock, which ignores network travel time. No number here would
+            be honest.
+          </p>
+        </>
+      ) : stage.pending ? (
         <>
           <div className="lt-empty">Benchmark pending</div>
           <p className="lt-leg-note">Brad's event-age numbers haven't been added yet (src/analytics/latencyBenchmarks.js).</p>
@@ -222,13 +234,23 @@ function LatencySection({ mode, units, delay = 0 }) {
       : { id: "age", label: "Curb to Receiver", source: "benchmark", note: "Event age: how old the curb's event is when the Receiver gets the LoRa packet. From Brad's bench tests, not live data.", stats: benchStats, pending: benchPending, when: BENCH.measured || null },
     { id: "rx", label: "Receiver to Firebase", source: sim ? "simulated" : "measured", note: "From the Receiver getting the LoRa packet to finishing its Firebase write.", points: rxPoints, waiting: sim ? "Start the simulation on the Simulation page." : "A sample arrives each time a curb reports." },
     { id: "fb", label: "Firebase to dashboard", source: sim ? "simulated" : "measured", note: "From the write's timestamp to this page's listener firing, corrected for this browser's clock. Not stored.", points: deliveryPoints, waiting: "Counted while this page is open, each time a curb reports." },
-  ].map((s) => (s.points ? { ...s, stats: summarize(s.points.map((p) => p.v)), chart: s.points.slice(-CHART_KEEP) } : s));
+  ].map((s) => (s.points ? { ...s, stats: summarize(s.points.map((p) => p.v)), chart: s.points.slice(-CHART_KEEP) } : s))
+    // Firebase to dashboard keeps raw values. If any is negative the stage can't be measured:
+    // say so instead of showing a clamped 0 (see deliveryVerdict).
+    .map((s) => {
+      if (s.id !== "fb") return s;
+      const verdict = deliveryVerdict(s.points.map((p) => p.v));
+      return verdict.measurable ? s : { ...s, unmeasurable: verdict, chart: [] };
+    });
 
-  const total = sumOfMedians(stages.map((s) => ({ label: s.label, median: s.pending || !s.stats?.enough ? null : s.stats.median })));
+  const total = sumOfMedians(stages.map((s) => ({
+    label: s.unmeasurable ? `${s.label} (not measurable here)` : s.label,
+    median: s.pending || s.unmeasurable || !s.stats?.enough ? null : s.stats.median,
+  })));
   const sources = [...new Set(stages.map((s) => s.source))];
 
   // Per-curb table for the stages measured per curb.
-  const tableStages = stages.filter((s) => s.points);
+  const tableStages = stages.filter((s) => s.points && !s.unmeasurable);
   const tableStage = tableStages.find((s) => s.id === leg) || tableStages[0];
   const tableUnits = [...new Set(tableStage.points.map((p) => p.unit))];
   const tableRows = tableUnits

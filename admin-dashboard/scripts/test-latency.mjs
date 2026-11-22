@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   MIN_SAMPLES, WINDOW_MS, WINDOW_MAX, isMs, summarize, recentWindow, mergeSamples,
-  flattenLatency, deliveryDelay, sumOfMedians,
+  flattenLatency, deliveryDelay, deliveryVerdict, sumOfMedians,
 } from "../src/analytics/latencyStats.js";
 import { CURB_TO_RECEIVER_BENCHMARK } from "../src/analytics/latencyBenchmarks.js";
 
@@ -118,12 +118,53 @@ test("deliveryDelay corrects the browser clock with .info/serverTimeOffset", () 
   assert.equal(deliveryDelay(10000, 10200, undefined), 200); // offset not loaded yet
 });
 
-test("deliveryDelay clamps small negative jitter to 0 and rejects clearly bad times", () => {
-  assert.equal(deliveryDelay(10000, 9800, 0), 0); // 200 ms early: jitter
-  assert.equal(deliveryDelay(10000, 5000, 0), null); // 5 s in the future: unusable
+test("deliveryDelay returns the raw value: negatives are kept, never clamped to 0 or dropped", () => {
+  assert.equal(deliveryDelay(10000, 9800, 0), -200);
+  assert.equal(deliveryDelay(10000, 5000, 0), -5000);
+  assert.equal(deliveryDelay(10000, 10000.4, 0), 10000.4 - 10000); // not rounded
   assert.equal(deliveryDelay(undefined, 10000, 0), null);
   assert.equal(deliveryDelay("10000", 10000, 0), null);
   assert.equal(deliveryDelay(10000, NaN, 0), null);
+});
+
+test("the offset sign: a browser clock behind the server has a positive offset, which is added", () => {
+  // .info/serverTimeOffset: server time ≈ Date.now() + offset.
+  const serverWrote = 1_000_000;
+  const trueDelay = 120;
+  const browserBehindBy = 300; // browser reads 300 ms less than the server
+  const firedAt = serverWrote + trueDelay - browserBehindBy;
+  assert.equal(deliveryDelay(serverWrote, firedAt, +browserBehindBy), trueDelay);
+  // The wrong sign would turn a 120 ms delay into a negative one.
+  assert.notEqual(deliveryDelay(serverWrote, firedAt, -browserBehindBy), trueDelay);
+});
+
+// ---------- is Firebase-to-dashboard measurable? ----------
+test("all raw delays >= 0: measurable", () => {
+  assert.deepEqual(deliveryVerdict([0, 12, 340, 95.5]), { measurable: true });
+  assert.deepEqual(deliveryVerdict([]), { measurable: true }); // no data is "not enough data", not "not measurable"
+});
+
+test("any negative raw delay: not measurable, with the count and the raw range", () => {
+  assert.deepEqual(deliveryVerdict([120, -40, 80]), { measurable: false, negative: 1, count: 3, min: -40, max: 120 });
+});
+
+test("a run like the reported one: 19 negative readings the old clamp showed as exactly 0 ms", () => {
+  // Illustrative values: no live curb reported while it was being investigated. With n = 19
+  // the nearest-rank p95 is the largest value, so p95 = 0 meant every raw value was <= 0.
+  const raw = [-312, -280, -455, -90, -130, -201, -377, -64, -510, -233, -298, -145, -402, -176, -88, -260, -341, -119, -222];
+  assert.equal(raw.length, 19);
+  // Before: every value clamped to 0, so median 0 ms and p95 0 ms.
+  assert.deepEqual(summarize(raw.map((v) => Math.max(0, v))), { count: 19, enough: true, median: 0, p95: 0 });
+  // Now: the stage says it can't be measured instead.
+  const v = deliveryVerdict(raw);
+  assert.equal(v.measurable, false);
+  assert.equal(v.negative, 19);
+  assert.equal(v.min, -510);
+  assert.equal(v.max, -64);
+});
+
+test("non-numbers are ignored by the verdict", () => {
+  assert.deepEqual(deliveryVerdict([10, null, undefined, NaN, "5"]), { measurable: true });
 });
 
 // ---------- total ----------
