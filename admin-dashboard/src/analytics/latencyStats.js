@@ -86,6 +86,73 @@ export function deliveryVerdict(raws) {
   return { measurable: false, negative, count: vals.length, min: Math.min(...vals), max: Math.max(...vals) };
 }
 
+// The newest usable `at` among the samples, or null.
+export function newestAt(samples) {
+  let newest = null;
+  for (const x of Array.isArray(samples) ? samples : []) if (x && isMs(x.at) && (newest === null || x.at > newest)) newest = x.at;
+  return newest;
+}
+
+// A simulation counts as stopped once its newest sample is older than this.
+export const SIM_STALE_MS = 2 * 60 * 1000;
+
+// A simulated Firebase-to-dashboard delay for a sample without one: 60 to 200 ms, and
+// always the same for the same curb and time, so the card doesn't flicker.
+export function simulatedDeliveryMs(unit, at) {
+  let h = 2166136261;
+  for (const ch of `${unit}|${at}`) h = Math.imul(h ^ ch.charCodeAt(0), 16777619);
+  return 60 + ((h >>> 0) % 141);
+}
+
+// Whether the Firebase-to-dashboard stage is shown as "Not measurable here": Live only.
+// Live values are raw browser measurements (see deliveryVerdict). Simulated values are the
+// simulator's own, never timed against this browser's clock, so the verdict doesn't apply.
+// Returns null when the stage shows its numbers, else deliveryVerdict's result.
+export function deliveryStageVerdict({ sim, points }) {
+  if (sim) return null;
+  const verdict = deliveryVerdict((points || []).map((p) => p.v));
+  return verdict.measurable ? null : verdict;
+}
+
+// The points behind each measured stage, by curb, for the card.
+//   history   latency/<unitId> trees in scope (Live) or demo/latency (Simulation)
+//   observed  rxToWriteMs seen on unit records while the page is open (Live)
+//   delivery  Firebase-to-dashboard delays measured in this browser (Live)
+//   now       server-corrected time
+// Live: the last hour up to now; Firebase to dashboard is measured in this browser.
+// Simulation: every stage comes from the simulator's samples, Firebase to dashboard
+// included (deliveryMs: timing simulated writes here would compare this browser's clock
+// with itself). The hour ends at the newest simulated sample, not now, so a simulation
+// that stopped (leaving Simulation stops it) still shows its last numbers. `stoppedAt`
+// is that newest time when it's more than SIM_STALE_MS old, so the card can say so.
+export function stagePoints({ sim, history, observed = [], delivery = [], now }) {
+  if (!sim) {
+    const win = (list) => recentWindow(list, now);
+    return {
+      age: [],
+      rx: win(mergeSamples(flattenLatency(history, "rxToWriteMs"), observed)),
+      fb: win(delivery),
+      stoppedAt: null,
+    };
+  }
+  const age = flattenLatency(history, "eventAgeMs");
+  const rx = flattenLatency(history, "rxToWriteMs");
+  // Every simulated sample gets a Firebase-to-dashboard value: its own deliveryMs, or a
+  // stand-in for samples the simulator wrote before it added that field.
+  const given = new Map(flattenLatency(history, "deliveryMs").map((p) => [`${p.unit}|${p.at}`, p]));
+  const fb = flattenLatency(history, "lastUpdated")
+    .map((p) => given.get(`${p.unit}|${p.at}`) || { unit: p.unit, at: p.at, v: simulatedDeliveryMs(p.unit, p.at) });
+  const newest = newestAt([...age, ...rx, ...fb]);
+  const end = newest === null ? now : Math.min(newest, now);
+  const win = (list) => recentWindow(list, end);
+  return {
+    age: win(age),
+    rx: win(rx),
+    fb: win(fb),
+    stoppedAt: newest !== null && now - newest > SIM_STALE_MS ? newest : null,
+  };
+}
+
 // Total of the stage medians. It is a sum of separate medians, not a measured
 // end-to-end time, and it only exists when every stage has a median.
 export function sumOfMedians(stages) {
