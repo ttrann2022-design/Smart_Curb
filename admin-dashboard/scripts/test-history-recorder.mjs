@@ -191,3 +191,85 @@ test("the key must exist and live outside the repo", () => {
 test("local slots used by the recorder match the unit-tested helper", () => {
   assert.equal(localSlot(Date.parse("2026-11-20T15:20:00Z"), "America/New_York").slot, 3);
 });
+
+// ---------- The allowlist (--units / RECORD_UNITS) ----------
+// Like the live database: four curbs with online: true set by hand and no lastUpdated
+// (nothing reports for them), and two real ones.
+const LIVE_LIKE = {
+  "C-001": { lot: "lot14", online: true, occupied: false },
+  "C-042": { lot: "lot14", online: true, occupied: true },
+  "C-077": { lot: "lot14", online: true, occupied: true },
+  "C-118": { lot: "garage2", online: true, occupied: true },
+  "C-095": { lot: "lot14", online: true, occupied: false, lastUpdated: 1795302468248 },
+  "C-201": { lot: "broward1", online: true, occupied: true, lastUpdated: 1795320791561 },
+};
+
+async function withRecorder(onlyUnits, fn) {
+  recorder?.stop();
+  await rest("PUT", "", { units: LIVE_LIKE });
+  const logs = [];
+  const r = createRecorder({ db, listKeys, env: { HISTORY_TIMEZONE: "America/New_York" }, onlyUnits, log: (m) => logs.push(m) });
+  try {
+    const refreshed = await r.refresh();
+    assert.ok(await r.ready());
+    await fn(r, refreshed, logs);
+  } finally {
+    r.stop();
+  }
+}
+
+test("without an allowlist every curb in units/ counts (unchanged behaviour)", async () => {
+  await withRecorder(null, async (r, { curbs }) => {
+    assert.equal(curbs, 6);
+    assert.equal((await r.tick()).pct, 67); // 4 of 6 occupied
+  });
+});
+
+test("with an allowlist only the named curbs count", async () => {
+  await withRecorder(["C-095", "C-201"], async (r, { curbs, missing }) => {
+    assert.equal(curbs, 2);
+    assert.deepEqual(missing, []);
+    assert.equal((await r.tick()).pct, 50); // C-201 occupied, C-095 free
+  });
+});
+
+test("with an allowlist the other curbs are never watched", async () => {
+  await withRecorder(["C-095", "C-201"], async (r) => {
+    assert.deepEqual(Object.keys(r.units).sort(), ["C-095", "C-201"]);
+    // A change to an unlisted curb changes nothing.
+    await rest("PATCH", "units/C-001", { occupied: true });
+    await sleep(300);
+    assert.equal((await r.tick()).pct, 50);
+  });
+});
+
+test("an allowlisted ID that isn't in units/ is logged once and not counted", async () => {
+  await withRecorder(["C-095", "C-999"], async (r, { curbs, missing }, logs) => {
+    assert.equal(curbs, 1);
+    assert.deepEqual(missing, ["C-999"]);
+    assert.equal(logs.filter((m) => m.includes("C-999")).length, 1);
+    await r.refresh();
+    assert.equal(logs.filter((m) => m.includes("C-999")).length, 1, "not repeated on every refresh");
+    assert.equal((await r.tick()).pct, 0); // only C-095, which is free
+  });
+});
+
+test("an allowlisted curb that appears later is picked up on refresh", async () => {
+  await withRecorder(["C-095", "C-300"], async (r) => {
+    await rest("PUT", "units/C-300", { lot: "lot14", online: true, occupied: true });
+    const { curbs, missing } = await r.refresh();
+    assert.equal(curbs, 2);
+    assert.deepEqual(missing, []);
+    await r.ready();
+    assert.equal((await r.tick()).pct, 50);
+  });
+});
+
+test("if every allowlisted curb is offline the tick is skipped, even with unlisted curbs online", async () => {
+  await withRecorder(["C-095", "C-201"], async (r) => {
+    await rest("PATCH", "units", { "C-095/online": false, "C-201/online": false });
+    await sleep(300);
+    assert.deepEqual(await r.tick(), { skipped: true });
+    assert.equal(await rest("GET", "history/live"), null);
+  });
+});

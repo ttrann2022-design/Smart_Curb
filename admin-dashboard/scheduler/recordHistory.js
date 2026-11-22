@@ -23,6 +23,8 @@
 //   HISTORY_TIMEZONE                           time zone for the week (default: see pickTimezone)
 //   HISTORY_SITE_ID                            take the time zone from schedules/<id>/settings
 //   HISTORY_DATABASE_URL                       database URL (default: this project's)
+//   RECORD_UNITS / --units C-095,C-201         count only these curbs (the flag wins); without
+//                                              either, every curb in units/ counts
 import { existsSync } from "node:fs";
 import { resolve, relative, isAbsolute } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -30,7 +32,7 @@ import { initializeApp, applicationDefault, deleteApp } from "firebase-admin/app
 import { getDatabase, ServerValue } from "firebase-admin/database";
 import {
   DEFAULT_INTERVAL_MS, LIVE_KEEP, addDays, addToCell, keysToTrim, localSlot, percentFull,
-  pickTimezone, rollingWeek, staleDates,
+  pickTimezone, rollingWeek, staleDates, unitsOption,
 } from "./history.js";
 
 export const DEFAULT_DATABASE_URL = "https://smartcurb-d174e-default-rtdb.firebaseio.com";
@@ -62,12 +64,14 @@ export function shallowKeys({ databaseURL, emulatorHost, credential }) {
 
 // The recorder, given a database and a way to list keys. Timers are left to main(), so
 // tests can call refresh() and tick() directly.
-export function createRecorder({ db, listKeys, env = {}, log = () => {} }) {
+// onlyUnits: curb IDs to count (the allowlist), or null to count every curb.
+export function createRecorder({ db, listKeys, env = {}, onlyUnits = null, log = () => {} }) {
   const units = {}; // unitId -> { online, occupied }, from two small listeners each
   const listeners = new Map(); // unitId -> unsubscribe
   let tz = null;
   let tzSource = "";
   let lastWeekJson = null;
+  let lastMissing = "";
   let lastPrune = 0;
   let offset = 0;
   const offsetRef = db.ref(".info/serverTimeOffset");
@@ -86,8 +90,15 @@ export function createRecorder({ db, listKeys, env = {}, log = () => {} }) {
   }
 
   // Curb IDs (shallow) and the time zone. New curbs get listeners; removed ones lose them.
+  // With an allowlist, only the listed curbs that exist are watched; the rest never are.
   async function refresh() {
-    const ids = new Set(await listKeys("units"));
+    const all = await listKeys("units");
+    const ids = new Set(onlyUnits ? onlyUnits.filter((id) => all.includes(id)) : all);
+    const missing = onlyUnits ? onlyUnits.filter((id) => !all.includes(id)) : [];
+    if (missing.join(",") !== lastMissing) {
+      if (missing.length) log(`Not in units/, so not counted: ${missing.join(", ")}.`);
+      lastMissing = missing.join(",");
+    }
     for (const id of ids) if (!listeners.has(id)) watch(id);
     for (const [id, off] of listeners) {
       if (!ids.has(id)) { off(); listeners.delete(id); delete units[id]; }
@@ -102,7 +113,7 @@ export function createRecorder({ db, listKeys, env = {}, log = () => {} }) {
     if (picked.tz !== tz) log(`Time zone ${picked.tz} (${picked.source}).`);
     tz = picked.tz;
     tzSource = picked.source;
-    return { curbs: ids.size, tz, tzSource };
+    return { curbs: ids.size, missing, tz, tzSource };
   }
 
   // Wait until every watched curb has delivered its first online and occupied values.
@@ -196,6 +207,9 @@ async function main() {
   const seconds = Number(arg("--interval") ?? env.HISTORY_INTERVAL_SECONDS ?? DEFAULT_INTERVAL_MS / 1000);
   if (!Number.isFinite(seconds) || seconds < 5) { console.error("The interval must be at least 5 seconds."); process.exit(1); }
 
+  let only;
+  try { only = unitsOption(process.argv.slice(2), env); } catch (err) { console.error(err.message); process.exit(1); }
+
   let app;
   if (emulatorHost) {
     if (!/^(127\.0\.0\.1|localhost|\[::1\]):\d+$/.test(emulatorHost)) { console.error(`Refusing emulator host ${emulatorHost}: only a local emulator is allowed.`); process.exit(1); }
@@ -210,8 +224,11 @@ async function main() {
 
   const db = getDatabase(app);
   const listKeys = shallowKeys({ databaseURL, emulatorHost, credential: app.options.credential });
-  const recorder = createRecorder({ db, listKeys, env, log: (m) => console.log(`${new Date().toLocaleTimeString()}  ${m}`) });
+  const recorder = createRecorder({ db, listKeys, env, onlyUnits: only.units, log: (m) => console.log(`${new Date().toLocaleTimeString()}  ${m}`) });
 
+  console.log(only.units
+    ? `Counting only these curbs (from ${only.source}): ${only.units.join(", ")}.`
+    : "Counting every curb in units/ (no --units or RECORD_UNITS given).");
   const { curbs } = await recorder.refresh();
   console.log(`Watching ${curbs} curbs. A reading every ${seconds} s. Ctrl+C to stop.`);
   await recorder.ready();

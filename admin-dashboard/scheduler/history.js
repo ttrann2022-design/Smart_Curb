@@ -113,6 +113,33 @@ export function keysToTrim(keys, keep = LIVE_KEEP) {
   return sorted.length > keep ? sorted.slice(0, sorted.length - keep) : [];
 }
 
+// ---------- Which curbs count ----------
+
+// "C-095, C-201" -> ["C-095", "C-201"] (trimmed, duplicates dropped). Null or blank means
+// no allowlist: every curb counts. Database keys can't contain . # $ [ ] or /.
+export function parseUnitList(text) {
+  if (text === undefined || text === null || String(text).trim() === "") return null;
+  const ids = [...new Set(String(text).split(",").map((s) => s.trim()).filter(Boolean))];
+  const bad = ids.filter((id) => /[.#$[\]/]/.test(id));
+  if (bad.length) throw new Error(`Not a curb ID: ${bad.join(", ")}. Curb IDs can't contain . # $ [ ] or /.`);
+  return ids.length ? ids : null;
+}
+
+// The allowlist from --units (wins) or RECORD_UNITS. Returns { units, source }, where
+// units is null when neither is given (count every curb, the default).
+export function unitsOption(argv = [], env = {}) {
+  const i = argv.findIndex((a) => a === "--units" || a.startsWith("--units="));
+  if (i !== -1) {
+    const value = argv[i].includes("=") ? argv[i].slice("--units=".length) : argv[i + 1];
+    if (value === undefined || value.startsWith("--")) throw new Error("--units needs a list of curb IDs, like --units C-095,C-201");
+    const units = parseUnitList(value);
+    if (!units) throw new Error("--units needs a list of curb IDs, like --units C-095,C-201");
+    return { units, source: "--units" };
+  }
+  const units = parseUnitList(env.RECORD_UNITS);
+  return units ? { units, source: "RECORD_UNITS" } : { units: null, source: null };
+}
+
 // ---------- Time zone ----------
 
 // Which time zone the week uses:
