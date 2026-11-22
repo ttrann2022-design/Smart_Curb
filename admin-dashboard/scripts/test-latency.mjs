@@ -176,13 +176,32 @@ test("the total is the sum of the medians, and only when every stage has one", (
   assert.deepEqual(sumOfMedians([{ label: "A", median: 0 }]), { value: 0, missing: [] });
 });
 
-// ---------- Brad's benchmark placeholders ----------
-test("the benchmark is labelled as Brad's and stays TODO (null) until numbers are provided", () => {
+// ---------- Brad's Curb to Receiver benchmark (simulated) ----------
+test("the Curb to Receiver benchmark holds Brad's 10/30 report numbers", () => {
   const b = CURB_TO_RECEIVER_BENCHMARK;
-  assert.equal(b.measuredBy, "Brad");
-  for (const k of ["samples", "medianMs", "p95Ms"]) {
-    assert.ok(b[k] === null || (typeof b[k] === "number" && b[k] >= 0), `${k} must be null (TODO) or a number`);
-  }
+  assert.equal(b.by, "Brad");
+  assert.equal(b.samples, 50);
+  assert.equal(b.medianMs, 259);
+  assert.equal(b.p95Ms, 359);
+  assert.equal(b.slowestMs, 2530);
+  assert.match(b.report, /10\/30/);
+  // Enough samples for the card to show it, and the figures are in a sane order.
+  assert.ok(Number.isInteger(b.samples) && b.samples >= MIN_SAMPLES);
+  assert.ok(b.medianMs <= b.p95Ms && b.p95Ms <= b.slowestMs);
+});
+
+test("the benchmark is marked simulated, and the card never calls it measured or live", async () => {
+  assert.equal(CURB_TO_RECEIVER_BENCHMARK.source, "simulated");
+  const { readFile } = await import("node:fs/promises");
+  const card = await readFile(new URL("../src/components/LatencySection.jsx", import.meta.url), "utf8");
+  const badge = /benchmark: \{ label: "([^"]+)"/.exec(card)?.[1];
+  assert.equal(badge, "Benchmark · simulated, from Brad's report");
+  assert.doesNotMatch(badge, /measured|live/i);
+  const note = /id: "age", label: "Curb to Receiver", source: "benchmark", note: "([^"]+)"/.exec(card)?.[1];
+  assert.match(note, /Run in the simulator, not on the curbs/);
+  assert.doesNotMatch(note.replace("not live data", ""), /measured|live/i);
+  // The benchmark's date row used to be labelled "Measured".
+  assert.doesNotMatch(card, /<dt>Measured<\/dt>/);
 });
 
 // ---------- Simulation: every stage from the simulator's samples ----------
