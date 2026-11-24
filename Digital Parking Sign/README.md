@@ -1,37 +1,116 @@
-# Smart Curb — Integrated Live Map and Recommendations
 
-This version combines the previous parking-map prototype with the **existing** lot-recommendation algorithm. It is a standalone browser sign, not yet merged into the team's `admin-dashboard/src/pages/Sign.jsx`.
+# Smart Curb - Digital Parking Sign
 
-## Open in VS Code
+## Project Overview
 
-1. Extract the ZIP, then open the **digital-parking-sign** folder in VS Code.
-2. Open `index.html` using the **Live Server** VS Code extension (right-click > Open with Live Server).
-3. Click **Switch to demo mode** to see two example lots with colored dots and automatically changing recommendations.
-4. Click **Simulate curb change** to toggle a sample curb. Click **Return to live data** to attempt reading the team's Firebase.
-5. Press F11 in Chrome for full-screen presentation.
+The Smart Curb Digital Parking Sign is part of the Florida Atlantic University Senior Design project. The system provides drivers with parking availability, visual occupancy indicators, and intelligent parking recommendations to help reduce the time spent searching for available parking.
 
-## What is implemented
+The project currently includes two versions of the digital parking display.
 
-- Schematic parking lot map using **green available**, **red occupied**, **gray offline**, and **yellow unknown** dots.
-- Live, read-only Firebase Realtime Database listeners for `lots/` and `units/`.
-- Existing `scoring.js` recommendation heuristic that prefers lots with confirmed open spaces and lower occupancy. **Not A* routing or verified travel-distance recommendations.**
-- Simulation mode with 2 lots and 24 sample curb IDs each; demo controls never write to Firebase.
-- Optional `?site=SITE_ID` for live-site filtering.
+## Live Deployments
 
-## What still needs work
+| Version | Description | Website |
+|---|---|---|
+| Version 1.0 | Original Digital Parking Sign | [Launch V1.0](https://eloquent-biscuit-9e0096.netlify.app/) |
+| Version 2.0 | Multi-Location Digital Parking Sign | [Launch V2.0](https://stellular-chimera-494fda.netlify.app/) |
 
-- Confirm Firebase database rules and test physical curb -> receiver -> Firebase -> sign end-to-end.
-- Integrate this standalone UI into the team's React `Sign.jsx` page (not yet done).
-- Obtain a genuine lot image/site plan and coordinates to replace schematic grid with accurate aerial overlay.
-- Confirm real curb IDs and lot assignments. Unsensored spaces cannot truthfully show live occupancy.
-- Directional arrows, route recommendations and A* integration require verified routing/entrance information.
+## Version 1.0 - Original Parking Display
 
-## Files
+The original version provides a four-zone parking lot visualization with real-time occupancy monitoring and parking recommendations.
 
-- `index.html` — layout/styles
-- `app.js` — Firebase subscriptions, map UI, simulation and recommendation display
-- `scoring.js` — pure recommendation/status logic retained from previous prototype
-- `config.js` — public Firebase web app identifiers (never store admin secrets)
-- `test-scoring.mjs` — scoring logic tests (`node test-scoring.mjs`)
+### Features
 
-No Firebase database writes or rules changes are performed.
+- Four parking zones: A, B, C, and D
+- Firebase Realtime Database integration
+- Live parking occupancy monitoring
+- Intelligent parking zone recommendations
+- Simulated parking data through Demo Mode
+- Dynamic parking availability updates
+- Color-coded parking spaces
+
+## Version 2.0 - Multi-Location Parking Display
+
+Version 2.0 expands the original system to support multiple parking locations and custom parking lot layouts.
+
+### Features
+
+- Selectable parking locations
+- FAU-style parking layout
+- Broward Mall parking layout
+- Custom asphalt-style parking visualization
+- Dynamic parking recommendations
+- Individual parking space indicators
+- Parking availability totals
+- Simulated occupancy changes
+- Firebase integration for the FAU display
+
+The Broward Mall layout is based on the general arrangement of the actual property. Parking space locations and occupancy readings are simulated for demonstration purposes.
+
+## Parking Space Indicators
+
+| Color | Status |
+|---|---|
+| Green | Available |
+| Red | Occupied |
+| Gray | Sensor offline |
+| Yellow | Unknown status |
+
+## Recommendation Algorithm
+
+The parking recommendation algorithm evaluates parking availability across the displayed zones and recommends an area with available parking spaces.
+
+Recommendations are updated as occupancy information changes.
+
+## Technologies Used
+
+- HTML5
+- CSS3
+- JavaScript
+- Firebase Realtime Database
+- Node.js
+- GitHub
+- Netlify
+
+## File Structure
+
+Digital Parking Sign/
+- index.html
+- app.js
+- config.js
+- scoring.js
+- package.json
+- test-scoring.mjs
+- README.md
+- Version 2.0/
+  - index.html
+  - app.js
+  - config.js
+  - scoring.js
+  - package.json
+  - test-scoring.mjs
+
+## Testing
+
+The system includes automated tests for the parking recommendation logic.
+
+To run the tests, open a terminal in the desired version's directory and execute:
+
+    node test-scoring.mjs
+
+## Demo Mode
+
+Demo Mode allows the parking display to operate without requiring physical Smart Curb hardware.
+
+Users can simulate occupancy changes and observe how parking availability and recommendations respond.
+
+## Future Development
+
+- Additional real-world parking locations
+- Physical sensor mapping for Broward Mall
+- More detailed parking lot layouts
+- Distance-based parking recommendations
+- Integration with the Smart Curb navigation system
+- Expanded digital signage deployment
+
+
+

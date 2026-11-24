@@ -1,0 +1,2 @@
+// Availability-only heuristic: no geographic routing or traffic-time calculation.
+export function rankLots(lots,units){return Object.entries(lots||{}).map(([id,lot])=>{const a=Object.values(units||{}).filter(u=>u&&String(u.lot)===id);const available=a.filter(u=>u.online===true&&u.occupied===false).length;const occupied=a.filter(u=>u.online===true&&u.occupied===true).length;return {id,name:lot?.name||id,counts:{available,occupied},score:available};}).sort((a,b)=>b.score-a.score);}
