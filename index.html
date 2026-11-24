@@ -1,0 +1,599 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<title>Smart Curb | Live Parking Guidance</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<style>
+:root {
+  --bg: #050505;
+  --panel: #111110;
+  --surface: #1b1b19;
+  --line: #383832;
+  --text: #f2f1ea;
+  --muted: #8e8c82;
+  --green: #9bf04a;
+  --red: #ff4d3d;
+  --gray: #777770;
+  --yellow: #ffb020;
+  --asphalt: #303033;
+  --paint: #e2e2da;
+  --mono: 'IBM Plex Mono', monospace;
+  --sans: 'Archivo', Arial, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  padding: 24px 32px;
+  border-bottom: 1px solid var(--line);
+}
+
+h1 {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: clamp(22px, 2.8vw, 36px);
+  font-weight: 600;
+  letter-spacing: 1px;
+}
+
+.subtitle {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 2px;
+  margin-top: 9px;
+}
+
+#connection {
+  color: var(--green);
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: nowrap;
+  border: 1px solid var(--line);
+  padding: 12px 16px;
+  border-radius: 5px;
+}
+
+main {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 18px;
+  padding: 22px;
+  max-width: 1800px;
+  margin: auto;
+}
+
+aside, .map-panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 20px;
+  min-width: 0;
+}
+
+h2 {
+  margin: 0 0 20px;
+  font-family: var(--mono);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 1px;
+}
+
+/* RECOMMENDATION PANEL */
+
+.recommend {
+  background: #17220e;
+  border: 1px solid var(--green);
+  border-radius: 6px;
+  padding: 24px 14px;
+  text-align: center;
+}
+
+.recommend small {
+  color: #c1d3ad;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 1px;
+}
+
+#bestZone {
+  font-family: var(--mono);
+  font-size: clamp(27px, 3.3vw, 48px);
+  font-weight: 700;
+  color: var(--green);
+  margin: 18px 0 10px;
+}
+
+#bestCount {
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.arrow {
+  font-size: 56px;
+  line-height: 1.3;
+  color: var(--green);
+  margin-top: 12px;
+}
+
+.zone-list {
+  display: grid;
+  gap: 9px;
+  margin-top: 20px;
+}
+
+.zone-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 15px 13px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+.zone-row.selected {
+  background: #202b17;
+  border-color: var(--green);
+}
+
+.zone-row .number {
+  font-size: 19px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.zone-row.selected .number {
+  color: var(--green);
+}
+
+.zone-row small {
+  display: block;
+  color: var(--muted);
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 400;
+  margin-top: 5px;
+}
+
+/* MAP HEADER */
+
+.map-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.map-title h2 {
+  margin: 0;
+}
+
+#modeLabel {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 1px;
+}
+
+/* ASPHALT PARKING LOT */
+
+.parking-map {
+  background: #252527;
+  border: 3px solid #494949;
+  border-radius: 6px;
+  padding: 24px;
+}
+
+.zone-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 28px;
+}
+
+.zone {
+  background: var(--asphalt);
+  border: none;
+  border-radius: 0;
+  padding: 18px 12px 22px;
+  min-width: 0;
+}
+
+.zone.recommended {
+  box-shadow: inset 0 0 0 2px var(--green);
+}
+
+.zone-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.zone-heading strong {
+  font-family: var(--mono);
+  font-size: 17px;
+  color: var(--text);
+}
+
+.zone-heading span {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: #bcbcb5;
+  text-align: right;
+}
+
+/* PAINTED PARKING SPACES */
+
+.spaces {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0;
+}
+
+.space {
+  position: relative;
+  height: 65px;
+  background: var(--asphalt);
+  border: none;
+  border-left: 3px solid var(--paint);
+  border-top: 3px solid var(--paint);
+  border-radius: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.space:nth-child(6n) {
+  border-right: 3px solid var(--paint);
+}
+
+.space:nth-last-child(-n+6) {
+  border-bottom: 3px solid var(--paint);
+}
+
+.space::before {
+  display: none;
+}
+
+/* SENSOR STATUS DOTS */
+
+.space .dot {
+  width: 18px;
+  height: 18px;
+  display: block;
+  border-radius: 50%;
+  position: relative;
+  z-index: 2;
+}
+
+.dot.available {
+  background: var(--green);
+  box-shadow: 0 0 12px #9bf04a99;
+}
+
+.dot.occupied {
+  background: var(--red);
+  box-shadow: 0 0 12px #ff4d3d99;
+}
+
+.dot.offline {
+  background: var(--gray);
+  box-shadow: none;
+}
+
+.dot.unknown {
+  background: var(--yellow);
+  box-shadow: none;
+}
+
+.space.placeholder {
+  opacity: .65;
+}
+
+/* CENTER ASPHALT ROAD */
+
+.road {
+  grid-column: 1 / -1;
+  height: 90px;
+  background: var(--asphalt);
+  border-top: 3px solid var(--paint);
+  border-bottom: 3px solid var(--paint);
+  border-left: none;
+  border-right: none;
+  border-radius: 0;
+  padding: 0;
+  position: relative;
+  overflow: hidden;
+  font-size: 0;
+  color: transparent;
+}
+
+.road::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 4px;
+  transform: translateY(-50%);
+  background: repeating-linear-gradient(
+    to right,
+    #f4c542 0px,
+    #f4c542 48px,
+    transparent 48px,
+    transparent 80px
+  );
+}
+
+/* LEGEND AND TOTALS */
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  margin-top: 20px;
+  color: #c5c4bb;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.legend span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.legend .dot {
+  width: 11px;
+  height: 11px;
+}
+
+#totals {
+  color: #c5c4bb;
+  font-family: var(--mono);
+  font-size: 13px;
+  margin-top: 22px;
+}
+
+/* BUTTONS */
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin-top: 20px;
+}
+
+button {
+  padding: 12px 13px;
+  background: #242420;
+  color: var(--text);
+  border: 1px solid #626259;
+  border-radius: 5px;
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+button:hover {
+  background: #35352d;
+  border-color: var(--green);
+}
+
+button:disabled {
+  opacity: .35;
+  cursor: not-allowed;
+}
+
+#details {
+  margin-top: 18px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/* RESPONSIVE DESIGN */
+
+@media (max-width: 900px) {
+  main {
+    grid-template-columns: 1fr;
+  }
+
+  .zone-grid {
+    column-gap: 12px;
+  }
+}
+
+@media (max-width: 650px) {
+  header {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 18px;
+  }
+
+  main {
+    padding: 10px;
+  }
+
+  aside, .map-panel {
+    padding: 13px;
+  }
+
+  .parking-map {
+    padding: 8px;
+  }
+
+  .zone-grid {
+    column-gap: 10px;
+  }
+
+  .zone {
+    padding: 12px 3px;
+  }
+
+  .zone-heading {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .zone-heading strong {
+    font-size: 13px;
+  }
+
+  .zone-heading span {
+    font-size: 10px;
+    text-align: left;
+  }
+
+  .space {
+    height: 38px;
+    border-left-width: 2px;
+    border-top-width: 2px;
+  }
+
+  .space .dot {
+    width: 11px;
+    height: 11px;
+  }
+
+  .road {
+    height: 55px;
+  }
+}
+</style>
+</head>
+
+<body>
+
+<header>
+  <div>
+    <h1>SMART CURB</h1>
+    <div class="subtitle">
+      LIVE PARKING AVAILABILITY / INTELLIGENT GUIDANCE
+    </div>
+  </div>
+
+  <div id="connection">
+    CONNECTING TO FIREBASE...
+  </div>
+</header>
+
+<main>
+
+  <!-- RECOMMENDATION PANEL -->
+  <aside>
+
+    <h2>PARKING RECOMMENDATION</h2>
+
+    <div class="recommend">
+      <small>RECOMMENDED PARKING AREA</small>
+
+      <div id="bestZone">WAITING</div>
+
+      <div id="bestCount">
+        Loading parking data...
+      </div>
+
+      <div class="arrow" id="direction">➜</div>
+    </div>
+
+    <div class="zone-list" id="zoneList"></div>
+
+    <div class="controls">
+      <button id="demo">Switch to Demo Mode</button>
+
+      <button id="change" disabled>
+        Simulate Curb Change
+      </button>
+
+      <button id="reset" disabled>
+        Reset Demo
+      </button>
+    </div>
+
+    <div id="details">
+      Waiting for parking sensor information.
+    </div>
+
+  </aside>
+
+  <!-- LIVE PARKING MAP -->
+  <section class="map-panel">
+
+    <div class="map-title">
+      <h2>LIVE PARKING LOT MAP</h2>
+      <span id="modeLabel">LIVE DATA</span>
+    </div>
+
+    <div class="parking-map">
+
+      <!-- app.js generates parking zones and the road -->
+      <div class="zone-grid" id="parkingMap"></div>
+
+    </div>
+
+    <div class="legend">
+      <span>
+        <i class="dot available"></i>
+        Available
+      </span>
+
+      <span>
+        <i class="dot occupied"></i>
+        Occupied
+      </span>
+
+      <span>
+        <i class="dot offline"></i>
+        Offline
+      </span>
+
+      <span>
+        <i class="dot unknown"></i>
+        Unknown / No Sensor
+      </span>
+    </div>
+
+    <p id="totals">
+      Waiting for parking data...
+    </p>
+
+  </section>
+
+</main>
+
+<script type="module" src="./app.js"></script>
+
+</body>
+</html>
+
