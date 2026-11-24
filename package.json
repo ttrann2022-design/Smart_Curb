@@ -1,1 +1,0 @@
-{"name":"smart-curb-multi-location-sign","private":true,"type":"module","scripts":{"test":"node test-scoring.mjs"}}
